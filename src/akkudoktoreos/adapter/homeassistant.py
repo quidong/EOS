@@ -1,7 +1,9 @@
 """Home Assistant adapter."""
 
+import difflib
 import os
-from typing import Optional, Union
+import re
+from typing import Iterable, Optional, Union
 
 import pandas as pd
 import requests
@@ -28,6 +30,44 @@ HEADERS = {
 }
 
 HOMEASSISTANT_ENTITY_ID_PREFIX = "sensor.eos_"
+
+
+def _normalize_measurement_key(key: str) -> str:
+    """Comparison form of a measurement key: case and separators (_ - .) ignored."""
+    return re.sub(r"[_\-.]+", "-", key.strip().lower())
+
+
+def resolve_measurement_key(key: str, known_keys: Iterable[str]) -> tuple[Optional[str], str]:
+    """Map a configured measurement key to a registered measurement key.
+
+    Device measurement keys are registered with hyphens (``<device_id>-soc-factor``).
+    Configurations often use underscores instead (issue #1302), which made every
+    write fail and the optimizer assume 0 % SoC. (RL29 fork.)
+
+    Args:
+        key: Key as configured in ``device_measurement_entity_ids``.
+        known_keys: Writable measurement keys.
+
+    Returns:
+        ``(resolved_key, message)``. ``resolved_key`` is ``None`` when no unique
+        match exists; ``message`` explains a correction or the failure and is empty
+        for an exact match.
+    """
+    known = list(dict.fromkeys(known_keys))
+    if key in known:
+        return key, ""
+    wanted = _normalize_measurement_key(key)
+    matches = [candidate for candidate in known if _normalize_measurement_key(candidate) == wanted]
+    if len(matches) == 1:
+        return matches[0], (
+            f"Measurement key '{key}' is not registered; using '{matches[0]}'. "
+            f"Please correct device_measurement_entity_ids."
+        )
+    if len(matches) > 1:
+        return None, f"Measurement key '{key}' is ambiguous: {sorted(matches)}."
+    close = difflib.get_close_matches(key, known, n=3, cutoff=0.6)
+    hint = f" Did you mean {close}?" if close else ""
+    return None, f"Measurement key '{key}' is not registered for any configured device.{hint}"
 
 
 class HomeAssistantAdapterCommonSettings(SettingsBaseModel):
@@ -97,8 +137,8 @@ class HomeAssistantAdapterCommonSettings(SettingsBaseModel):
             "description": "Mapping of EOS measurement keys used by device (resource) simulations to Home Assistant entity IDs.",
             "examples": [
                 {
-                    "ev11_soc_factor": "sensor.ev11_soc_factor",
-                    "battery1_soc_factor": "sensor.battery1_soc_factor",
+                    "ev11-soc-factor": "sensor.ev11_soc_factor",
+                    "battery1-soc-factor": "sensor.battery1_soc_factor",
                 }
             ],
         },
@@ -457,10 +497,17 @@ class HomeAssistantAdapter(AdapterProvider):
             # Retrieve measurements necessary for device simulations
             entity_ids = self.config.adapter.homeassistant.device_measurement_entity_ids
             if entity_ids:
+                known_keys = self.measurement.record_keys_writable
                 for (
-                    measurement_key,
+                    configured_key,
                     entity_id,
                 ) in entity_ids.items():
+                    measurement_key, message = resolve_measurement_key(configured_key, known_keys)
+                    if measurement_key is None:
+                        logger.error(message)
+                        continue
+                    if message:
+                        logger.warning(message)
                     if entity_id:
                         try:
                             state = self.get_entity_state(entity_id)

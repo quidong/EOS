@@ -179,8 +179,8 @@ E.g. solution key 'battery1_idle_op_mode' becomes the entity_id 'sensor.eos_batt
                    "sensor.pv_energy_total_kwh"
                ],
                "device_measurement_entity_ids": {
-                   "ev11_soc_factor": "sensor.ev11_soc_factor",
-                   "battery1_soc_factor": "sensor.battery1_soc_factor"
+                   "ev11-soc-factor": "sensor.ev11_soc_factor",
+                   "battery1-soc-factor": "sensor.battery1_soc_factor"
                },
                "device_instruction_entity_ids": [
                    "sensor.eos_battery1"
@@ -219,8 +219,8 @@ E.g. solution key 'battery1_idle_op_mode' becomes the entity_id 'sensor.eos_batt
                    "sensor.pv_energy_total_kwh"
                ],
                "device_measurement_entity_ids": {
-                   "ev11_soc_factor": "sensor.ev11_soc_factor",
-                   "battery1_soc_factor": "sensor.battery1_soc_factor"
+                   "ev11-soc-factor": "sensor.ev11_soc_factor",
+                   "battery1-soc-factor": "sensor.battery1_soc_factor"
                },
                "device_instruction_entity_ids": [
                    "sensor.eos_battery1"
