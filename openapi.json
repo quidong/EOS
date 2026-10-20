@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610202268931085"
+    "version": "v0.3.0.dev2610202210943380"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -14687,7 +14687,25 @@
         "description": "Common settings for pvforecast data import from file or JSON string."
       },
       "PVForecastPVLibCommonSettings": {
-        "properties": {},
+        "properties": {
+          "max_ac_power_w": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Ac Power W",
+            "description": "Optional AC power limit of the whole PV system [W]. Use it when several planes share one inverter: the summed AC power of all planes is clipped to this value. Per-plane limits use `inverter_paco` of the plane.",
+            "examples": [
+              null,
+              20000
+            ]
+          }
+        },
         "type": "object",
         "title": "PVForecastPVLibCommonSettings",
         "description": "Common settings for pvforecast data calculation with PVLib."
