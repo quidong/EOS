@@ -8,6 +8,8 @@
                "HomeAssistant"
            ],
            "homeassistant": {
+               "base_url": null,
+               "token": null,
                "config_entity_ids": null,
                "load_emr_entity_ids": null,
                "grid_export_emr_entity_ids": null,
