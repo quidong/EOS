@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610202210943380"
+    "version": "v0.3.0.dev2610202232416747"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -10871,6 +10871,37 @@
       },
       "HomeAssistantAdapterCommonSettings-Input": {
         "properties": {
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url",
+            "description": "Base URL of the Home Assistant instance for a direct connection, e.g. when EOS runs as a standalone container. Leave empty when EOS runs as a Home Assistant add-on (the Supervisor API is used).",
+            "examples": [
+              null,
+              "http://homeassistant.local:8123"
+            ]
+          },
+          "token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token",
+            "description": "Long-lived access token for the direct connection. Prefer the environment variable EOS_ADAPTER__HOMEASSISTANT__TOKEN over storing it in the configuration file.",
+            "examples": [
+              null
+            ]
+          },
           "config_entity_ids": {
             "anyOf": [
               {
@@ -11047,6 +11078,37 @@
       },
       "HomeAssistantAdapterCommonSettings-Output": {
         "properties": {
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url",
+            "description": "Base URL of the Home Assistant instance for a direct connection, e.g. when EOS runs as a standalone container. Leave empty when EOS runs as a Home Assistant add-on (the Supervisor API is used).",
+            "examples": [
+              null,
+              "http://homeassistant.local:8123"
+            ]
+          },
+          "token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token",
+            "description": "Long-lived access token for the direct connection. Prefer the environment variable EOS_ADAPTER__HOMEASSISTANT__TOKEN over storing it in the configuration file.",
+            "examples": [
+              null
+            ]
+          },
           "config_entity_ids": {
             "anyOf": [
               {

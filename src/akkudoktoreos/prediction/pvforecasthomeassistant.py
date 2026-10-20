@@ -1,6 +1,5 @@
 """Retrieves pvforecast data from a Home Assistant entity attribute."""
 
-import os
 from typing import Any, Literal, Optional
 
 import requests
@@ -90,20 +89,30 @@ class PVForecastHomeAssistant(PVForecastProvider):
         return "PVForecastHomeAssistant"
 
     def _api_base_and_token(self) -> tuple[str, str]:
+        """API base URL and token.
+
+        Own ``base_url``/``token`` win; otherwise the Home Assistant adapter's
+        direct connection settings are reused (RL29 fork), and finally the
+        add-on Supervisor API.
+        """
+        from akkudoktoreos.adapter.homeassistant import homeassistant_api
+
         settings = self.config.pvforecast.homeassistant
         if settings.base_url:
-            base_url = settings.base_url.rstrip("/") + "/api"
-            token = settings.token
+            base_url, token, purpose = settings.base_url, settings.token, "pvforecast.homeassistant"
         else:
-            base_url = CORE_API
-            token = os.environ.get("SUPERVISOR_TOKEN")
-        if not token:
+            adapter = self.config.adapter.homeassistant
+            base_url, token, purpose = adapter.base_url, adapter.token, "adapter.homeassistant"
+        try:
+            api, headers = homeassistant_api(base_url, token, purpose)
+        except RuntimeError as exc:
             raise RuntimeError(
                 "No Home Assistant access token available. Set "
-                "'pvforecast.homeassistant.token' (and 'base_url') when EOS is not "
-                "running as a Home Assistant add-on."
-            )
-        return base_url, token
+                "'pvforecast.homeassistant.token' (and 'base_url') or the adapter's "
+                "'adapter.homeassistant.base_url'/'token' when EOS is not running as a "
+                f"Home Assistant add-on. ({exc})"
+            ) from exc
+        return api, headers["Authorization"].removeprefix("Bearer ")
 
     def _request_entity_state(self) -> dict[str, Any]:
         settings = self.config.pvforecast.homeassistant
