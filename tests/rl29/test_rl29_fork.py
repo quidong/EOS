@@ -212,3 +212,26 @@ class TestSnapshotAgainstServer:
         out = tmp_path / "snap.json"
         assert eos_snapshot.main(["snapshot", server, "-o", str(out), "--hours", "2"]) == 0
         assert json.loads(out.read_text())["health"]["status"] == "alive"
+
+
+def test_snapshot_window_from_reuses_hours(tmp_path, monkeypatch):
+    """--window-from takes start and length of an earlier snapshot."""
+    calls = {}
+
+    def fake_snapshot(base, hours, start_at=None):
+        calls["args"] = (base, hours, start_at)
+        return {"prediction_keys": []}
+
+    monkeypatch.setattr(eos_snapshot, "snapshot", fake_snapshot)
+    earlier = tmp_path / "before.json"
+    earlier.write_text(
+        json.dumps(
+            {"series_window": {"start": "2026-10-20T21:00:00+00:00", "end": "2026-10-21T21:00:00+00:00"}}
+        )
+    )
+    out = tmp_path / "after.json"
+    rc = eos_snapshot.main(
+        ["snapshot", "http://eos:8503", "-o", str(out), "--window-from", str(earlier)]
+    )
+    assert rc == 0
+    assert calls["args"] == ("http://eos:8503", 24, "2026-10-20T21:00:00+00:00")
