@@ -7,7 +7,7 @@ compact (48 h horizon: 96 genes per heat pump) and the modes match what the
 actuators can execute without frequent switching (SG Ready relays, the
 "Warmwasser PUSH" contact and the heating rod).
 
-Per candidate, the thermal model (:mod:`akkudoktoreos.devices.thermal`)
+Per candidate, the thermal model (``akkudoktoreos.devices.thermal``)
 turns the modes into the electric load of heat pump and heating rod per slot.
 The load enters the energy balance of the simulation before the inverter, so
 PV, battery and grid see it like any other consumer. Penalties for comfort
