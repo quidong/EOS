@@ -102,8 +102,20 @@ class BuildingModel:
     ) -> tuple[float, float]:
         """Temperatures at the end of one slot for constant inputs."""
         a, b = self._a, self._b
-        s = a[0][0] * slab_c + a[0][1] * room_c + b[0][0] * heat_w + b[0][1] * outdoor_c + b[0][2] * gains_w
-        r = a[1][0] * slab_c + a[1][1] * room_c + b[1][0] * heat_w + b[1][1] * outdoor_c + b[1][2] * gains_w
+        s = (
+            a[0][0] * slab_c
+            + a[0][1] * room_c
+            + b[0][0] * heat_w
+            + b[0][1] * outdoor_c
+            + b[0][2] * gains_w
+        )
+        r = (
+            a[1][0] * slab_c
+            + a[1][1] * room_c
+            + b[1][0] * heat_w
+            + b[1][1] * outdoor_c
+            + b[1][2] * gains_w
+        )
         return s, r
 
     def heat_for_room_target(
@@ -114,7 +126,12 @@ class BuildingModel:
         The result can be negative (room would overshoot without heating) or
         exceed any heat pump limit; callers clip it.
         """
-        r0 = self._a[1][0] * slab_c + self._a[1][1] * room_c + self._b[1][1] * outdoor_c + self._b[1][2] * gains_w
+        r0 = (
+            self._a[1][0] * slab_c
+            + self._a[1][1] * room_c
+            + self._b[1][1] * outdoor_c
+            + self._b[1][2] * gains_w
+        )
         gain = self._b[1][0]
         return (room_target_c - r0) / gain
 

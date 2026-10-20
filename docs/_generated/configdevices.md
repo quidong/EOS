@@ -14,10 +14,12 @@ config path from ``self.device_id`` without needing an external index.
 | ---- | -------------------- | ---- | --------- | ------- | ----------- |
 | batteries | `EOS_DEVICES__BATTERIES` | `Optional[dict[str, akkudoktoreos.devices.settings.batterysettings.BatteriesCommonSettings]]` | `rw` | `None` | Stationary battery storage devices, keyed by device_id. |
 | electric_vehicles | `EOS_DEVICES__ELECTRIC_VEHICLES` | `Optional[dict[str, akkudoktoreos.devices.settings.batterysettings.BatteriesCommonSettings]]` | `rw` | `None` | Electric vehicle battery packs, keyed by device_id. |
+| heat_pumps | `EOS_DEVICES__HEAT_PUMPS` | `dict[str, akkudoktoreos.devices.settings.heatpumpsettings.HeatPumpCommonSettings]` | `rw` | `required` | Heat pumps with building, hot water tank and heating rod, keyed by device_id. Optimized by GENETIC (RL29 fork). |
 | home_appliances | `EOS_DEVICES__HOME_APPLIANCES` | `dict[str, akkudoktoreos.devices.settings.homeappliancesettings.HomeApplianceCommonSettings]` | `rw` | `required` | Shiftable home appliance devices, keyed by device_id. |
 | inverters | `EOS_DEVICES__INVERTERS` | `Optional[dict[str, akkudoktoreos.devices.settings.invertersettings.InverterCommonSettings]]` | `rw` | `None` | Inverter devices, keyed by device_id. |
 | max_batteries | `EOS_DEVICES__MAX_BATTERIES` | `Optional[int]` | `rw` | `None` | Maximum number of batteries allowed. |
 | max_electric_vehicles | `EOS_DEVICES__MAX_ELECTRIC_VEHICLES` | `Optional[int]` | `rw` | `None` | Maximum number of EVs allowed. |
+| max_heat_pumps | `EOS_DEVICES__MAX_HEAT_PUMPS` | `Optional[int]` | `rw` | `None` | Maximum number of heat pumps allowed. |
 | max_home_appliances | `EOS_DEVICES__MAX_HOME_APPLIANCES` | `Optional[int]` | `rw` | `None` | Maximum number of home appliances allowed. |
 | max_inverters | `EOS_DEVICES__MAX_INVERTERS` | `Optional[int]` | `rw` | `None` | Maximum number of inverters allowed. |
 | measurement_keys | | `list[str]` | `ro` | `N/A` | All measurement keys across all configured devices. |
@@ -126,7 +128,134 @@ config path from ``self.device_id`` without needing an external index.
                    "deadline_policy": "BEST_EFFORT"
                }
            },
-           "max_home_appliances": 3
+           "max_home_appliances": 3,
+           "heat_pumps": {
+               "wbb12": {
+                   "device_id": "wbb12",
+                   "building": {
+                       "slab_capacity_wh_per_k": 3500.0,
+                       "room_capacity_wh_per_k": 10000.0,
+                       "loss_w_per_k": 180.0,
+                       "slab_room_w_per_k": 1500.0,
+                       "emitter_w_per_k": 1000.0,
+                       "solar_aperture_m2": 0.0,
+                       "internal_gains_w": 0.0
+                   },
+                   "unit": {
+                       "cop_points": [
+                           {
+                               "outdoor_c": 7.0,
+                               "flow_c": 35.0,
+                               "cop": 4.85
+                           },
+                           {
+                               "outdoor_c": 2.0,
+                               "flow_c": 35.0,
+                               "cop": 4.11
+                           },
+                           {
+                               "outdoor_c": -7.0,
+                               "flow_c": 35.0,
+                               "cop": 3.28
+                           },
+                           {
+                               "outdoor_c": 7.0,
+                               "flow_c": 55.0,
+                               "cop": 3.1
+                           },
+                           {
+                               "outdoor_c": -7.0,
+                               "flow_c": 55.0,
+                               "cop": 2.47
+                           }
+                       ],
+                       "cop_scale": 1.0,
+                       "max_heat_w": 10000.0,
+                       "max_electric_w": 5500.0,
+                       "standby_w": 22.0,
+                       "max_flow_c": 45.0,
+                       "flow_spread_k": 3.0,
+                       "dhw_heat_w": 5000.0,
+                       "dhw_flow_overshoot_k": 7.0
+                   },
+                   "dhw": {
+                       "volume_l": 190.0,
+                       "loss_w_per_k": 1.5,
+                       "ambient_c": 18.0,
+                       "setpoint_c": 45.0,
+                       "hysteresis_k": 5.0,
+                       "min_c": 40.0,
+                       "rod_power_w": 3000.0,
+                       "rod_max_c": 70.0,
+                       "legionella_c": 60.0,
+                       "legionella_interval_days": 7,
+                       "draw_profile_wh": [
+                           20.0,
+                           10.0,
+                           10.0,
+                           10.0,
+                           20.0,
+                           80.0,
+                           450.0,
+                           500.0,
+                           250.0,
+                           120.0,
+                           100.0,
+                           120.0,
+                           200.0,
+                           150.0,
+                           100.0,
+                           100.0,
+                           120.0,
+                           200.0,
+                           350.0,
+                           450.0,
+                           350.0,
+                           200.0,
+                           80.0,
+                           40.0
+                       ]
+                   },
+                   "comfort": {
+                       "setpoint_c": 21.0,
+                       "max_c": 22.0,
+                       "min_c": {
+                           "windows": [
+                               {
+                                   "start_time": "00:00:00.000000",
+                                   "duration": "6 hours",
+                                   "day_of_week": null,
+                                   "date": null,
+                                   "months": null,
+                                   "locale": null,
+                                   "value": 19.5
+                               },
+                               {
+                                   "start_time": "06:00:00.000000",
+                                   "duration": "16 hours",
+                                   "day_of_week": null,
+                                   "date": null,
+                                   "months": null,
+                                   "locale": null,
+                                   "value": 20.5
+                               },
+                               {
+                                   "start_time": "22:00:00.000000",
+                                   "duration": "2 hours",
+                                   "day_of_week": null,
+                                   "date": null,
+                                   "months": null,
+                                   "locale": null,
+                                   "value": 19.5
+                               }
+                           ]
+                       },
+                       "raised_offset_k": 1.0
+                   },
+                   "power_limit_w": null
+               }
+           },
+           "max_heat_pumps": 1
        }
    }
 ```
@@ -263,6 +392,145 @@ config path from ``self.device_id`` without needing an external index.
                }
            },
            "max_home_appliances": 3,
+           "heat_pumps": {
+               "wbb12": {
+                   "device_id": "wbb12",
+                   "building": {
+                       "slab_capacity_wh_per_k": 3500.0,
+                       "room_capacity_wh_per_k": 10000.0,
+                       "loss_w_per_k": 180.0,
+                       "slab_room_w_per_k": 1500.0,
+                       "emitter_w_per_k": 1000.0,
+                       "solar_aperture_m2": 0.0,
+                       "internal_gains_w": 0.0
+                   },
+                   "unit": {
+                       "cop_points": [
+                           {
+                               "outdoor_c": 7.0,
+                               "flow_c": 35.0,
+                               "cop": 4.85
+                           },
+                           {
+                               "outdoor_c": 2.0,
+                               "flow_c": 35.0,
+                               "cop": 4.11
+                           },
+                           {
+                               "outdoor_c": -7.0,
+                               "flow_c": 35.0,
+                               "cop": 3.28
+                           },
+                           {
+                               "outdoor_c": 7.0,
+                               "flow_c": 55.0,
+                               "cop": 3.1
+                           },
+                           {
+                               "outdoor_c": -7.0,
+                               "flow_c": 55.0,
+                               "cop": 2.47
+                           }
+                       ],
+                       "cop_scale": 1.0,
+                       "max_heat_w": 10000.0,
+                       "max_electric_w": 5500.0,
+                       "standby_w": 22.0,
+                       "max_flow_c": 45.0,
+                       "flow_spread_k": 3.0,
+                       "dhw_heat_w": 5000.0,
+                       "dhw_flow_overshoot_k": 7.0
+                   },
+                   "dhw": {
+                       "volume_l": 190.0,
+                       "loss_w_per_k": 1.5,
+                       "ambient_c": 18.0,
+                       "setpoint_c": 45.0,
+                       "hysteresis_k": 5.0,
+                       "min_c": 40.0,
+                       "rod_power_w": 3000.0,
+                       "rod_max_c": 70.0,
+                       "legionella_c": 60.0,
+                       "legionella_interval_days": 7,
+                       "draw_profile_wh": [
+                           20.0,
+                           10.0,
+                           10.0,
+                           10.0,
+                           20.0,
+                           80.0,
+                           450.0,
+                           500.0,
+                           250.0,
+                           120.0,
+                           100.0,
+                           120.0,
+                           200.0,
+                           150.0,
+                           100.0,
+                           100.0,
+                           120.0,
+                           200.0,
+                           350.0,
+                           450.0,
+                           350.0,
+                           200.0,
+                           80.0,
+                           40.0
+                       ]
+                   },
+                   "comfort": {
+                       "setpoint_c": 21.0,
+                       "max_c": 22.0,
+                       "min_c": {
+                           "windows": [
+                               {
+                                   "start_time": "00:00:00.000000",
+                                   "duration": "6 hours",
+                                   "day_of_week": null,
+                                   "date": null,
+                                   "months": null,
+                                   "locale": null,
+                                   "value": 19.5
+                               },
+                               {
+                                   "start_time": "06:00:00.000000",
+                                   "duration": "16 hours",
+                                   "day_of_week": null,
+                                   "date": null,
+                                   "months": null,
+                                   "locale": null,
+                                   "value": 20.5
+                               },
+                               {
+                                   "start_time": "22:00:00.000000",
+                                   "duration": "2 hours",
+                                   "day_of_week": null,
+                                   "date": null,
+                                   "months": null,
+                                   "locale": null,
+                                   "value": 19.5
+                               }
+                           ]
+                       },
+                       "raised_offset_k": 1.0
+                   },
+                   "power_limit_w": null,
+                   "measurement_key_room_temperature": "wbb12-room-temperature",
+                   "measurement_key_slab_temperature": "wbb12-slab-temperature",
+                   "measurement_key_dhw_temperature": "wbb12-dhw-temperature",
+                   "measurement_key_dhw_setpoint": "wbb12-dhw-setpoint",
+                   "measurement_key_power_limited": "wbb12-power-limited",
+                   "measurement_keys": [
+                       "wbb12-room-temperature",
+                       "wbb12-slab-temperature",
+                       "wbb12-dhw-temperature",
+                       "wbb12-dhw-setpoint",
+                       "wbb12-power-limited"
+                   ]
+               }
+           },
+           "max_heat_pumps": 1,
            "measurement_keys": [
                "bat0-soc-factor",
                "bat0-power-l1-w",
@@ -274,7 +542,12 @@ config path from ``self.device_id`` without needing an external index.
                "ev0-power-l2-w",
                "ev0-power-l3-w",
                "ev0-power-3-phase-sym-w",
-               "dishwasher.cycles_completed"
+               "dishwasher.cycles_completed",
+               "wbb12-room-temperature",
+               "wbb12-slab-temperature",
+               "wbb12-dhw-temperature",
+               "wbb12-dhw-setpoint",
+               "wbb12-power-limited"
            ]
        }
    }

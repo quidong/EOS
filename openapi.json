@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610202232416747"
+    "version": "v0.3.0.dev2610202299660629"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -4764,6 +4764,46 @@
               "GENETIC",
               "GENETIC0"
             ]
+          },
+          "heat_pumps": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/HeatPumpCommonSettings-Input"
+            },
+            "type": "object",
+            "title": "Heat Pumps",
+            "description": "Heat pumps with building, hot water tank and heating rod, keyed by device_id. Optimized by GENETIC (RL29 fork).",
+            "examples": [
+              {
+                "wbb12": {
+                  "device_id": "wbb12",
+                  "dhw": {
+                    "rod_power_w": 3000
+                  }
+                }
+              }
+            ],
+            "x-scope": [
+              "GENETIC"
+            ]
+          },
+          "max_heat_pumps": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Heat Pumps",
+            "description": "Maximum number of heat pumps allowed.",
+            "examples": [
+              1
+            ],
+            "x-scope": [
+              "GENETIC"
+            ]
           }
         },
         "type": "object",
@@ -4956,6 +4996,46 @@
             "x-scope": [
               "GENETIC",
               "GENETIC0"
+            ]
+          },
+          "heat_pumps": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/HeatPumpCommonSettings-Output"
+            },
+            "type": "object",
+            "title": "Heat Pumps",
+            "description": "Heat pumps with building, hot water tank and heating rod, keyed by device_id. Optimized by GENETIC (RL29 fork).",
+            "examples": [
+              {
+                "wbb12": {
+                  "device_id": "wbb12",
+                  "dhw": {
+                    "rod_power_w": 3000
+                  }
+                }
+              }
+            ],
+            "x-scope": [
+              "GENETIC"
+            ]
+          },
+          "max_heat_pumps": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Heat Pumps",
+            "description": "Maximum number of heat pumps allowed.",
+            "examples": [
+              1
+            ],
+            "x-scope": [
+              "GENETIC"
             ]
           },
           "measurement_keys": {
@@ -10079,6 +10159,455 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HeatPumpBuildingSettings": {
+        "properties": {
+          "slab_capacity_wh_per_k": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Slab Capacity Wh Per K",
+            "description": "Heat capacity of screed, heating water and buffer [Wh/K].",
+            "default": 3500.0
+          },
+          "room_capacity_wh_per_k": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Room Capacity Wh Per K",
+            "description": "Effective heat capacity of air and inner building mass [Wh/K].",
+            "default": 10000.0
+          },
+          "loss_w_per_k": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Loss W Per K",
+            "description": "Heat loss coefficient room to outside [W/K].",
+            "default": 180.0
+          },
+          "slab_room_w_per_k": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Slab Room W Per K",
+            "description": "Heat transfer underfloor heating to room [W/K].",
+            "default": 1500.0
+          },
+          "emitter_w_per_k": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Emitter W Per K",
+            "description": "Heat transfer heating water to screed [W/K].",
+            "default": 1000.0
+          },
+          "solar_aperture_m2": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Solar Aperture M2",
+            "description": "Effective solar aperture [m\u00b2]: gain = aperture x global irradiance.",
+            "default": 0.0
+          },
+          "internal_gains_w": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Internal Gains W",
+            "description": "Constant internal gains [W].",
+            "default": 0.0
+          }
+        },
+        "type": "object",
+        "title": "HeatPumpBuildingSettings",
+        "description": "Two-node building model (screed + room)."
+      },
+      "HeatPumpComfortSettings-Input": {
+        "properties": {
+          "setpoint_c": {
+            "type": "number",
+            "title": "Setpoint C",
+            "description": "Room setpoint in normal operation [degC].",
+            "default": 21.0
+          },
+          "max_c": {
+            "type": "number",
+            "title": "Max C",
+            "description": "Highest room temperature for pre-heating [degC].",
+            "default": 22.0
+          },
+          "min_c": {
+            "$ref": "#/components/schemas/ValueTimeWindowSequence-Input",
+            "description": "Comfort minimum by time of day [degC]; fallback 20.0."
+          },
+          "raised_offset_k": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Raised Offset K",
+            "description": "Raised operation above setpoint [K].",
+            "default": 1.0
+          }
+        },
+        "type": "object",
+        "title": "HeatPumpComfortSettings",
+        "description": "Room comfort band (the same for all rooms)."
+      },
+      "HeatPumpComfortSettings-Output": {
+        "properties": {
+          "setpoint_c": {
+            "type": "number",
+            "title": "Setpoint C",
+            "description": "Room setpoint in normal operation [degC].",
+            "default": 21.0
+          },
+          "max_c": {
+            "type": "number",
+            "title": "Max C",
+            "description": "Highest room temperature for pre-heating [degC].",
+            "default": 22.0
+          },
+          "min_c": {
+            "$ref": "#/components/schemas/ValueTimeWindowSequence-Output",
+            "description": "Comfort minimum by time of day [degC]; fallback 20.0."
+          },
+          "raised_offset_k": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Raised Offset K",
+            "description": "Raised operation above setpoint [K].",
+            "default": 1.0
+          }
+        },
+        "type": "object",
+        "title": "HeatPumpComfortSettings",
+        "description": "Room comfort band (the same for all rooms)."
+      },
+      "HeatPumpCommonSettings-Input": {
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "title": "Device Id",
+            "description": "ID of device",
+            "examples": [
+              "battery1",
+              "ev1",
+              "inverter1",
+              "dishwasher"
+            ]
+          },
+          "building": {
+            "$ref": "#/components/schemas/HeatPumpBuildingSettings"
+          },
+          "unit": {
+            "$ref": "#/components/schemas/HeatPumpUnitSettings"
+          },
+          "dhw": {
+            "$ref": "#/components/schemas/HeatPumpDhwSettings"
+          },
+          "comfort": {
+            "$ref": "#/components/schemas/HeatPumpComfortSettings-Input"
+          },
+          "power_limit_w": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ValueTimeWindowSequence-Input"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Electric limit for heat pump plus heating rod by time window [W], e.g. the \u00a714a EnWG dimming window announced by the grid operator.",
+            "examples": [
+              null,
+              {
+                "windows": [
+                  {
+                    "duration": "2 hours",
+                    "start_time": "19:00",
+                    "value": 4200
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "HeatPumpCommonSettings",
+        "description": "Heat pump with building, hot water tank and heating rod (RL29 fork)."
+      },
+      "HeatPumpCommonSettings-Output": {
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "title": "Device Id",
+            "description": "ID of device",
+            "examples": [
+              "battery1",
+              "ev1",
+              "inverter1",
+              "dishwasher"
+            ]
+          },
+          "building": {
+            "$ref": "#/components/schemas/HeatPumpBuildingSettings"
+          },
+          "unit": {
+            "$ref": "#/components/schemas/HeatPumpUnitSettings"
+          },
+          "dhw": {
+            "$ref": "#/components/schemas/HeatPumpDhwSettings"
+          },
+          "comfort": {
+            "$ref": "#/components/schemas/HeatPumpComfortSettings-Output"
+          },
+          "power_limit_w": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ValueTimeWindowSequence-Output"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Electric limit for heat pump plus heating rod by time window [W], e.g. the \u00a714a EnWG dimming window announced by the grid operator.",
+            "examples": [
+              null,
+              {
+                "windows": [
+                  {
+                    "duration": "2 hours",
+                    "start_time": "19:00",
+                    "value": 4200
+                  }
+                ]
+              }
+            ]
+          },
+          "measurement_key_room_temperature": {
+            "type": "string",
+            "title": "Measurement Key Room Temperature",
+            "readOnly": true
+          },
+          "measurement_key_slab_temperature": {
+            "type": "string",
+            "title": "Measurement Key Slab Temperature",
+            "readOnly": true
+          },
+          "measurement_key_dhw_temperature": {
+            "type": "string",
+            "title": "Measurement Key Dhw Temperature",
+            "readOnly": true
+          },
+          "measurement_key_dhw_setpoint": {
+            "type": "string",
+            "title": "Measurement Key Dhw Setpoint",
+            "readOnly": true
+          },
+          "measurement_key_power_limited": {
+            "type": "string",
+            "title": "Measurement Key Power Limited",
+            "readOnly": true
+          },
+          "measurement_keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Measurement Keys",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "measurement_key_room_temperature",
+          "measurement_key_slab_temperature",
+          "measurement_key_dhw_temperature",
+          "measurement_key_dhw_setpoint",
+          "measurement_key_power_limited",
+          "measurement_keys"
+        ],
+        "title": "HeatPumpCommonSettings",
+        "description": "Heat pump with building, hot water tank and heating rod (RL29 fork)."
+      },
+      "HeatPumpCopPointSettings": {
+        "properties": {
+          "outdoor_c": {
+            "type": "number",
+            "title": "Outdoor C",
+            "description": "Outdoor air temperature [degC]."
+          },
+          "flow_c": {
+            "type": "number",
+            "title": "Flow C",
+            "description": "Flow temperature [degC]."
+          },
+          "cop": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Cop",
+            "description": "Rated COP."
+          }
+        },
+        "type": "object",
+        "required": [
+          "outdoor_c",
+          "flow_c",
+          "cop"
+        ],
+        "title": "HeatPumpCopPointSettings",
+        "description": "Rating point of the heat pump (EN 14511)."
+      },
+      "HeatPumpDhwSettings": {
+        "properties": {
+          "volume_l": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Volume L",
+            "description": "Water volume [l].",
+            "default": 190.0
+          },
+          "loss_w_per_k": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Loss W Per K",
+            "description": "Standby loss [W/K].",
+            "default": 1.5
+          },
+          "ambient_c": {
+            "type": "number",
+            "title": "Ambient C",
+            "description": "Temperature around the tank [degC].",
+            "default": 18.0
+          },
+          "setpoint_c": {
+            "type": "number",
+            "title": "Setpoint C",
+            "description": "Heat pump hot water setpoint; overridden by measurement '<id>-dhw-setpoint'.",
+            "default": 45.0
+          },
+          "hysteresis_k": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Hysteresis K",
+            "description": "Heat pump switch-on difference [K].",
+            "default": 5.0
+          },
+          "min_c": {
+            "type": "number",
+            "title": "Min C",
+            "description": "Comfort minimum of the tank [degC].",
+            "default": 40.0
+          },
+          "rod_power_w": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Rod Power W",
+            "description": "Heating rod power [W]; 0 = no rod.",
+            "default": 0.0
+          },
+          "rod_max_c": {
+            "type": "number",
+            "title": "Rod Max C",
+            "description": "Highest tank temperature by the rod [degC].",
+            "default": 70.0
+          },
+          "legionella_c": {
+            "type": "number",
+            "title": "Legionella C",
+            "description": "Legionella protection temperature [degC].",
+            "default": 60.0
+          },
+          "legionella_interval_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legionella Interval Days",
+            "description": "Reach legionella_c at least every N days (by the rod); None disables.",
+            "default": 7
+          },
+          "draw_profile_wh": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Draw Profile Wh",
+            "description": "Hot water tapped per hour of day, 24 values [Wh]."
+          }
+        },
+        "type": "object",
+        "title": "HeatPumpDhwSettings",
+        "description": "Domestic hot water tank, heat pump setpoint and heating rod."
+      },
+      "HeatPumpUnitSettings": {
+        "properties": {
+          "cop_points": {
+            "items": {
+              "$ref": "#/components/schemas/HeatPumpCopPointSettings"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Cop Points",
+            "description": "Rating points; default Weishaupt WBB 12."
+          },
+          "cop_scale": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Cop Scale",
+            "description": "Calibration factor on the rated COP (pumps, defrost, controller). Determined by scripts/rl29/calibrate_heatpump.py.",
+            "default": 1.0
+          },
+          "max_heat_w": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Max Heat W",
+            "description": "Maximum thermal output [W].",
+            "default": 10000.0
+          },
+          "max_electric_w": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Max Electric W",
+            "description": "Maximum compressor power [W].",
+            "default": 5500.0
+          },
+          "standby_w": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Standby W",
+            "description": "Standby power [W].",
+            "default": 22.0
+          },
+          "max_flow_c": {
+            "type": "number",
+            "title": "Max Flow C",
+            "description": "Highest flow temperature for space heating [degC].",
+            "default": 45.0
+          },
+          "flow_spread_k": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Flow Spread K",
+            "description": "Flow-return spread [K].",
+            "default": 3.0
+          },
+          "dhw_heat_w": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Dhw Heat W",
+            "description": "Thermal power while charging hot water [W].",
+            "default": 5000.0
+          },
+          "dhw_flow_overshoot_k": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Dhw Flow Overshoot K",
+            "description": "Flow above tank temperature while charging hot water [K].",
+            "default": 7.0
+          }
+        },
+        "type": "object",
+        "title": "HeatPumpUnitSettings",
+        "description": "Heat pump unit."
       },
       "HomeApplianceCommonSettings-Input": {
         "properties": {

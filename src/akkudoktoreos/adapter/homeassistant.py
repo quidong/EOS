@@ -50,9 +50,7 @@ def homeassistant_api(
         if not api.endswith("/api"):
             api += "/api"
         if not token:
-            raise RuntimeError(
-                f"'{purpose}.token' is required when '{purpose}.base_url' is set."
-            )
+            raise RuntimeError(f"'{purpose}.token' is required when '{purpose}.base_url' is set.")
         bearer = token
     else:
         api = CORE_API

@@ -230,7 +230,9 @@ class TimeWindow(SettingsBaseModel):
             raise ValueError("months must contain at least one month (1-12) or be None")
         for month in value:
             if not 1 <= month <= 12:
-                raise ValueError(f"month {month} out of range, expected 1 (January) to 12 (December)")
+                raise ValueError(
+                    f"month {month} out of range, expected 1 (January) to 12 (December)"
+                )
         return sorted(set(value))
 
     def matches_day(self, date_time: DateTime) -> bool:
