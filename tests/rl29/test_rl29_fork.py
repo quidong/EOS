@@ -83,8 +83,20 @@ def _snapshot(**overrides) -> dict:
         "prediction_keys": ["pvforecast_ac_power", "elecprice_marketprice_wh"],
         "measurement_keys": ["sensor.energie_hausverbrauch_gesamt"],
         "series": {
-            "pvforecast_ac_power": {"count": 96, "numeric": 96, "min": 0.0, "max": 9000.0, "mean": 2100.0},
-            "elecprice_marketprice_wh": {"count": 96, "numeric": 96, "min": 0.0001, "max": 0.0003, "mean": 0.0002},
+            "pvforecast_ac_power": {
+                "count": 96,
+                "numeric": 96,
+                "min": 0.0,
+                "max": 9000.0,
+                "mean": 2100.0,
+            },
+            "elecprice_marketprice_wh": {
+                "count": 96,
+                "numeric": 96,
+                "min": 0.0001,
+                "max": 0.0003,
+                "mean": 0.0002,
+            },
         },
     }
     snap.update(overrides)
@@ -173,13 +185,22 @@ def test_workflow_is_valid_and_complete():
     assert wf["jobs"]["smoke"]["needs"] == "build"
     steps = " ".join(str(s.get("run", "")) for s in wf["jobs"]["test"]["steps"])
     assert "tests/rl29" in steps
-    labels = next(s for s in wf["jobs"]["build"]["steps"] if s.get("id") == "build")["with"]["labels"]
+    labels = next(s for s in wf["jobs"]["build"]["steps"] if s.get("id") == "build")["with"][
+        "labels"
+    ]
     assert "com.centurylinklabs.watchtower.enable=false" in labels
 
 
 def test_upstream_workflows_untouched():
     """The fork adds its own workflow and leaves upstream workflows alone (rebase friendly)."""
-    upstream = {"bump-version.yml", "codeql.yml", "docker-build.yml", "pre-commit.yml", "pytest.yml", "stale.yml"}
+    upstream = {
+        "bump-version.yml",
+        "codeql.yml",
+        "docker-build.yml",
+        "pre-commit.yml",
+        "pytest.yml",
+        "stale.yml",
+    }
     present = {p.name for p in (REPO_ROOT / ".github" / "workflows").glob("*.yml")}
     assert upstream <= present
     assert present - upstream == {"rl29-image.yml"}
@@ -226,7 +247,12 @@ def test_snapshot_window_from_reuses_hours(tmp_path, monkeypatch):
     earlier = tmp_path / "before.json"
     earlier.write_text(
         json.dumps(
-            {"series_window": {"start": "2026-10-20T21:00:00+00:00", "end": "2026-10-21T21:00:00+00:00"}}
+            {
+                "series_window": {
+                    "start": "2026-10-20T21:00:00+00:00",
+                    "end": "2026-10-21T21:00:00+00:00",
+                }
+            }
         )
     )
     out = tmp_path / "after.json"

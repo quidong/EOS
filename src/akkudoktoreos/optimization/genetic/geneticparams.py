@@ -34,6 +34,7 @@ from akkudoktoreos.devices.genetic.battery import (
 from akkudoktoreos.devices.genetic.homeappliance import HomeApplianceParameters
 from akkudoktoreos.devices.genetic.inverter import InverterParameters
 from akkudoktoreos.optimization.genetic.geneticabc import GeneticParametersBaseModel
+from akkudoktoreos.optimization.genetic.heatpumpgenes import GeneticHeatPumpParameters
 from akkudoktoreos.utils.datetimeutil import DateTime, to_datetime
 
 # Do not import directly from akkudoktoreos.core.coreabc
@@ -145,6 +146,23 @@ class GeneticOptimizationParameters(
         default=None,
         json_schema_extra={
             "description": "An array of floats representing the temperature forecast in degrees Celsius for different time intervals."
+        },
+    )
+    ghi_forecast: Optional[list[Optional[float]]] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "Global horizontal irradiance forecast [W/m²] per interval, for the solar "
+                "gains of heat pump buildings (RL29 fork)."
+            )
+        },
+    )
+    heat_pumps: Optional[list[GeneticHeatPumpParameters]] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "Heat pumps optimized together with battery, EV and appliances (RL29 fork)."
+            )
         },
     )
     start_solution: Optional[list[float]] = Field(
@@ -260,6 +278,11 @@ class GeneticOptimizationParameters(
         arr_length = len(self.ems.pv_forecast_wh)
         if self.temperature_forecast is not None and arr_length != len(self.temperature_forecast):
             raise ValueError("Input lists have different lengths")
+        if self.ghi_forecast is not None and arr_length != len(self.ghi_forecast):
+            raise ValueError("Input lists have different lengths")
+        heat_pump_ids = [hp.device_id for hp in self.heat_pumps or []]
+        if len(heat_pump_ids) != len(set(heat_pump_ids)):
+            raise ValueError("heat_pumps device_id values must be unique.")
         return self
 
     @field_validator("start_solution")

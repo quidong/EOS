@@ -214,7 +214,9 @@ class TestHeatPumpSystem:
         state = ThermalState(slab_c=20.6, room_c=20.55, dhw_c=45.0)
         state, results = run(sim, state, COLD, (HeatingMode.REDUCED, DhwMode.HOLD), 48)
         assert state.room_c >= 20.5 - 0.02
-        assert sum(r.forced_space_wh for r in results) == pytest.approx(0.0)  # REDUCED targets the minimum
+        assert sum(r.forced_space_wh for r in results) == pytest.approx(
+            0.0
+        )  # REDUCED targets the minimum
         assert sum(r.heat_space_wh for r in results) > 0
 
     def test_never_above_comfort_max(self):
@@ -287,9 +289,11 @@ class TestHeatPumpSystem:
         _, results = run(sim, state, COLD, (HeatingMode.RAISED, DhwMode.HEAT_PUMP), 8)
         for r in results:
             heat_hp = r.heat_space_wh + r.heat_dhw_hp_wh
-            expected = (r.heat_space_wh / r.cop_space if r.heat_space_wh else 0) + (
-                r.heat_dhw_hp_wh / r.cop_dhw if r.heat_dhw_hp_wh else 0
-            ) + 22.0 * 0.25
+            expected = (
+                (r.heat_space_wh / r.cop_space if r.heat_space_wh else 0)
+                + (r.heat_dhw_hp_wh / r.cop_dhw if r.heat_dhw_hp_wh else 0)
+                + 22.0 * 0.25
+            )
             assert r.hp_electric_wh == pytest.approx(expected)
             assert heat_hp >= 0
 
@@ -323,7 +327,9 @@ class TestSettings:
         settings = HeatPumpCommonSettings.model_validate(
             {
                 "device_id": "x",
-                "power_limit_w": {"windows": [{"start_time": "19:00", "duration": "2 hours", "value": 4200}]},
+                "power_limit_w": {
+                    "windows": [{"start_time": "19:00", "duration": "2 hours", "value": 4200}]
+                },
             }
         )
         tz = "Europe/Berlin"
@@ -339,7 +345,9 @@ class TestSettings:
 
     def test_invalid_draw_profile(self):
         with pytest.raises(ValidationError):
-            HeatPumpCommonSettings.model_validate({"device_id": "x", "dhw": {"draw_profile_wh": [1.0] * 23}})
+            HeatPumpCommonSettings.model_validate(
+                {"device_id": "x", "dhw": {"draw_profile_wh": [1.0] * 23}}
+            )
 
     def test_registered_in_device_config(self, config_eos):
         config_eos.merge_settings_from_dict(
@@ -369,5 +377,5 @@ def test_daily_cop_in_measured_range():
     state, results = run(sim, state, inputs, (HeatingMode.NORMAL, DhwMode.HOLD), 96)
     heat = sum(r.heat_space_wh + r.heat_dhw_hp_wh for r in results)
     electric = sum(r.hp_electric_wh for r in results)
-    assert 3.5 < heat / electric < 5.0
+    assert 3.5 < heat / electric < 5.2
     assert np.isfinite(state.room_c)

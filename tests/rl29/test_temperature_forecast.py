@@ -15,7 +15,6 @@ import pytest
 from akkudoktoreos.optimization.genetic.configrequest import ConfigOptimizationRequest
 
 
-
 def _series(values, start="2026-09-12T00:00:00Z", freq="h"):
     return pd.Series(values, index=pd.date_range(start, periods=len(values), freq=freq))
 

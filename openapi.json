@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610202299660629"
+    "version": "v0.3.0.dev2610202272112784"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -9350,6 +9350,88 @@
         "title": "GeneticEnergyManagementParameters",
         "description": "Encapsulates energy-related forecasts and costs used in GENETIC optimization."
       },
+      "GeneticHeatPumpParameters": {
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "title": "Device Id",
+            "description": "ID of the heat pump."
+          },
+          "settings": {
+            "$ref": "#/components/schemas/HeatPumpCommonSettings-Output",
+            "description": "Device configuration (devices.heat_pumps.<id>)."
+          },
+          "initial_room_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Room C",
+            "description": "Measured room temperature [degC]; None = setpoint."
+          },
+          "initial_slab_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Slab C",
+            "description": "Measured screed temperature [degC]; None = steady state estimate."
+          },
+          "initial_dhw_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Dhw C",
+            "description": "Measured hot water temperature [degC]; None = setpoint - hysteresis/2."
+          },
+          "dhw_setpoint_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dhw Setpoint C",
+            "description": "Hot water setpoint read from the heat pump; None = configuration."
+          },
+          "hours_since_legionella": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hours Since Legionella",
+            "description": "Hours since the tank last reached the legionella temperature; None = unknown (treated as just done, no heat-up required in this run)."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "device_id",
+          "settings"
+        ],
+        "title": "GeneticHeatPumpParameters",
+        "description": "Heat pump device and its current thermal state for one optimization run."
+      },
       "GeneticOptimizationParameters": {
         "properties": {
           "ems": {
@@ -9418,6 +9500,43 @@
             ],
             "title": "Temperature Forecast",
             "description": "An array of floats representing the temperature forecast in degrees Celsius for different time intervals."
+          },
+          "ghi_forecast": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ghi Forecast",
+            "description": "Global horizontal irradiance forecast [W/m\u00b2] per interval, for the solar gains of heat pump buildings (RL29 fork)."
+          },
+          "heat_pumps": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/GeneticHeatPumpParameters"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heat Pumps",
+            "description": "Heat pumps optimized together with battery, EV and appliances (RL29 fork)."
           },
           "start_solution": {
             "anyOf": [
@@ -9655,6 +9774,28 @@
             "type": "object",
             "title": "Home Appliance Running",
             "description": "Active run occupancy, including zero-power phases."
+          },
+          "heat_pump_wh_per_hour": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heat Pump Wh Per Hour",
+            "description": "Electric energy of all heat pumps and heating rods per slot [Wh] (RL29 fork); included in load_wh_per_hour."
           },
           "Last_Wh_pro_Stunde": {
             "items": {
@@ -10051,6 +10192,15 @@
             "title": "Appliance Starts",
             "description": "Scheduled run start times per appliance device_id as absolute local datetimes."
           },
+          "heat_pumps": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "object",
+            "title": "Heat Pumps",
+            "description": "Per heat pump device_id (RL29 fork): schedule and predicted states per slot - heating_mode, dhw_mode, sg_ready_state, dhw_push, rod_target_c, valves_forced, electric_wh, hp_electric_wh, rod_electric_wh, room_c, slab_c, dhw_c, flow_c, cop_space - and a summary."
+          },
           "appliance_deadline_missed": {
             "additionalProperties": {
               "type": "boolean"
@@ -10301,6 +10451,9 @@
           "comfort": {
             "$ref": "#/components/schemas/HeatPumpComfortSettings-Input"
           },
+          "optimization": {
+            "$ref": "#/components/schemas/HeatPumpOptimizationSettings"
+          },
           "power_limit_w": {
             "anyOf": [
               {
@@ -10353,6 +10506,9 @@
           },
           "comfort": {
             "$ref": "#/components/schemas/HeatPumpComfortSettings-Output"
+          },
+          "optimization": {
+            "$ref": "#/components/schemas/HeatPumpOptimizationSettings"
           },
           "power_limit_w": {
             "anyOf": [
@@ -10489,8 +10645,8 @@
           "min_c": {
             "type": "number",
             "title": "Min C",
-            "description": "Comfort minimum of the tank [degC].",
-            "default": 40.0
+            "description": "Comfort minimum of the tank [degC]; below the heat pump switch-on temperature, which the tank briefly undershoots while tapping.",
+            "default": 38.0
           },
           "rod_power_w": {
             "type": "number",
@@ -10537,6 +10693,78 @@
         "type": "object",
         "title": "HeatPumpDhwSettings",
         "description": "Domestic hot water tank, heat pump setpoint and heating rod."
+      },
+      "HeatPumpOptimizationSettings": {
+        "properties": {
+          "heating_modes": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Heating Modes",
+            "description": "Space heating modes the optimizer may choose: 0 REDUCED (SG Ready 1, blocked), 1 NORMAL (SG Ready 2), 2 RAISED (SG Ready 3), 3 PREHEAT (SG Ready 3 with all valves forced open; needs the KNX forced position).",
+            "examples": [
+              [
+                0,
+                1,
+                2
+              ],
+              [
+                0,
+                1,
+                2,
+                3
+              ]
+            ]
+          },
+          "dhw_modes": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Dhw Modes",
+            "description": "Hot water modes the optimizer may choose: 0 HOLD (heat pump controller), 1 HEAT_PUMP (Warmwasser PUSH), 2 ROD_60, 3 ROD_70. Rod modes are dropped while dhw.rod_power_w is 0."
+          },
+          "comfort_penalty_amt_per_kh": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Comfort Penalty Amt Per Kh",
+            "description": "Cost of a room below its comfort minimum [currency per K*h].",
+            "default": 1.0
+          },
+          "dhw_penalty_amt_per_kh": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Dhw Penalty Amt Per Kh",
+            "description": "Cost of a tank below its comfort minimum [currency per K*h].",
+            "default": 0.5
+          },
+          "legionella_penalty_amt": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Legionella Penalty Amt",
+            "description": "Cost of a missed legionella heat-up [currency].",
+            "default": 2.0
+          },
+          "mode_change_penalty_amt": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Mode Change Penalty Amt",
+            "description": "Cost per change of the heating or hot water mode between two hours; keeps relay switching and compressor starts rare [currency].",
+            "default": 0.002
+          },
+          "load_forecast_includes_heat_pump": {
+            "type": "boolean",
+            "title": "Load Forecast Includes Heat Pump",
+            "description": "The load forecast still contains the heat pump. The consumption of the status quo operation (NORMAL/HOLD) is then subtracted from the forecast so the heat pump is not counted twice. Prefer a load forecast without the heat pump.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "HeatPumpOptimizationSettings",
+        "description": "How the optimizer may operate the heat pump and what deviations cost."
       },
       "HeatPumpUnitSettings": {
         "properties": {
@@ -15937,6 +16165,27 @@
               }
             ],
             "title": "Temperature Forecast"
+          },
+          "ghi_forecast": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ghi Forecast"
           }
         },
         "additionalProperties": false,

@@ -75,11 +75,18 @@ def test_adapter_writes_state_directly(adapter, monkeypatch):
     monkeypatch.setattr(ha.requests, "post", post)
     adapter.set_entity_state("sensor.eos_test", "1", {"unit_of_measurement": "W"})
     assert post.call_args.args[0] == "http://192.168.30.180:8123/api/states/sensor.eos_test"
-    assert post.call_args.kwargs["json"] == {"state": "1", "attributes": {"unit_of_measurement": "W"}}
+    assert post.call_args.kwargs["json"] == {
+        "state": "1",
+        "attributes": {"unit_of_measurement": "W"},
+    }
 
 
 def test_adapter_lists_entities_directly(adapter, monkeypatch):
-    payload = [{"entity_id": "sensor.a"}, {"entity_id": "sensor.eos_plan"}, {"entity_id": "light.b"}]
+    payload = [
+        {"entity_id": "sensor.a"},
+        {"entity_id": "sensor.eos_plan"},
+        {"entity_id": "light.b"},
+    ]
     get = MagicMock(return_value=_response(payload=payload))
     monkeypatch.setattr(ha.requests, "get", get)
     assert adapter.get_homeassistant_entity_ids() == ["light.b", "sensor.a"]

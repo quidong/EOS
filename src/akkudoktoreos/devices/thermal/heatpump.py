@@ -49,6 +49,11 @@ from akkudoktoreos.devices.thermal.cop import CopModel
 from akkudoktoreos.devices.thermal.dhw import DhwTank, DhwTankParameters
 
 
+# The controllers aim a little above the comfort minimum: the screed reacts
+# with a delay, a target exactly at the minimum undershoots it.
+REPAIR_MARGIN_K = 0.3
+
+
 class HeatingMode(IntEnum):
     """Space heating operating mode of a slot."""
 
@@ -221,7 +226,7 @@ class HeatPumpSystem:
     def _room_target(self, mode: HeatingMode, inputs: "SlotInputs") -> float:
         low, setpoint, high = self.comfort_band(inputs)
         if mode == HeatingMode.REDUCED:
-            return low
+            return min(low + REPAIR_MARGIN_K, setpoint)
         if mode == HeatingMode.NORMAL:
             return setpoint
         if mode == HeatingMode.RAISED:
@@ -282,7 +287,13 @@ class HeatPumpSystem:
 
         # --- Hot water: decide heat pump share of the slot ---------------
         switch_on_c = self.dhw.setpoint_c - self.dhw.hysteresis_k
-        hp_dhw_active = state.hp_dhw_charging or state.dhw_c < switch_on_c
+        # The controller checks continuously: a tank that falls below the
+        # switch-on temperature within this slot starts a charge in this slot.
+        hp_dhw_active = (
+            state.hp_dhw_charging
+            or state.dhw_c < switch_on_c
+            or self.tank.step(state.dhw_c, 0.0, inputs.draw_wh) < switch_on_c
+        )
         forced_dhw = False
         if dhw_mode == DhwMode.HEAT_PUMP and state.dhw_c < self.dhw.setpoint_c - 0.2:
             hp_dhw_active = True
@@ -317,7 +328,12 @@ class HeatPumpSystem:
         _, _, room_max = self.comfort_band(inputs)
         room_target = self._room_target(heating_mode, inputs)
         wanted = self._space_heat_demand_w(state, inputs.outdoor_c, gains, room_target)
-        minimum = self._space_heat_demand_w(state, inputs.outdoor_c, gains, inputs.comfort_min_c)
+        minimum = self._space_heat_demand_w(
+            state,
+            inputs.outdoor_c,
+            gains,
+            min(inputs.comfort_min_c + REPAIR_MARGIN_K, self.comfort_band(inputs)[1]),
+        )
         if state.room_c >= room_max:
             wanted = 0.0
             minimum = 0.0

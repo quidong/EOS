@@ -34,6 +34,11 @@ from akkudoktoreos.optimization.genetic.geneticsolution import (
     GeneticSimulationResult,
     GeneticSolution,
 )
+from akkudoktoreos.optimization.genetic.heatpumpgenes import (
+    HeatPumpGeneLayout,
+    build_run_plan,
+    plan_result,
+)
 from akkudoktoreos.optimization.genetic.tailvalue import (
     TailValueCurve,
     build_tail_value_curve,
@@ -409,6 +414,10 @@ class GeneticSimulation(PydanticBaseModel):
 
     home_appliance_start_hour: Optional[int] = Field(default=None)
 
+    # RL29 fork: electric energy of heat pumps and heating rods per slot [Wh],
+    # set per candidate from the heat pump genes. None = no heat pump.
+    heat_pump_load_wh: Optional[list[float]] = Field(default=None)
+
     @property
     def home_appliance(self) -> Optional[HomeAppliance]:
         """Deprecated singular device accessor."""
@@ -434,6 +443,7 @@ class GeneticSimulation(PydanticBaseModel):
         Populate internal arrays and device references used during simulation.
         """
         self.home_appliance_start_hour = None
+        self.heat_pump_load_wh = None
         self.optimization_hours = optimization_hours
         self.prediction_hours = prediction_hours
         self.direct_marketing_enabled = direct_marketing_enabled
@@ -506,6 +516,7 @@ class GeneticSimulation(PydanticBaseModel):
         home_appliances_fast = self.home_appliances
         inverter_fast = self.inverter
         direct_marketing_enabled_fast = self.direct_marketing_enabled
+        heat_pump_load_fast = self.heat_pump_load_wh
 
         # Check for simulation integrity (in a way that mypy understands)
         if (
@@ -666,6 +677,15 @@ class GeneticSimulation(PydanticBaseModel):
             home_appliance_wh_per_hour = np.full((total_hours), 0)
             appliance_loads_fast = []
 
+        heat_pump_wh_per_hour: Any = None
+        if heat_pump_load_fast is not None:
+            if len(heat_pump_load_fast) < end_hour:
+                # Slots beyond the heat pump plan carry no heat pump load.
+                heat_pump_load_fast = list(heat_pump_load_fast) + [0.0] * (
+                    end_hour - len(heat_pump_load_fast)
+                )
+            heat_pump_wh_per_hour = [nan] * total_hours
+
         # The per-slot inputs as plain numbers. They are final here: the loop
         # itself changes only the charge arrays of the devices, and those after
         # the slot value was read.
@@ -735,6 +755,12 @@ class GeneticSimulation(PydanticBaseModel):
                         ha_load += appliance_load(hour)
                 consumption += ha_load
                 home_appliance_wh_per_hour[hour_idx] = ha_load
+
+            # Heat pumps and heating rods (RL29 fork)
+            if heat_pump_load_fast is not None:
+                hp_load = heat_pump_load_fast[hour]
+                consumption += hp_load
+                heat_pump_wh_per_hour[hour_idx] = hp_load
 
             # E-Auto handling
             if ev_fast:
@@ -882,7 +908,7 @@ class GeneticSimulation(PydanticBaseModel):
         total_revenue = np.nansum(revenue_per_hour)
 
         # Prepare output dictionary
-        return {
+        result = {
             "Last_Wh_pro_Stunde": loads_energy_per_hour,
             "Netzeinspeisung_Wh_pro_Stunde": feedin_energy_per_hour,
             "Netzbezug_Wh_pro_Stunde": consumption_energy_per_hour,
@@ -899,6 +925,9 @@ class GeneticSimulation(PydanticBaseModel):
             "Electricity_price": electricity_price_per_hour,
             "Feed_in_tariff": feed_in_tariff_per_hour,
         }
+        if heat_pump_wh_per_hour is not None:
+            result["heat_pump_wh_per_hour"] = np.array(heat_pump_wh_per_hour, dtype=float)
+        return result
 
 
 class GeneticOptimization(OptimizationBase):
@@ -1095,12 +1124,95 @@ class GeneticOptimization(OptimizationBase):
         # optimize_ems(). Empty by default so setup_deap_environment() can be
         # exercised standalone (e.g. in tests) without appliances.
         self.appliance_layout: ApplianceGeneLayout = ApplianceGeneLayout([])
+        # RL29 fork: heat pump genome block (between EV and appliance genes),
+        # built per run in optimize_ems(). Empty = no heat pump genes at all.
+        self.heat_pump_layout: HeatPumpGeneLayout = HeatPumpGeneLayout()
+        self._heat_pump_extra_cost = 0.0
         # Local datetime of slot index 0 (the run start), needed to
         # turn decoded start slots into absolute local timestamps.
         self._slot0_datetime: Optional[Any] = None
 
         # Create Simulation
         self.simulation = GeneticSimulation()
+
+    # ------------------------------------------------------------------
+    # Heat pump genes (RL29 fork)
+    # ------------------------------------------------------------------
+
+    def _hp_layout(self) -> HeatPumpGeneLayout:
+        """Heat pump layout; empty for instances built without __init__."""
+        layout = getattr(self, "heat_pump_layout", None)
+        return layout if layout is not None else HeatPumpGeneLayout()
+
+    def _tail_gene_count(self) -> int:
+        """Genes after the battery/EV blocks: heat pump genes plus appliance genes."""
+        return self._hp_layout().n_genes + self.appliance_layout.n_genes
+
+    def _heat_pump_genes(self, individual: list[Any]) -> list[int]:
+        """Heat pump genes of an individual (they precede the appliance genes)."""
+        n = self._hp_layout().n_genes
+        if n == 0:
+            return []
+        end = len(individual) - self.appliance_layout.n_genes
+        return [int(value) for value in individual[end - n : end]]
+
+    def _set_heat_pump_genes(self, individual: list[Any], genes: list[int]) -> None:
+        n = self._hp_layout().n_genes
+        if n == 0:
+            return
+        end = len(individual) - self.appliance_layout.n_genes
+        individual[end - n : end] = genes
+
+    def _build_heat_pump_layout(self, parameters: GeneticOptimizationParameters) -> None:
+        """Prepare the thermal model of every heat pump for this run."""
+        heat_pumps = parameters.heat_pumps or []
+        if not heat_pumps:
+            self.heat_pump_layout = HeatPumpGeneLayout()
+            return
+        n_slots = self.control_slots
+        slot0 = self._slot0_datetime or self.ems.start_datetime
+        interval_s = int(self.slot_duration_h * 3600)
+        starts = [slot0.add(seconds=interval_s * i) for i in range(n_slots)]
+
+        def series(values: Optional[list[Any]]) -> Optional[list[Optional[float]]]:
+            if values is None:
+                return None
+            cleaned: list[Optional[float]] = []
+            for value in values[:n_slots]:
+                if value is None or not math.isfinite(float(value)):
+                    cleaned.append(None)
+                else:
+                    cleaned.append(float(value))
+            return cleaned + [None] * (n_slots - len(cleaned))
+
+        outdoor = series(parameters.temperature_forecast) or [None] * n_slots
+        ghi = series(parameters.ghi_forecast)
+        price_array = self.simulation.elect_price_hourly
+        prices = list(price_array[:n_slots]) if price_array is not None else [0.0] * n_slots
+        plans = [
+            build_run_plan(device, starts, self.slot_duration_h, outdoor, ghi, prices)
+            for device in heat_pumps
+        ]
+        self.heat_pump_layout = HeatPumpGeneLayout(plans)
+        # A load forecast that still contains the heat pump would count it
+        # twice: subtract the status quo consumption.
+        load = self.simulation.load_energy_array
+        for plan in plans:
+            if plan.load_includes_heat_pump and load is not None:
+                baseline = plan.evaluate(plan.default_genes()).electric_wh
+                for slot, energy in enumerate(baseline[: len(load)]):
+                    load[slot] = max(0.0, float(load[slot]) - energy)
+                logger.info(
+                    "Heat pump {}: removed {:.0f} Wh status quo consumption from the load forecast.",
+                    plan.device_id,
+                    sum(baseline),
+                )
+        logger.info(
+            "Heat pump genes: {} for {} heat pump(s), {} slots per gene.",
+            self.heat_pump_layout.n_genes,
+            len(plans),
+            plans[0].slots_per_gene,
+        )
 
     def _direct_marketing_enabled(self) -> bool:
         """Return whether direct marketing mode is enabled in configuration."""
@@ -1827,8 +1939,14 @@ class GeneticOptimization(OptimizationBase):
             if parameters.temperature_forecast is not None
             else None
         )
+        update: dict[str, Any] = {}
+        if parameters.ghi_forecast is not None:
+            update["ghi_forecast"] = normalize(
+                parameters.ghi_forecast, "ghi_forecast", energy=False
+            )
         return parameters.model_copy(
             update={
+                **update,
                 "ems": normalized_ems,
                 "temperature_forecast": temperature_forecast,
                 "forecast_interval_seconds": self._genetic_cfg.interval_sec,
@@ -1844,7 +1962,7 @@ class GeneticOptimization(OptimizationBase):
         are copied verbatim and validated later against the current layout
         (incompatible tails cause the whole start solution to be discarded).
         """
-        n_appliance_genes = self.appliance_layout.n_genes
+        n_appliance_genes = self._tail_gene_count()
         expected_length = self.control_end_slot * (2 if self.optimize_ev else 1) + n_appliance_genes
         hourly_length = (
             self._genetic_cfg.horizon_hours * (2 if self.optimize_ev else 1) + n_appliance_genes
@@ -1918,7 +2036,7 @@ class GeneticOptimization(OptimizationBase):
             return start_solution
         start_solution = self._start_solution_for_slot_grid(start_solution)
         blocks = 2 if self.optimize_ev else 1
-        if len(start_solution) != self.control_end_slot * blocks + self.appliance_layout.n_genes:
+        if len(start_solution) != self.control_end_slot * blocks + self._tail_gene_count():
             # optimize() rejects the length and logs why.
             return start_solution
 
@@ -1947,6 +2065,13 @@ class GeneticOptimization(OptimizationBase):
             end = begin + self.control_slots
             genes = aligned[begin:end]
             aligned[begin:end] = genes[elapsed_slots:] + [genes[-1]] * elapsed_slots
+        if self._hp_layout():
+            self._set_heat_pump_genes(
+                aligned,
+                self._hp_layout().shift(
+                    [int(value) for value in self._heat_pump_genes(aligned)], elapsed_slots
+                ),
+            )
         logger.debug("Shifted start_solution by {} elapsed slots.", elapsed_slots)
         return aligned
 
@@ -2236,7 +2361,24 @@ class GeneticOptimization(OptimizationBase):
         """Apply one coherent mutation family instead of stacking destructive changes."""
         operation = random.random()  # noqa: S311
         changed = False
-        if operation < 0.50:
+        if self._hp_layout():
+            # Heat pump modes (RL29 fork): a quarter of the mutations, half of
+            # them combined with one of the other families. The other families
+            # keep their relative weights.
+            if operation < 0.25:
+                genes = self._heat_pump_genes(individual)
+                changed = self._hp_layout().mutate(genes)
+                self._set_heat_pump_genes(individual, genes)
+                operation = random.random()  # noqa: S311
+                if changed and operation < 0.5:
+                    operation = 2.0  # heat pump change only
+                else:
+                    operation = random.random()  # noqa: S311
+            else:
+                operation = (operation - 0.25) / 0.75
+        if operation >= 1.0:
+            pass
+        elif operation < 0.50:
             changed = self._mutate_point_controls(individual)
         elif operation < 0.70:
             before = list(individual)
@@ -2275,6 +2417,10 @@ class GeneticOptimization(OptimizationBase):
                 ev_controls[-self.fixed_eauto_hours :] = [0] * self.fixed_eauto_hours
             individual_components += ev_controls
 
+        # Heat pump modes (RL29 fork); no draws without a heat pump.
+        if self._hp_layout():
+            individual_components.extend(self._hp_layout().random_genes())
+
         # Add one appliance start gene per scheduled run (index into that run's
         # allowed_start_slots). No draws happen when there are no appliances, so
         # the battery/EV-only genome is unchanged.
@@ -2288,6 +2434,7 @@ class GeneticOptimization(OptimizationBase):
         discharge_hours_bin: np.ndarray,
         eautocharge_hours_index: Optional[np.ndarray],
         appliance_gene_values: Optional[list[int]],
+        heat_pump_gene_values: Optional[list[int]] = None,
     ) -> list[int]:
         """Merge the individual components back into a single solution list.
 
@@ -2309,6 +2456,14 @@ class GeneticOptimization(OptimizationBase):
         elif self.optimize_ev:
             # optimize_ev active but no EV data present: pad with zeros
             individual.extend([0] * self.control_end_slot)
+
+        # Heat pump genes (RL29 fork), status quo when not given.
+        if self._hp_layout():
+            individual.extend(
+                heat_pump_gene_values
+                if heat_pump_gene_values is not None
+                else self._hp_layout().default_genes()
+            )
 
         # Add appliance start genes (one index per scheduled run).
         n_appliance_genes = self.appliance_layout.n_genes
@@ -2404,6 +2559,7 @@ class GeneticOptimization(OptimizationBase):
                 battery_genes,
                 ev_charge_indices,
                 appliance_genes,
+                self._heat_pump_genes(individual) if self._hp_layout() else None,
             )
         return changed
 
@@ -2522,11 +2678,16 @@ class GeneticOptimization(OptimizationBase):
         ev_price = self._heuristic_ev_schedule(prefer_pv=False)
         ev_pv = self._heuristic_ev_schedule(prefer_pv=True)
         appliance_genes = self._heuristic_appliance_genes()
+        heat_pump_sets: list[list[int]] = []
+        if self._hp_layout():
+            heat_pump_sets = self._hp_layout().heuristic_gene_sets(pv, load, prices)
 
         def compose(battery_genes: list[int], ev_genes: list[int]) -> list[int]:
             individual = list(battery_genes)
             if self.optimize_ev:
                 individual.extend(ev_genes)
+            if heat_pump_sets:
+                individual.extend(random.choice(heat_pump_sets))  # noqa: S311
             individual.extend(appliance_genes)
             return individual
 
@@ -3392,6 +3553,16 @@ class GeneticOptimization(OptimizationBase):
         if appliance_gene_values:
             individual[-len(appliance_gene_values) :] = appliance_gene_values
 
+        # Heat pump load of this candidate (RL29 fork).
+        hp_layout = self._hp_layout()
+        if hp_layout:
+            hp_load, self._heat_pump_extra_cost = hp_layout.evaluate(
+                self._heat_pump_genes(individual)
+            )
+            self.simulation.heat_pump_load_wh = hp_load
+        else:
+            self._heat_pump_extra_cost = 0.0
+
         ac_charge_hours, dc_charge_hours, discharge, battery_grid_export = (
             self.decode_charge_discharge(discharge_hours_bin)
         )
@@ -3511,8 +3682,9 @@ class GeneticOptimization(OptimizationBase):
         start_slot = self._control_start_slot()
         control_end_slot = self.control_end_slot
         n_appliance_genes = self.appliance_layout.n_genes
+        n_tail_genes = self._tail_gene_count()
         if start_slot == 0 and len(individual) == (
-            control_end_slot * (2 if self.optimize_ev else 1) + n_appliance_genes
+            control_end_slot * (2 if self.optimize_ev else 1) + n_tail_genes
         ):
             # The whole genome is relevant (the usual case): no copy needed.
             relevant = individual
@@ -3521,8 +3693,8 @@ class GeneticOptimization(OptimizationBase):
             if self.optimize_ev:
                 ev_start = control_end_slot + start_slot
                 relevant.extend(individual[ev_start : control_end_slot * 2])
-            if n_appliance_genes > 0:
-                relevant.extend(individual[-n_appliance_genes:])
+            if n_tail_genes > 0:
+                relevant.extend(individual[-n_tail_genes:])
         try:
             # Genes are plain ints; bytes() rejects anything else.
             return _pack_genes(relevant)
@@ -3610,6 +3782,9 @@ class GeneticOptimization(OptimizationBase):
             return (100000.0,)
 
         gesamtbilanz = simulation_result["Gesamtbilanz_Euro"] * (-1.0 if worst_case else 1.0)
+        # Heat pump comfort, legionella and switching penalties minus the
+        # value of the heat stored at the end of the horizon (RL29 fork).
+        gesamtbilanz += getattr(self, "_heat_pump_extra_cost", 0.0)
 
         # New check: Activate discharge when battery SoC is 0
         # battery_soc_per_hour = np.array(
@@ -3815,7 +3990,7 @@ class GeneticOptimization(OptimizationBase):
         # Validate the warm start before assigning the fixed population budget.
         valid_start_solution: Optional[list[float]] = None
         if start_solution is not None:
-            n_appliance_genes = self.appliance_layout.n_genes
+            n_appliance_genes = self._tail_gene_count()
             expected_length = (
                 self.control_end_slot * (2 if self.optimize_ev else 1) + n_appliance_genes
             )
@@ -3831,6 +4006,13 @@ class GeneticOptimization(OptimizationBase):
                 logger.warning(
                     "Ignoring start_solution: appliance genes do not match the current "
                     "appliance layout."
+                )
+            elif self._hp_layout() and not self._hp_layout().valid(
+                self._heat_pump_genes(list(start_solution))
+            ):
+                logger.warning(
+                    "Ignoring start_solution: heat pump genes do not match the current "
+                    "heat pump configuration."
                 )
             else:
                 valid_start_solution = start_solution
@@ -4243,6 +4425,10 @@ class GeneticOptimization(OptimizationBase):
 
         self._validate_forecast_availability()
 
+        # Heat pump thermal models and genes (RL29 fork). Before the terminal
+        # value curve: a load forecast with heat pump is corrected here.
+        self._build_heat_pump_layout(parameters)
+
         # Terminal value of the energy left in the battery. Built once per run -
         # it needs the prepared price/load/PV series - so every fitness
         # evaluation only interpolates on it.
@@ -4322,6 +4508,17 @@ class GeneticOptimization(OptimizationBase):
         simulation_result["home_appliance_energy_wh"] = home_appliance_energy_wh
         simulation_result["home_appliance_running"] = home_appliance_running
 
+        # Heat pump schedules and predicted temperatures (RL29 fork).
+        heat_pump_results: dict[str, Any] = {}
+        hp_layout = self._hp_layout()
+        if hp_layout:
+            hp_genes = self._heat_pump_genes(list(start_solution))
+            for plan, genes in zip(hp_layout.plans, hp_layout.split(hp_genes)):
+                heat_pump_results[plan.device_id] = plan_result(plan, genes)
+                logger.info(
+                    "Heat pump {}: {}", plan.device_id, heat_pump_results[plan.device_id]["summary"]
+                )
+
         # Deprecated single-device hourly start (kept for backward compatibility).
         # Only meaningful for the legacy case: exactly one appliance on the hourly
         # grid. Otherwise None; use appliance_starts instead.
@@ -4374,5 +4571,6 @@ class GeneticOptimization(OptimizationBase):
                 "washingstart": washingstart_int,
                 "appliance_starts": appliance_starts,
                 "appliance_deadline_missed": appliance_deadline_missed,
+                "heat_pumps": heat_pump_results,
             }
         )

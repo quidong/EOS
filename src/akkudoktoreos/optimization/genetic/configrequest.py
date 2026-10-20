@@ -19,6 +19,7 @@ from akkudoktoreos.optimization.genetic.geneticparams import (
     GeneticEnergyManagementParameters,
     GeneticOptimizationParameters,
 )
+from akkudoktoreos.optimization.genetic.heatpumpgenes import GeneticHeatPumpParameters
 from akkudoktoreos.utils.datetimeutil import DateTime, to_duration
 
 
@@ -44,6 +45,7 @@ class RuntimeForecasts(GeneticParametersBaseModel):
         validation_alias=AliasChoices("feed_in_tariff_per_wh", "einspeiseverguetung_euro_pro_wh"),
     )
     temperature_forecast: Optional[list[Optional[float]]] = None
+    ghi_forecast: Optional[list[Optional[float]]] = None
 
 
 class ConfigOptimizationRequest(
@@ -84,7 +86,13 @@ class ConfigOptimizationRequest(
             if name != "home_appliances" and len(entries) > 1:
                 raise ValueError(f"GENETIC supports at most one device in devices.{name}.")
             groups[name] = entries
+        heat_pump_settings = list((devices.heat_pumps or {}).values())
+        if devices.max_heat_pumps is not None and len(heat_pump_settings) > devices.max_heat_pumps:
+            raise ValueError(
+                f"devices.heat_pumps exceeds configured maximum {devices.max_heat_pumps}."
+            )
         ids = [device.device_id for entries in groups.values() for device in entries]
+        ids += [device.device_id for device in heat_pump_settings]
         if len(ids) != len(set(ids)):
             raise ValueError("Configured device IDs must be unique across device groups.")
         storage = groups["batteries"] + groups["electric_vehicles"]
@@ -224,6 +232,16 @@ class ConfigOptimizationRequest(
         temperatures = await self._temperature_forecast(
             supplied.temperature_forecast, origin, end, interval, length
         )
+        ghi = None
+        heat_pumps = None
+        if heat_pump_settings:
+            ghi = await self._weather_forecast(
+                supplied.ghi_forecast, "weather_ghi", origin, end, interval, length
+            )
+            heat_pumps = [
+                await self._heat_pump_state(device, observation_time)
+                for device in heat_pump_settings
+            ]
         previous = ems.genetic_solution()
         warm_start = self.start_solution
         warm_start_time = self.start_solution_datetime
@@ -244,6 +262,8 @@ class ConfigOptimizationRequest(
             inverter=inverter,
             home_appliances=appliances,
             temperature_forecast=temperatures,
+            ghi_forecast=ghi,
+            heat_pumps=heat_pumps,
             start_solution=warm_start,
             start_solution_datetime=warm_start_time,
         )
@@ -265,18 +285,32 @@ class ConfigOptimizationRequest(
         ``None``; no data at all yields ``None``. The temperature is optional, so
         a missing weather provider never cancels the optimization.
         """
+        return await self._weather_forecast(
+            supplied, "weather_temp_air", origin, end, interval, length
+        )
+
+    async def _weather_forecast(
+        self,
+        supplied: Optional[list[Optional[float]]],
+        key: str,
+        origin: DateTime,
+        end: DateTime,
+        interval: Any,
+        length: int,
+    ) -> Optional[list[Optional[float]]]:
+        """Weather series per slot (see ``_temperature_forecast``)."""
         if supplied is not None:
             return (list(supplied[:length]) + [None] * length)[:length]
         try:
             values = await bounded_forecast_array(
                 self.prediction,
-                key="weather_temp_air",
+                key=key,
                 start_datetime=origin,
                 end_datetime=end,
                 interval=interval,
             )
         except (KeyError, ValueError) as exc:
-            logger.debug("No outdoor temperature forecast available: {}", exc)
+            logger.debug("No {} forecast available: {}", key, exc)
             return None
         temperatures: list[Optional[float]] = [
             float(value) if math.isfinite(value) else None for value in values[:length]
@@ -285,3 +319,103 @@ class ConfigOptimizationRequest(
         if all(value is None for value in temperatures):
             return None
         return temperatures
+
+    async def _latest_measurement(
+        self, key: str, observation_time: DateTime, max_age_seconds: float
+    ) -> Optional[float]:
+        """Latest finite value of a measurement key not older than ``max_age_seconds``."""
+        try:
+            dates, values = await self.measurement.key_to_lists(
+                key=key,
+                start_datetime=observation_time.subtract(seconds=max_age_seconds),
+                end_datetime=observation_time.add(seconds=1),
+                dropna=True,
+            )
+        except (KeyError, ValueError):
+            return None
+        samples = [
+            (date, value)
+            for date, value in zip(dates, values)
+            if date.timestamp() <= observation_time.timestamp()
+            and value is not None
+            and math.isfinite(value)
+        ]
+        if not samples:
+            return None
+        return float(max(samples, key=lambda sample: sample[0].timestamp())[1])
+
+    async def _heat_pump_state(
+        self, device: Any, observation_time: DateTime
+    ) -> GeneticHeatPumpParameters:
+        """Current thermal state of a heat pump from fresh measurements (RL29 fork).
+
+        Missing or stale values stay ``None`` and the optimizer uses model
+        defaults. The time since the last legionella heat-up is read from the
+        hot water temperature history.
+        """
+        max_age = self.config.optimization.genetic.measurement_max_age_seconds
+        room = await self._latest_measurement(
+            device.measurement_key_room_temperature, observation_time, max_age
+        )
+        slab = await self._latest_measurement(
+            device.measurement_key_slab_temperature, observation_time, max_age
+        )
+        dhw = await self._latest_measurement(
+            device.measurement_key_dhw_temperature, observation_time, max_age
+        )
+        setpoint = await self._latest_measurement(
+            device.measurement_key_dhw_setpoint, observation_time, 7 * 24 * 3600
+        )
+        if setpoint is not None and not 30.0 <= setpoint <= 65.0:
+            logger.warning(
+                "Heat pump {}: ignoring hot water setpoint {}.", device.device_id, setpoint
+            )
+            setpoint = None
+        hours_since: Optional[float] = None
+        interval_days = device.dhw.legionella_interval_days
+        if interval_days is not None:
+            try:
+                dates, values = await self.measurement.key_to_lists(
+                    key=device.measurement_key_dhw_temperature,
+                    start_datetime=observation_time.subtract(days=interval_days + 1),
+                    end_datetime=observation_time.add(seconds=1),
+                    dropna=True,
+                )
+            except (KeyError, ValueError):
+                dates, values = [], []
+            threshold = device.dhw.legionella_c - 0.5
+            hot = [
+                date
+                for date, value in zip(dates, values)
+                if value is not None
+                and math.isfinite(value)
+                and value >= threshold
+                and date.timestamp() <= observation_time.timestamp()
+            ]
+            if hot:
+                last = max(hot, key=lambda date: date.timestamp())
+                hours_since = (observation_time.timestamp() - last.timestamp()) / 3600.0
+            elif dates:
+                # History exists but never reached the temperature: overdue.
+                first = min(dates, key=lambda date: date.timestamp())
+                covered_h = (observation_time.timestamp() - first.timestamp()) / 3600.0
+                if covered_h >= interval_days * 24.0 * 0.9:
+                    hours_since = interval_days * 24.0
+        logger.debug(
+            "Heat pump {} state: room {} slab {} dhw {} setpoint {} legionella {} h ago",
+            device.device_id,
+            room,
+            slab,
+            dhw,
+            setpoint,
+            hours_since,
+        )
+        return GeneticHeatPumpParameters(
+            device_id=device.device_id,
+            settings=device,
+            initial_room_c=room,
+            initial_slab_c=slab,
+            initial_dhw_c=dhw,
+            dhw_setpoint_c=setpoint,
+            hours_since_legionella=hours_since,
+        )

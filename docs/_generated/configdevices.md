@@ -184,7 +184,7 @@ config path from ``self.device_id`` without needing an external index.
                        "ambient_c": 18.0,
                        "setpoint_c": 45.0,
                        "hysteresis_k": 5.0,
-                       "min_c": 40.0,
+                       "min_c": 38.0,
                        "rod_power_w": 3000.0,
                        "rod_max_c": 70.0,
                        "legionella_c": 60.0,
@@ -251,6 +251,24 @@ config path from ``self.device_id`` without needing an external index.
                            ]
                        },
                        "raised_offset_k": 1.0
+                   },
+                   "optimization": {
+                       "heating_modes": [
+                           0,
+                           1,
+                           2
+                       ],
+                       "dhw_modes": [
+                           0,
+                           1,
+                           2,
+                           3
+                       ],
+                       "comfort_penalty_amt_per_kh": 1.0,
+                       "dhw_penalty_amt_per_kh": 0.5,
+                       "legionella_penalty_amt": 2.0,
+                       "mode_change_penalty_amt": 0.002,
+                       "load_forecast_includes_heat_pump": false
                    },
                    "power_limit_w": null
                }
@@ -447,7 +465,7 @@ config path from ``self.device_id`` without needing an external index.
                        "ambient_c": 18.0,
                        "setpoint_c": 45.0,
                        "hysteresis_k": 5.0,
-                       "min_c": 40.0,
+                       "min_c": 38.0,
                        "rod_power_w": 3000.0,
                        "rod_max_c": 70.0,
                        "legionella_c": 60.0,
@@ -514,6 +532,24 @@ config path from ``self.device_id`` without needing an external index.
                            ]
                        },
                        "raised_offset_k": 1.0
+                   },
+                   "optimization": {
+                       "heating_modes": [
+                           0,
+                           1,
+                           2
+                       ],
+                       "dhw_modes": [
+                           0,
+                           1,
+                           2,
+                           3
+                       ],
+                       "comfort_penalty_amt_per_kh": 1.0,
+                       "dhw_penalty_amt_per_kh": 0.5,
+                       "legionella_penalty_amt": 2.0,
+                       "mode_change_penalty_amt": 0.002,
+                       "load_forecast_includes_heat_pump": false
                    },
                    "power_limit_w": null,
                    "measurement_key_room_temperature": "wbb12-room-temperature",
