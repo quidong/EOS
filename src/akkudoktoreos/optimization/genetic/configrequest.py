@@ -221,6 +221,9 @@ class ConfigOptimizationRequest(
                 raise ValueError(f"Missing or invalid {key} within the control horizon.")
         if any(value < 0 for values in (pv, load) for value in values[first:last]):
             raise ValueError("PV and load energy must be nonnegative.")
+        temperatures = await self._temperature_forecast(
+            supplied.temperature_forecast, origin, end, interval, length
+        )
         previous = ems.genetic_solution()
         warm_start = self.start_solution
         warm_start_time = self.start_solution_datetime
@@ -240,11 +243,45 @@ class ConfigOptimizationRequest(
             ev=ev,
             inverter=inverter,
             home_appliances=appliances,
-            temperature_forecast=(
-                (supplied.temperature_forecast[:length] + [None] * length)[:length]
-                if supplied.temperature_forecast is not None
-                else None
-            ),
+            temperature_forecast=temperatures,
             start_solution=warm_start,
             start_solution_datetime=warm_start_time,
         )
+
+    async def _temperature_forecast(
+        self,
+        supplied: Optional[list[Optional[float]]],
+        origin: DateTime,
+        end: DateTime,
+        interval: Any,
+        length: int,
+    ) -> Optional[list[Optional[float]]]:
+        """Outdoor temperature per slot in degC, aligned with the other forecasts.
+
+        A supplied series takes precedence. Otherwise the configured weather
+        provider's ``weather_temp_air`` is read from the prediction store (RL29
+        fork: upstream left the forecast empty for configuration-owned runs, so
+        temperature dependent device models had no input). Missing slots stay
+        ``None``; no data at all yields ``None``. The temperature is optional, so
+        a missing weather provider never cancels the optimization.
+        """
+        if supplied is not None:
+            return (list(supplied[:length]) + [None] * length)[:length]
+        try:
+            values = await bounded_forecast_array(
+                self.prediction,
+                key="weather_temp_air",
+                start_datetime=origin,
+                end_datetime=end,
+                interval=interval,
+            )
+        except (KeyError, ValueError) as exc:
+            logger.debug("No outdoor temperature forecast available: {}", exc)
+            return None
+        temperatures: list[Optional[float]] = [
+            float(value) if math.isfinite(value) else None for value in values[:length]
+        ]
+        temperatures += [None] * (length - len(temperatures))
+        if all(value is None for value in temperatures):
+            return None
+        return temperatures
