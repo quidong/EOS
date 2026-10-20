@@ -21,7 +21,12 @@ class TestResolveMeasurementKey:
 
     @pytest.mark.parametrize(
         "configured",
-        ["battery1_soc_factor", "Battery1-SoC-Factor", "battery1.soc_factor", " battery1_soc_factor "],
+        [
+            "battery1_soc_factor",
+            "Battery1-SoC-Factor",
+            "battery1.soc_factor",
+            " battery1_soc_factor ",
+        ],
     )
     def test_separator_and_case_variants_are_corrected(self, configured):
         key, message = resolve_measurement_key(configured, KNOWN)
@@ -72,7 +77,9 @@ def ha_adapter(config_eos, monkeypatch):
     ems = MagicMock()
     ems.stage.return_value = EnergyManagementStage.DATA_ACQUISITION
     object.__setattr__(adapter, "ems", ems)
-    monkeypatch.setattr(HomeAssistantAdapter, "ems_start_datetime", "2026-10-21T00:00:00+02:00", raising=False)
+    monkeypatch.setattr(
+        HomeAssistantAdapter, "ems_start_datetime", "2026-10-21T00:00:00+02:00", raising=False
+    )
     measurement = MagicMock()
     measurement.record_keys_writable = ["battery1-soc-factor", "battery1-power-l1-w"]
     measurement.update_value = AsyncMock()

@@ -188,7 +188,13 @@ class HeatPumpDhwSettings(SettingsBaseModel):
         default=5.0, gt=0, json_schema_extra={"description": "Heat pump switch-on difference [K]."}
     )
     min_c: float = Field(
-        default=40.0, json_schema_extra={"description": "Comfort minimum of the tank [degC]."}
+        default=38.0,
+        json_schema_extra={
+            "description": (
+                "Comfort minimum of the tank [degC]; below the heat pump switch-on "
+                "temperature, which the tank briefly undershoots while tapping."
+            )
+        },
     )
     rod_power_w: float = Field(
         default=0.0, ge=0, json_schema_extra={"description": "Heating rod power [W]; 0 = no rod."}
@@ -261,6 +267,81 @@ class HeatPumpComfortSettings(SettingsBaseModel):
         return 20.0
 
 
+class HeatPumpOptimizationSettings(SettingsBaseModel):
+    """How the optimizer may operate the heat pump and what deviations cost."""
+
+    heating_modes: list[int] = Field(
+        default_factory=lambda: [0, 1, 2],
+        min_length=1,
+        json_schema_extra={
+            "description": (
+                "Space heating modes the optimizer may choose: 0 REDUCED (SG Ready 1, "
+                "blocked), 1 NORMAL (SG Ready 2), 2 RAISED (SG Ready 3), 3 PREHEAT "
+                "(SG Ready 3 with all valves forced open; needs the KNX forced position)."
+            ),
+            "examples": [[0, 1, 2], [0, 1, 2, 3]],
+        },
+    )
+    dhw_modes: list[int] = Field(
+        default_factory=lambda: [0, 1, 2, 3],
+        min_length=1,
+        json_schema_extra={
+            "description": (
+                "Hot water modes the optimizer may choose: 0 HOLD (heat pump controller), "
+                "1 HEAT_PUMP (Warmwasser PUSH), 2 ROD_60, 3 ROD_70. Rod modes are dropped "
+                "while dhw.rod_power_w is 0."
+            ),
+        },
+    )
+    comfort_penalty_amt_per_kh: float = Field(
+        default=1.0,
+        ge=0,
+        json_schema_extra={
+            "description": "Cost of a room below its comfort minimum [currency per K*h]."
+        },
+    )
+    dhw_penalty_amt_per_kh: float = Field(
+        default=0.5,
+        ge=0,
+        json_schema_extra={
+            "description": "Cost of a tank below its comfort minimum [currency per K*h]."
+        },
+    )
+    legionella_penalty_amt: float = Field(
+        default=2.0,
+        ge=0,
+        json_schema_extra={"description": "Cost of a missed legionella heat-up [currency]."},
+    )
+    mode_change_penalty_amt: float = Field(
+        default=0.002,
+        ge=0,
+        json_schema_extra={
+            "description": (
+                "Cost per change of the heating or hot water mode between two hours; "
+                "keeps relay switching and compressor starts rare [currency]."
+            )
+        },
+    )
+    load_forecast_includes_heat_pump: bool = Field(
+        default=False,
+        json_schema_extra={
+            "description": (
+                "The load forecast still contains the heat pump. The consumption of "
+                "the status quo operation (NORMAL/HOLD) is then subtracted from the "
+                "forecast so the heat pump is not counted twice. Prefer a load "
+                "forecast without the heat pump."
+            )
+        },
+    )
+
+    @field_validator("heating_modes", "dhw_modes")
+    @classmethod
+    def validate_modes(cls, value: list[int]) -> list[int]:
+        if any(mode not in (0, 1, 2, 3) for mode in value):
+            raise ValueError("Modes are 0..3.")
+        return sorted(set(value))
+
+
 class HeatPumpCommonSettings(DevicesBaseSettings):
     """Heat pump with building, hot water tank and heating rod (RL29 fork)."""
 
@@ -268,6 +349,7 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
     unit: HeatPumpUnitSettings = Field(default_factory=HeatPumpUnitSettings)
     dhw: HeatPumpDhwSettings = Field(default_factory=HeatPumpDhwSettings)
     comfort: HeatPumpComfortSettings = Field(default_factory=HeatPumpComfortSettings)
+    optimization: HeatPumpOptimizationSettings = Field(default_factory=HeatPumpOptimizationSettings)
     power_limit_w: Optional[ValueTimeWindowSequence] = Field(
         default=None,
         json_schema_extra={

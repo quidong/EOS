@@ -36,6 +36,32 @@ from akkudoktoreos.utils.datetimeutil import DateTime, to_datetime, to_duration
 from akkudoktoreos.utils.utils import NumpyEncoder
 
 
+def _mode_value(name: Any) -> float:
+    """Numeric value of a heating or hot water mode name (see heatpumpgenes)."""
+    from akkudoktoreos.devices.thermal.heatpump import DhwMode, HeatingMode
+
+    for enum in (HeatingMode, DhwMode):
+        if isinstance(name, str) and name in enum.__members__:
+            return float(enum[name].value)
+    return float(name)
+
+
+# (solution column suffix, schedule key, converter) for heat pump columns.
+HEAT_PUMP_SOLUTION_COLUMNS: list[tuple[str, str, Any]] = [
+    ("heating_mode", "heating_mode", _mode_value),
+    ("dhw_mode", "dhw_mode", _mode_value),
+    ("sg_ready_state", "sg_ready_state", float),
+    ("dhw_push", "dhw_push", lambda v: 1.0 if v else 0.0),
+    ("valves_forced", "valves_forced", lambda v: 1.0 if v else 0.0),
+    ("rod_target_c", "rod_target_c", float),
+    ("energy_wh", "electric_wh", float),
+    ("rod_energy_wh", "rod_electric_wh", float),
+    ("room_temperature_c", "room_c", float),
+    ("slab_temperature_c", "slab_c", float),
+    ("dhw_temperature_c", "dhw_c", float),
+]
+
+
 class DeviceOptimizeResult(GeneticParametersBaseModel):
     device_id: str = Field(
         json_schema_extra={"description": "ID of device", "examples": ["device1"]}
@@ -268,6 +294,22 @@ class GeneticSimulationResult(GeneticParametersBaseModel):
         default_factory=dict, description="Active run occupancy, including zero-power phases."
     )
 
+    heat_pump_wh_per_hour: Optional[list[Optional[float]]] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "Electric energy of all heat pumps and heating rods per slot [Wh] "
+                "(RL29 fork); included in load_wh_per_hour."
+            )
+        },
+    )
+
+    @field_validator("heat_pump_wh_per_hour", mode="before")
+    def convert_numpy_heat_pump(cls, field: Any) -> Any:
+        if field is None:
+            return None
+        return NumpyEncoder.convert_numpy(field)[0]
+
     @field_validator("home_appliance_energy_wh", mode="before")
     def convert_numpy_appliance_energy(cls, field: Any) -> Any:
         if isinstance(field, dict):
@@ -450,6 +492,18 @@ class GeneticSolution(ConfigMixin, GeneticParametersBaseModel):
         json_schema_extra={
             "description": (
                 "Scheduled run start times per appliance device_id as absolute local datetimes."
+            )
+        },
+    )
+
+    heat_pumps: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        json_schema_extra={
+            "description": (
+                "Per heat pump device_id (RL29 fork): schedule and predicted states per "
+                "slot - heating_mode, dhw_mode, sg_ready_state, dhw_push, rod_target_c, "
+                "valves_forced, electric_wh, hp_electric_wh, rod_electric_wh, room_c, "
+                "slab_c, dhw_c, flow_c, cop_space - and a summary."
             )
         },
     )
@@ -908,6 +962,14 @@ class GeneticSolution(ConfigMixin, GeneticParametersBaseModel):
                     raise ValueError(error_msg)
                 solution[key] = operation[key]
 
+        # Heat pumps (RL29 fork): one block of columns per device.
+        for device_id, schedule in self.heat_pumps.items():
+            for column, key, convert in HEAT_PUMP_SOLUTION_COLUMNS:
+                values = list(schedule.get(key, []))[:n_points]
+                if len(values) < n_points:
+                    values += [values[-1] if values else 0] * (n_points - len(values))
+                solution[f"{device_id}_{column}"] = [convert(v) for v in values]
+
         # Fill prediction into dataframe with correct column names
         # - pvforecast_ac_energy_wh_energy_wh: PV energy prediction (positive) in wh
         # - elec_price_amt_kwh: Electricity price prediction in money per kwh
@@ -1179,6 +1241,28 @@ class GeneticSolution(ConfigMixin, GeneticParametersBaseModel):
                         )
                     )
                     last_state = running
+
+        # Heat pumps (RL29 fork): fill-rate based control of the thermal
+        # storages, one resource per actuator (space heating, hot water) so
+        # each gets its own Home Assistant entity (sensor.eos_<id>_space_heating,
+        # sensor.eos_<id>_dhw). A new instruction is emitted on a mode change only.
+        for device_id, schedule in self.heat_pumps.items():
+            for actuator, key in (("space_heating", "heating_mode"), ("dhw", "dhw_mode")):
+                resource_id = f"{device_id}_{actuator}"
+                last_mode: Optional[str] = None
+                for slot, mode in enumerate(schedule.get(key, [])):
+                    if mode == last_mode:
+                        continue
+                    last_mode = mode
+                    plan.add_instruction(
+                        FRBCInstruction(
+                            resource_id=resource_id,
+                            execution_time=start_datetime.add(seconds=interval_s * slot),
+                            actuator_id=resource_id,
+                            operation_mode_id=str(mode),
+                            operation_mode_factor=1.0,
+                        )
+                    )
 
         if not plan.instructions:
             plan.valid_from = start_datetime

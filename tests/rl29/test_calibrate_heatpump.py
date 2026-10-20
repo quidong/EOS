@@ -110,13 +110,19 @@ def test_snippet_is_valid_eos_config(config_eos, tmp_path, capsys):
     cal.main(["fit", str(path), "--device-id", "wbb12"])
     snippet = json.loads(capsys.readouterr().out)
     config_eos.merge_settings_from_dict(snippet)
-    assert config_eos.devices.heat_pumps["wbb12"].unit.cop_scale == pytest.approx(SCALE_TRUE, rel=0.01)
+    assert config_eos.devices.heat_pumps["wbb12"].unit.cop_scale == pytest.approx(
+        SCALE_TRUE, rel=0.01
+    )
 
 
 class TestHourlyMeans:
     def test_step_signal_time_weighted(self):
         t0 = datetime(2026, 10, 20, 10, tzinfo=timezone.utc)
-        samples = [(t0, 0.0), (t0 + timedelta(minutes=15), 100.0), (t0 + timedelta(minutes=45), 0.0)]
+        samples = [
+            (t0, 0.0),
+            (t0 + timedelta(minutes=15), 100.0),
+            (t0 + timedelta(minutes=45), 0.0),
+        ]
         means = cal.hourly_means(samples, t0, t0 + timedelta(hours=1))
         assert means[t0] == pytest.approx(50.0)
 
