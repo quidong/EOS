@@ -5,12 +5,15 @@ Used as the acceptance check when the RL29 fork image replaces another image:
 take a snapshot before the switch, one after, and diff them.
 
     python3 scripts/rl29/eos_snapshot.py snapshot http://eos.local:8503 -o before.json
-    python3 scripts/rl29/eos_snapshot.py snapshot http://eos.local:8503 -o after.json
+    python3 scripts/rl29/eos_snapshot.py snapshot http://eos.local:8503 -o after.json \\
+        --window-from before.json
     python3 scripts/rl29/eos_snapshot.py diff before.json after.json
 
 The snapshot holds the configuration (volatile keys removed), the health
 state, the available prediction and measurement keys and a few statistics of
-every prediction series over the next 24 h. Only the standard library is used,
+every prediction series over the next 24 h. Forecast providers refresh between
+two snapshots, so weather-driven series can differ slightly; use ``--rel-tol``
+and ``--window-from`` to compare the same hours. Only the standard library is used,
 so the script runs on any machine with Python 3.9+.
 """
 
@@ -71,15 +74,19 @@ def _series_stats(values: list[Any]) -> dict[str, Any]:
     }
 
 
-def snapshot(base: str, hours: int = 24) -> dict[str, Any]:
+def snapshot(base: str, hours: int = 24, start_at: str | None = None) -> dict[str, Any]:
     health = _get(base, "/v1/health")
     config = _strip_volatile(_get(base, "/v1/config"))
     pred_keys = sorted(_get(base, "/v1/prediction/keys"))
     meas_keys = sorted(_get(base, "/v1/measurement/keys"))
 
-    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
-    start = now.isoformat()
-    end = (now + timedelta(hours=hours)).isoformat()
+    if start_at is not None:
+        # Same window as an earlier snapshot, so both cover identical hours.
+        origin = datetime.fromisoformat(start_at)
+    else:
+        origin = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    start = origin.isoformat()
+    end = (origin + timedelta(hours=hours)).isoformat()
     series: dict[str, Any] = {}
     for key in pred_keys:
         try:
@@ -166,6 +173,10 @@ def main(argv: list[str] | None = None) -> int:
     p_snap.add_argument("base", help="EOS base URL, e.g. http://eos.local:8503")
     p_snap.add_argument("-o", "--output", required=True)
     p_snap.add_argument("--hours", type=int, default=24)
+    p_snap.add_argument(
+        "--window-from",
+        help="reuse the series window of an earlier snapshot file (compare identical hours)",
+    )
 
     p_diff = sub.add_parser("diff", help="compare two snapshots")
     p_diff.add_argument("before")
@@ -174,7 +185,15 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     if args.cmd == "snapshot":
-        snap = snapshot(args.base, args.hours)
+        start_at = None
+        hours = args.hours
+        if args.window_from:
+            with open(args.window_from, encoding="utf-8") as fh:
+                window = json.load(fh)["series_window"]
+            start_at = window["start"]
+            span = datetime.fromisoformat(window["end"]) - datetime.fromisoformat(window["start"])
+            hours = int(span.total_seconds() // 3600)
+        snap = snapshot(args.base, hours, start_at)
         with open(args.output, "w", encoding="utf-8") as fh:
             json.dump(snap, fh, indent=2, sort_keys=True)
         print(f"snapshot written: {args.output} ({len(snap['prediction_keys'])} prediction keys)")
