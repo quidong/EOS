@@ -2,7 +2,7 @@
 
 A heat pump device bundles the building it heats, the domestic hot water tank
 with an optional heating rod and the heat pump unit itself. The physical models
-live in :mod:`akkudoktoreos.devices.thermal`; this module only holds the
+live in ``akkudoktoreos.devices.thermal``; this module only holds the
 configuration and converts it.
 
 Example::
