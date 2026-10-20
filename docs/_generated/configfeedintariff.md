@@ -177,6 +177,7 @@
                            "duration": "8 hours",
                            "day_of_week": null,
                            "date": null,
+                           "months": null,
                            "locale": null,
                            "value": 0.028
                        },
@@ -185,6 +186,7 @@
                            "duration": "16 hours",
                            "day_of_week": null,
                            "date": null,
+                           "months": null,
                            "locale": null,
                            "value": 0.034
                        }

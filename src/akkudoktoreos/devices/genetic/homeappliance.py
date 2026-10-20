@@ -575,9 +575,7 @@ class HomeAppliance:
             days_back = math.ceil(window.duration.total_seconds() / 86400) + 1
             for offset in range(days_back + 1):
                 anchor = start.subtract(days=offset)
-                if window.date is not None and anchor.date() != window.date:
-                    continue
-                if window.day_of_week is not None and anchor.day_of_week != window.day_of_week:
+                if not window.matches_day(anchor):
                     continue
                 opening, closing = window._window_start_end(anchor)
                 if opening <= start and run_end <= closing:

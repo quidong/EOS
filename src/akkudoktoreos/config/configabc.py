@@ -145,6 +145,21 @@ class TimeWindow(SettingsBaseModel):
             ],
         },
     )
+    months: Optional[list[int]] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "Optional month restriction (1=January to 12=December). "
+                "The window only applies in the listed months, matched against the local "
+                "date of the datetime passed to contains(). If None, applies in every month. "
+                "Useful for seasonal tariffs, e.g. quarters Q1 and Q4 = [1, 2, 3, 10, 11, 12]."
+            ),
+            "examples": [
+                None,
+                [1, 2, 3, 10, 11, 12],
+            ],
+        },
+    )
     locale: Optional[str] = Field(
         default=None,
         json_schema_extra={
@@ -204,6 +219,36 @@ class TimeWindow(SettingsBaseModel):
             Duration: The converted Duration object.
         """
         return to_duration(value)
+
+    @field_validator("months", mode="after")
+    @classmethod
+    def validate_months(cls, value: Optional[list[int]]) -> Optional[list[int]]:
+        """Ensure months are within 1..12, unique and sorted; an empty list is rejected."""
+        if value is None:
+            return None
+        if len(value) == 0:
+            raise ValueError("months must contain at least one month (1-12) or be None")
+        for month in value:
+            if not 1 <= month <= 12:
+                raise ValueError(f"month {month} out of range, expected 1 (January) to 12 (December)")
+        return sorted(set(value))
+
+    def matches_day(self, date_time: DateTime) -> bool:
+        """Check the calendar constraints (date, weekday, months) for a given day.
+
+        Args:
+            date_time: Any datetime on the day to check. Its local calendar date is used.
+
+        Returns:
+            bool: True if the window applies on that day.
+        """
+        if self.date and date_time.date() != self.date:
+            return False
+        if self.day_of_week is not None and date_time.day_of_week != self.day_of_week:
+            return False
+        if self.months is not None and date_time.month not in self.months:
+            return False
+        return True
 
     @model_validator(mode="after")
     def validate_day_of_week_with_locale(self) -> "TimeWindow":
@@ -286,8 +331,57 @@ class TimeWindow(SettingsBaseModel):
             second=self.start_time.second,
             microsecond=self.start_time.microsecond,
         )
-        end = start + self.duration
-        return start, end
+        if reference_date.tzinfo is None:
+            return start, start + self.duration
+
+        # Timezone-aware: the window is defined in local wall-clock time.
+        # ``replace`` keeps the DST fold of ``reference_date`` (and shifts
+        # non-existent times in an arbitrary direction), so on DST change days
+        # the same window would get different absolute bounds depending on the
+        # hour that is checked, and adding the duration in absolute time moves
+        # the end by the DST offset.  Build both bounds from wall-clock values:
+        # an ambiguous start resolves to its first occurrence, an ambiguous end
+        # to its last one, and a non-existent time is moved forward by the
+        # length of the gap (PEP 495 semantics; for windows on full hours this
+        # is the moment the clocks jump).  (RL29 fork fix.)
+        tz = reference_date.tzinfo
+        naive_start = pendulum.naive(
+            reference_date.year,
+            reference_date.month,
+            reference_date.day,
+            self.start_time.hour,
+            self.start_time.minute,
+            self.start_time.second,
+            self.start_time.microsecond,
+        )
+        naive_end = naive_start + self.duration
+        return (
+            self._localize_wall_clock(naive_start, tz, fold=0),
+            self._localize_wall_clock(naive_end, tz, fold=1),
+        )
+
+    @staticmethod
+    def _localize_wall_clock(naive: DateTime, tz: Any, fold: int) -> DateTime:
+        """Attach ``tz`` to a naive wall-clock time.
+
+        Ambiguous times (clocks going back) resolve according to ``fold``;
+        non-existent times (clocks going forward) are moved forward by the
+        length of the gap.
+        """
+        parts = (
+            naive.year,
+            naive.month,
+            naive.day,
+            naive.hour,
+            naive.minute,
+            naive.second,
+            naive.microsecond,
+        )
+        local = pendulum.datetime(*parts, tz=tz, fold=fold)
+        if (local.hour, local.minute) != (naive.hour, naive.minute):
+            # Non-existent wall-clock time: fold=1 moves it past the gap.
+            local = pendulum.datetime(*parts, tz=tz, fold=1)
+        return local
 
     def contains(self, date_time: DateTime, duration: Optional[Duration] = None) -> bool:
         """Check whether a datetime (and optional duration) fits within the time window.
@@ -306,12 +400,9 @@ class TimeWindow(SettingsBaseModel):
             bool: True if the datetime (and optional duration) is fully
             contained in the time window, False otherwise.
         """
-        # Date and weekday constraints are checked against date_time as-is;
+        # Date, weekday and month constraints are checked against date_time as-is;
         # since start_time is naive it is always interpreted in date_time's tz.
-        if self.date and date_time.date() != self.date:
-            return False
-
-        if self.day_of_week is not None and date_time.day_of_week != self.day_of_week:
+        if not self.matches_day(date_time):
             return False
 
         start, end = self._window_start_end(date_time)
@@ -339,10 +430,7 @@ class TimeWindow(SettingsBaseModel):
         if reference_date is None:
             reference_date = pendulum.today()
 
-        if self.date and reference_date.date() != self.date:
-            return None
-
-        if self.day_of_week is not None and reference_date.day_of_week != self.day_of_week:
+        if not self.matches_day(reference_date):
             return None
 
         if duration > self.duration:
@@ -366,10 +454,7 @@ class TimeWindow(SettingsBaseModel):
         if reference_date is None:
             reference_date = pendulum.today()
 
-        if self.date and reference_date.date() != self.date:
-            return None
-
-        if self.day_of_week is not None and reference_date.day_of_week != self.day_of_week:
+        if not self.matches_day(reference_date):
             return None
 
         if duration > self.duration:
@@ -409,10 +494,7 @@ class TimeWindow(SettingsBaseModel):
         if reference_date is None:
             reference_date = pendulum.today()
 
-        if self.date and reference_date.date() != self.date:
-            return None
-
-        if self.day_of_week is not None and reference_date.day_of_week != self.day_of_week:
+        if not self.matches_day(reference_date):
             return None
 
         return self.duration
