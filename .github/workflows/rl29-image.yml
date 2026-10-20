@@ -52,10 +52,27 @@ jobs:
         run: uv sync --extra dev
 
       - name: Upstream test suite (incl. long optimizer runs)
-        run: uv run pytest --finalize --check-config-side-effect -q
+        run: |
+          set -o pipefail
+          uv run pytest --finalize --check-config-side-effect -q -rfE 2>&1 | tee pytest-upstream.log
 
       - name: RL29 fork tests
-        run: uv run pytest -q tests/rl29
+        run: |
+          set -o pipefail
+          uv run pytest -q -rfE tests/rl29 2>&1 | tee pytest-rl29.log
+
+      # Job logs need a GitHub login; annotations are readable through the API
+      # (gh api repos/<owner>/EOS/check-runs/<job id>/annotations).
+      - name: Report failed tests as annotations
+        if: failure()
+        run: |
+          for log in pytest-upstream.log pytest-rl29.log; do
+            [ -f "$log" ] || continue
+            grep -E '^(FAILED|ERROR) ' "$log" | head -40 | while IFS= read -r line; do
+              echo "::error title=${log%.log}::${line:0:900}"
+            done
+            tail -1 "$log" | sed 's/^/::notice title=summary::/'
+          done
 
   build:
     needs: test
