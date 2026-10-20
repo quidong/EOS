@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610201560628681"
+    "version": "v0.3.0.dev2610202221300689"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -16284,6 +16284,32 @@
               null
             ]
           },
+          "months": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Months",
+            "description": "Optional month restriction (1=January to 12=December). The window only applies in the listed months, matched against the local date of the datetime passed to contains(). If None, applies in every month. Useful for seasonal tariffs, e.g. quarters Q1 and Q4 = [1, 2, 3, 10, 11, 12].",
+            "examples": [
+              null,
+              [
+                1,
+                2,
+                3,
+                10,
+                11,
+                12
+              ]
+            ]
+          },
           "locale": {
             "anyOf": [
               {
@@ -16358,6 +16384,32 @@
             "description": "Optional specific calendar date for the time window. Naive \u2014 matched against the local date of the datetime passed to contains(). Overrides `day_of_week` if set.",
             "examples": [
               null
+            ]
+          },
+          "months": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Months",
+            "description": "Optional month restriction (1=January to 12=December). The window only applies in the listed months, matched against the local date of the datetime passed to contains(). If None, applies in every month. Useful for seasonal tariffs, e.g. quarters Q1 and Q4 = [1, 2, 3, 10, 11, 12].",
+            "examples": [
+              null,
+              [
+                1,
+                2,
+                3,
+                10,
+                11,
+                12
+              ]
             ]
           },
           "locale": {
@@ -16512,6 +16564,32 @@
               null
             ]
           },
+          "months": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Months",
+            "description": "Optional month restriction (1=January to 12=December). The window only applies in the listed months, matched against the local date of the datetime passed to contains(). If None, applies in every month. Useful for seasonal tariffs, e.g. quarters Q1 and Q4 = [1, 2, 3, 10, 11, 12].",
+            "examples": [
+              null,
+              [
+                1,
+                2,
+                3,
+                10,
+                11,
+                12
+              ]
+            ]
+          },
           "locale": {
             "anyOf": [
               {
@@ -16602,6 +16680,32 @@
             "description": "Optional specific calendar date for the time window. Naive \u2014 matched against the local date of the datetime passed to contains(). Overrides `day_of_week` if set.",
             "examples": [
               null
+            ]
+          },
+          "months": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Months",
+            "description": "Optional month restriction (1=January to 12=December). The window only applies in the listed months, matched against the local date of the datetime passed to contains(). If None, applies in every month. Useful for seasonal tariffs, e.g. quarters Q1 and Q4 = [1, 2, 3, 10, 11, 12].",
+            "examples": [
+              null,
+              [
+                1,
+                2,
+                3,
+                10,
+                11,
+                12
+              ]
             ]
           },
           "locale": {

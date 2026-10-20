@@ -128,6 +128,7 @@ This model extends `TimeWindow` by associating a value with the defined time int
 | day_of_week | `Union[int, str, NoneType]` | `rw` | `None` | Optional day of the week restriction. Can be specified as integer (0=Monday to 6=Sunday) or localized weekday name. If None, applies every day unless `date` is set. |
 | duration | `Duration` | `rw` | `required` | Duration of the time window starting from `start_time`. |
 | locale | `Optional[str]` | `rw` | `None` | Locale used to parse weekday names in `day_of_week` when given as string. If not set, Pendulum's default locale is used. Examples: 'en', 'de', 'fr', etc. |
+| months | `Optional[list[int]]` | `rw` | `None` | Optional month restriction (1=January to 12=December). The window only applies in the listed months, matched against the local date of the datetime passed to contains(). If None, applies in every month. Useful for seasonal tariffs, e.g. quarters Q1 and Q4 = [1, 2, 3, 10, 11, 12]. |
 | start_time | `Time` | `rw` | `required` | Naive start time of the time window (time of day, no timezone). Interpreted in the timezone of the datetime passed to contains() or earliest_start_time(). |
 | value | `Optional[float]` | `rw` | `None` | Value applicable during this time window. |
 :::
@@ -149,6 +150,7 @@ This model extends `TimeWindow` by associating a value with the defined time int
                            "duration": "2 hours",
                            "day_of_week": null,
                            "date": null,
+                           "months": null,
                            "locale": null,
                            "value": 0.288
                        }
@@ -232,6 +234,7 @@ fee applicable during that interval.
                            "duration": "8 hours",
                            "day_of_week": null,
                            "date": null,
+                           "months": null,
                            "locale": null,
                            "value": 0.00288
                        },
@@ -240,6 +243,7 @@ fee applicable during that interval.
                            "duration": "16 hours",
                            "day_of_week": null,
                            "date": null,
+                           "months": null,
                            "locale": null,
                            "value": 0.0034
                        }
@@ -252,6 +256,7 @@ fee applicable during that interval.
                            "duration": "1 day",
                            "day_of_week": null,
                            "date": null,
+                           "months": null,
                            "locale": null,
                            "value": 19.0
                        }
@@ -264,6 +269,7 @@ fee applicable during that interval.
                            "duration": "8 hours",
                            "day_of_week": null,
                            "date": null,
+                           "months": null,
                            "locale": null,
                            "value": 0.00288
                        },
@@ -272,6 +278,7 @@ fee applicable during that interval.
                            "duration": "16 hours",
                            "day_of_week": null,
                            "date": null,
+                           "months": null,
                            "locale": null,
                            "value": 0.0034
                        }
@@ -284,6 +291,7 @@ fee applicable during that interval.
                            "duration": "1 day",
                            "day_of_week": null,
                            "date": null,
+                           "months": null,
                            "locale": null,
                            "value": 19.0
                        }
