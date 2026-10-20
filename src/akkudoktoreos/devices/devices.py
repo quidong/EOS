@@ -20,6 +20,7 @@ from akkudoktoreos.devices.settings.batterysettings import (
 from akkudoktoreos.devices.settings.homeappliancesettings import (
     HomeApplianceCommonSettings,
 )
+from akkudoktoreos.devices.settings.heatpumpsettings import HeatPumpCommonSettings
 from akkudoktoreos.devices.settings.invertersettings import InverterCommonSettings
 from akkudoktoreos.utils.datetimeutil import DateTime, to_datetime
 
@@ -118,8 +119,35 @@ class DevicesCommonSettings(SettingsBaseModel):
         },
     )
 
+    # ---- Heat pumps (RL29 fork) ----
+    heat_pumps: dict[str, HeatPumpCommonSettings] = Field(
+        default_factory=dict,
+        json_schema_extra={
+            "description": (
+                "Heat pumps with building, hot water tank and heating rod, keyed by device_id. "
+                "Optimized by GENETIC (RL29 fork)."
+            ),
+            "examples": [{"wbb12": {"device_id": "wbb12", "dhw": {"rod_power_w": 3000}}}],
+            "x-scope": [str(ConfigScope.GENETIC)],
+        },
+    )
+    max_heat_pumps: Optional[int] = Field(
+        default=None,
+        ge=0,
+        json_schema_extra={
+            "description": "Maximum number of heat pumps allowed.",
+            "examples": [1],
+            "x-scope": [str(ConfigScope.GENETIC)],
+        },
+    )
+
     @field_validator(
-        "batteries", "electric_vehicles", "inverters", "home_appliances", mode="before"
+        "batteries",
+        "electric_vehicles",
+        "inverters",
+        "home_appliances",
+        "heat_pumps",
+        mode="before",
     )
     @classmethod
     def validate_device_ids(cls, value: Any) -> Any:
@@ -149,6 +177,7 @@ class DevicesCommonSettings(SettingsBaseModel):
             self.electric_vehicles,
             self.inverters,
             self.home_appliances,
+            self.heat_pumps,
         ]:
             for device in (device_dict or {}).values():
                 keys.extend(device.measurement_keys or [])
