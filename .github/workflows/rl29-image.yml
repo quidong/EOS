@@ -1,0 +1,152 @@
+# RL29 fork: test, build and publish the EOS image used on the "energy" VM.
+#
+# Runs on every push to rl29/main (and manually). Upstream workflows stay
+# untouched so that rebasing onto Akkudoktor-EOS/EOS main stays conflict free.
+#
+# Result: ghcr.io/<owner>/eos:rl29-<short-sha> and ghcr.io/<owner>/eos:rl29-latest
+# The Portainer stack pins the image by digest (see RL29.md).
+
+name: rl29-image
+
+on:
+  push:
+    branches:
+      - 'rl29/main'
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: "Skip the pytest job (emergency builds only)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rl29-image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.13.15"
+
+jobs:
+  test:
+    if: ${{ !inputs.skip_tests }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        run: |
+          python -m pip install --upgrade pip
+          pip install uv
+
+      - name: Sync environment
+        run: uv sync --extra dev
+
+      - name: Upstream test suite (incl. long optimizer runs)
+        run: uv run pytest --finalize --check-config-side-effect -q
+
+      - name: RL29 fork tests
+        run: uv run pytest -q tests/rl29
+
+  build:
+    needs: test
+    # Run when tests passed, or when they were skipped on purpose.
+    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.names.outputs.image }}
+      digest: ${{ steps.build.outputs.digest }}
+      version: ${{ steps.names.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Image names
+        id: names
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          short="${GITHUB_SHA::7}"
+          echo "image=ghcr.io/${owner}/eos" >> "$GITHUB_OUTPUT"
+          echo "version=rl29-${short}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push (linux/amd64)
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            BUILD_VERSION=${{ steps.names.outputs.version }}
+          tags: |
+            ${{ steps.names.outputs.image }}:${{ steps.names.outputs.version }}
+            ${{ steps.names.outputs.image }}:rl29-latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.names.outputs.version }}
+            org.opencontainers.image.licenses=Apache-2.0
+            com.centurylinklabs.watchtower.enable=false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  smoke:
+    needs: build
+    if: ${{ always() && needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Smoke test the published image
+        run: |
+          bash scripts/rl29/smoke_test_image.sh \
+            "${{ needs.build.outputs.image }}@${{ needs.build.outputs.digest }}" \
+            "${{ needs.build.outputs.version }}"
+
+      - name: Summary
+        run: |
+          {
+            echo "### EOS image published"
+            echo ""
+            echo "- Version: \`${{ needs.build.outputs.version }}\`"
+            echo "- Digest:  \`${{ needs.build.outputs.image }}@${{ needs.build.outputs.digest }}\`"
+            echo ""
+            echo "Portainer stack line:"
+            echo ""
+            echo "\`image: ${{ needs.build.outputs.image }}@${{ needs.build.outputs.digest }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,40 @@
+{
+  "devices": {"inverters": {"fronius": {"device_id": "fronius", "max_power_w": 20000.0}}},
+  "load": {"loadakkudoktor": {"loadakkudoktor_year_energy_kwh": 10000.0}, "provider": "LoadAkkudoktor"},
+  "pvforecast": {
+    "planes": [
+      {"inverter_model": "10000", "loss": 0.0, "module_model": "465", "modules_per_string": 19, "peakpower": 8.835, "strings_per_inverter": 1, "surface_azimuth": 115.3, "surface_tilt": 20.0},
+      {"inverter_model": "10000", "loss": 0.0, "module_model": "465", "modules_per_string": 20, "peakpower": 9.3, "strings_per_inverter": 1, "surface_azimuth": 295.3, "surface_tilt": 20.0}
+    ],
+    "provider": "PVForecastPVLib"
+  },
+  "elecprice": {"provider": "ElecPriceEnergyCharts"},
+  "weather": {"provider": "OpenMeteo"},
+  "adapter": {
+    "homeassistant": {
+      "grid_export_emr_entity_ids": ["sensor.energie_einspeisung_gesamt"],
+      "grid_import_emr_entity_ids": ["sensor.energie_netzbezug_gesamt"],
+      "load_emr_entity_ids": ["sensor.energie_hausverbrauch_gesamt"],
+      "pv_production_emr_entity_ids": ["sensor.energie_pv_erzeugung_gesamt"]
+    },
+    "provider": ["HomeAssistant"]
+  },
+  "ems": {"interval": 900.0, "mode": "PREDICTION"},
+  "feedintariff": {
+    "feedintarifffixed": {"feed_in_tariff_amt_kwh": {"windows": [{"duration": "1 day", "start_time": "00:00:00.000000", "value": 0.0721}]}},
+    "provider": "FeedInTariffFixed"
+  },
+  "elecfee": {
+    "elecfeefixed": {
+      "consumption_amt_kwh": {"windows": [{"duration": "1 day", "start_time": "00:00:00.000000", "value": 0.13796}]},
+      "consumption_percent_amt": {"windows": [{"duration": "1 day", "start_time": "00:00:00.000000", "value": 19.0}]}
+    },
+    "provider": "ElecFeeFixed"
+  },
+  "measurement": {
+    "grid_export_emr_keys": ["sensor.energie_einspeisung_gesamt"],
+    "grid_import_emr_keys": ["sensor.energie_netzbezug_gesamt"],
+    "load_emr_keys": ["sensor.energie_hausverbrauch_gesamt"],
+    "pv_production_emr_keys": ["sensor.energie_pv_erzeugung_gesamt"]
+  }
+}
