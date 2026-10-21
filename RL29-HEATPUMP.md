@@ -127,25 +127,34 @@ Hinweise zur Konfiguration:
 - **Gebäudeparameter** kommen aus `scripts/rl29/calibrate_heatpump.py`. Die Defaults sind Schätzwerte.
 - Ein **Estrich-Messwert** existiert nicht. EOS schätzt ihn dann aus dem Gleichgewicht.
 
-## 3. Netzentgelt Modul 3 (MVV)
+## 3. §14a EnWG: Modul wählbar (keins, 1, 2, 1+3)
+
+Einstellung `elecfee.grid_control_14a` (generisch, für jede Anlage):
+
+| Modul | Wirkung in EOS |
+|---|---|
+| `none` | keine Preisänderung, keine Dimmung |
+| `module1` | pauschale Kürzung – keine Wirkung auf die Optimierung; Dimmung aktiv |
+| `module2` | steuerbares Gerät mit eigenem Zähler: Preis = Haushaltspreis − `module2_reduction_percent` × regulärer Netz-Arbeitspreis (inkl. MwSt.); das Gerät nutzt dann keinen PV-/Batteriestrom und zählt nicht zur Hausbilanz; Dimmung aktiv |
+| `module1_3` | Modul 1 + zeitvariabler Netz-Arbeitspreis: EOS ersetzt im Festpreis-Gebührenprovider den regulären Netzpreis je Viertelstunde durch das Band (`module3_network_amt_kwh`, Fenster mit `months`); Dimmung aktiv |
+
+Weitere Felder:
+
+- `controllable_device_ids`: die steuerbaren Verbraucher, z. B. `wbb12`.
+- `regular_network_amt_kwh`: der Netz-Arbeitspreis, der in `consumption_amt_kwh` steckt. Er wird für Modul 2 und Modul 3 gebraucht.
+- `dimming_power_w`: Standard 4.200 W.
+- `dimming_hold_hours`: Standard 1 h.
+
+Ist der Messwert `<id>-power-limited` aktiv, begrenzt EOS die steuerbaren Verbraucher ab jetzt auf `dimming_power_w`.
 
 ```bash
-python3 scripts/rl29/elecfee_modul3.py \
-  --other-amt-kwh <13,796 ct minus Netz-Arbeitspreis, in EUR> \
-  --regular-network-amt-kwh <Netz-Arbeitspreis Q2/Q3 laut Preisblatt 2, in EUR> \
-  --apply http://eos.local:8503
+# Modul 1+3 (MVV-Bänder als Standard), regulärer Netz-Arbeitspreis aus Preisblatt 2
+python3 scripts/rl29/gridfee_14a.py --module module1_3 --device wbb12 \
+  --regular-network-amt-kwh <EUR/kWh netto> --apply http://eos.local:8503
+# Alternativ: --module none | module1 | module2
 ```
 
-Das Skript setzt diese Bänder (netto):
-
-| Quartale | Zeitfenster | Arbeitspreis |
-|---|---|---|
-| Q1/Q4 | 02–06 Uhr (Niedrig) | 1,73 ct |
-| Q1/Q4 | 00–02, 06–17, 20–24 Uhr (Standard) | 4,32 ct |
-| Q1/Q4 | 17–20 Uhr (Hoch) | 5,96 ct |
-| Q2/Q3 | ganztägig | regulärer Netz-Arbeitspreis |
-
-Die Fenster nutzen das neue `months`-Feld. Modul 1 ist eine pauschale Kürzung und spielt für die Optimierung keine Rolle.
+`consumption_amt_kwh` bleibt dabei unverändert (13,796 ct mit regulärem Netzpreis).
 
 ## 4. HA-Dispatcher (ENTWURF – nicht angelegt)
 

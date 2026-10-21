@@ -410,6 +410,26 @@ class ConfigOptimizationRequest(
             setpoint,
             hours_since,
         )
+        # §14a EnWG: dimming signal and module 2 (own meter, reduced price).
+        grid_14a = self.config.elecfee.grid_control_14a
+        power_limited_w: Optional[float] = None
+        if grid_14a.is_controllable(device.device_id):
+            limited = await self._latest_measurement(
+                device.measurement_key_power_limited, observation_time, max_age
+            )
+            if limited is not None and limited > 0.5:
+                power_limited_w = grid_14a.dimming_power_w
+                logger.info(
+                    "Heat pump {}: §14a dimming active, limit {} W.",
+                    device.device_id,
+                    power_limited_w,
+                )
+        reduction_wh: Optional[float] = None
+        if grid_14a.separately_metered(device.device_id):
+            vat = self.config.elecfee.elecfeefixed.consumption_percent_amt.get_value_for_datetime(
+                observation_time
+            )
+            reduction_wh = grid_14a.module2_reduction_amt_kwh() * (100.0 + vat) / 100.0 / 1000.0
         return GeneticHeatPumpParameters(
             device_id=device.device_id,
             settings=device,
@@ -417,5 +437,8 @@ class ConfigOptimizationRequest(
             initial_slab_c=slab,
             initial_dhw_c=dhw,
             dhw_setpoint_c=setpoint,
+            power_limited_w=power_limited_w,
+            power_limited_hours=grid_14a.dimming_hold_hours,
+            separate_meter_price_reduction_amt_wh=reduction_wh,
             hours_since_legionella=hours_since,
         )

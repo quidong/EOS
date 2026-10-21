@@ -7,6 +7,7 @@ from akkudoktoreos.core.coreabc import get_prediction
 from akkudoktoreos.prediction.elecfeeabc import ElecFeeProvider
 from akkudoktoreos.prediction.elecfeefixed import ElecFeeFixedCommonSettings
 from akkudoktoreos.prediction.elecfeeimport import ElecFeeImportCommonSettings
+from akkudoktoreos.prediction.gridcontrol14a import GridControl14aSettings
 
 
 def elecfee_provider_ids() -> list[str]:
@@ -46,6 +47,17 @@ class ElecFeeCommonSettings(SettingsBaseModel):
     elecfeeimport: ElecFeeImportCommonSettings = Field(
         default_factory=ElecFeeImportCommonSettings,
         json_schema_extra={"description": "Electricity fees import provider settings."},
+    )
+
+    grid_control_14a: GridControl14aSettings = Field(
+        default_factory=GridControl14aSettings,
+        json_schema_extra={
+            "description": (
+                "§14a EnWG grid fee module (none, module1, module2, module1_3) and dimming "
+                "of controllable consumers (RL29 fork). Module 3 prices are applied to the "
+                "fixed fee provider."
+            )
+        },
     )
 
     @computed_field  # type: ignore[prop-decorator]

@@ -312,6 +312,17 @@
            "elecfeeimport": {
                "import_file_path": null,
                "import_json": null
+           },
+           "grid_control_14a": {
+               "module": "none",
+               "controllable_device_ids": [],
+               "regular_network_amt_kwh": null,
+               "module2_reduction_percent": 60.0,
+               "module3_network_amt_kwh": {
+                   "windows": []
+               },
+               "dimming_power_w": 4200.0,
+               "dimming_hold_hours": 1.0
            }
        },
        "elecprice": {

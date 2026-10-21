@@ -10,7 +10,7 @@ from akkudoktoreos.config.configabc import (
     ValueTimeWindowSequence,
 )
 from akkudoktoreos.prediction.elecfeeabc import ElecFeeProvider
-from akkudoktoreos.utils.datetimeutil import to_duration
+from akkudoktoreos.utils.datetimeutil import to_datetime, to_duration
 
 
 class ElecFeeFixedCommonSettings(SettingsBaseModel):
@@ -179,6 +179,13 @@ class ElecFeeFixed(ElecFeeProvider):
                 boundary="context",
                 align_to_interval=True,
             )
+
+            if prediction_key == "elecfee_consumption_amt_wh":
+                # §14a module 3: band price instead of the regular network price.
+                grid_14a = self.config.elecfee.grid_control_14a
+                if grid_14a.module == "module1_3":
+                    deltas = [grid_14a.module3_delta_amt_kwh(to_datetime(ts)) for ts in fees.index]
+                    fees = fees + deltas
 
             if prediction_key.endswith("_wh"):
                 # Convert kWh → Wh

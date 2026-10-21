@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610210475020436"
+    "version": "v0.3.0.dev2610210469672640"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -5079,6 +5079,10 @@
           "elecfeeimport": {
             "$ref": "#/components/schemas/ElecFeeImportCommonSettings",
             "description": "Electricity fees import provider settings."
+          },
+          "grid_control_14a": {
+            "$ref": "#/components/schemas/GridControl14aSettings-Input",
+            "description": "\u00a714a EnWG grid fee module (none, module1, module2, module1_3) and dimming of controllable consumers (RL29 fork). Module 3 prices are applied to the fixed fee provider."
           }
         },
         "type": "object",
@@ -5109,6 +5113,10 @@
           "elecfeeimport": {
             "$ref": "#/components/schemas/ElecFeeImportCommonSettings",
             "description": "Electricity fees import provider settings."
+          },
+          "grid_control_14a": {
+            "$ref": "#/components/schemas/GridControl14aSettings-Output",
+            "description": "\u00a714a EnWG grid fee module (none, module1, module2, module1_3) and dimming of controllable consumers (RL29 fork). Module 3 prices are applied to the fixed fee provider."
           },
           "providers": {
             "items": {
@@ -9409,6 +9417,39 @@
             "title": "Dhw Setpoint C",
             "description": "Hot water setpoint read from the heat pump; None = configuration."
           },
+          "power_limited_w": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Power Limited W",
+            "description": "Active \u00a714a dimming: electric limit of heat pump plus rod from now [W]; None = not dimmed."
+          },
+          "power_limited_hours": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Power Limited Hours",
+            "description": "Assumed remaining duration of the dimming [h].",
+            "default": 1.0
+          },
+          "separate_meter_price_reduction_amt_wh": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Separate Meter Price Reduction Amt Wh",
+            "description": "\u00a714a module 2: the heat pump has its own meter; its import price is the household price minus this reduction [currency/Wh, gross]. It then cannot use PV or battery energy. None = shared meter."
+          },
           "hours_since_legionella": {
             "anyOf": [
               {
@@ -10287,6 +10328,308 @@
           "hours"
         ],
         "title": "GesamtlastRequest"
+      },
+      "GridControl14aSettings-Input": {
+        "properties": {
+          "module": {
+            "type": "string",
+            "enum": [
+              "none",
+              "module1",
+              "module2",
+              "module1_3"
+            ],
+            "title": "Module",
+            "description": "Grid fee module: 'none', 'module1' (flat reduction), 'module2' (separate meter, reduced network energy price), 'module1_3' (module 1 plus time-variable network energy price).",
+            "default": "none",
+            "examples": [
+              "none",
+              "module1",
+              "module2",
+              "module1_3"
+            ]
+          },
+          "controllable_device_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Controllable Device Ids",
+            "description": "Device ids registered as controllable consumers (e.g. the heat pump). They are dimmed on a grid operator signal; with module 2 they are separately metered.",
+            "examples": [
+              [
+                "wbb12"
+              ]
+            ]
+          },
+          "regular_network_amt_kwh": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regular Network Amt Kwh",
+            "description": "Regular network energy price contained in the configured consumption fee [currency/kWh, net]. Needed for module 2 and module 3.",
+            "examples": [
+              0.075
+            ]
+          },
+          "module2_reduction_percent": {
+            "type": "number",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Module2 Reduction Percent",
+            "description": "Module 2: reduction of the network energy price of the device [%].",
+            "default": 60.0
+          },
+          "module3_network_amt_kwh": {
+            "$ref": "#/components/schemas/ValueTimeWindowSequence-Input",
+            "description": "Module 3: network energy price by time window [currency/kWh, net]; use 'months' to restrict windows to the quarters with module 3 prices. Times without a window keep the regular network energy price.",
+            "examples": [
+              {
+                "windows": [
+                  {
+                    "duration": "2 hours",
+                    "months": [
+                      1,
+                      2,
+                      3,
+                      10,
+                      11,
+                      12
+                    ],
+                    "start_time": "00:00",
+                    "value": 0.0432
+                  },
+                  {
+                    "duration": "4 hours",
+                    "months": [
+                      1,
+                      2,
+                      3,
+                      10,
+                      11,
+                      12
+                    ],
+                    "start_time": "02:00",
+                    "value": 0.0173
+                  },
+                  {
+                    "duration": "11 hours",
+                    "months": [
+                      1,
+                      2,
+                      3,
+                      10,
+                      11,
+                      12
+                    ],
+                    "start_time": "06:00",
+                    "value": 0.0432
+                  },
+                  {
+                    "duration": "3 hours",
+                    "months": [
+                      1,
+                      2,
+                      3,
+                      10,
+                      11,
+                      12
+                    ],
+                    "start_time": "17:00",
+                    "value": 0.0596
+                  },
+                  {
+                    "duration": "4 hours",
+                    "months": [
+                      1,
+                      2,
+                      3,
+                      10,
+                      11,
+                      12
+                    ],
+                    "start_time": "20:00",
+                    "value": 0.0432
+                  }
+                ]
+              }
+            ]
+          },
+          "dimming_power_w": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Dimming Power W",
+            "description": "Power a controllable device may still draw while dimmed [W] (4.2 kW, or 0.4 x connected power for larger devices).",
+            "default": 4200.0
+          },
+          "dimming_hold_hours": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Dimming Hold Hours",
+            "description": "While a dimming signal is active, assume it lasts this long from now [h].",
+            "default": 1.0
+          }
+        },
+        "type": "object",
+        "title": "GridControl14aSettings",
+        "description": "\u00a714a EnWG grid fee module and dimming of controllable consumers."
+      },
+      "GridControl14aSettings-Output": {
+        "properties": {
+          "module": {
+            "type": "string",
+            "enum": [
+              "none",
+              "module1",
+              "module2",
+              "module1_3"
+            ],
+            "title": "Module",
+            "description": "Grid fee module: 'none', 'module1' (flat reduction), 'module2' (separate meter, reduced network energy price), 'module1_3' (module 1 plus time-variable network energy price).",
+            "default": "none",
+            "examples": [
+              "none",
+              "module1",
+              "module2",
+              "module1_3"
+            ]
+          },
+          "controllable_device_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Controllable Device Ids",
+            "description": "Device ids registered as controllable consumers (e.g. the heat pump). They are dimmed on a grid operator signal; with module 2 they are separately metered.",
+            "examples": [
+              [
+                "wbb12"
+              ]
+            ]
+          },
+          "regular_network_amt_kwh": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regular Network Amt Kwh",
+            "description": "Regular network energy price contained in the configured consumption fee [currency/kWh, net]. Needed for module 2 and module 3.",
+            "examples": [
+              0.075
+            ]
+          },
+          "module2_reduction_percent": {
+            "type": "number",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Module2 Reduction Percent",
+            "description": "Module 2: reduction of the network energy price of the device [%].",
+            "default": 60.0
+          },
+          "module3_network_amt_kwh": {
+            "$ref": "#/components/schemas/ValueTimeWindowSequence-Output",
+            "description": "Module 3: network energy price by time window [currency/kWh, net]; use 'months' to restrict windows to the quarters with module 3 prices. Times without a window keep the regular network energy price.",
+            "examples": [
+              {
+                "windows": [
+                  {
+                    "duration": "2 hours",
+                    "months": [
+                      1,
+                      2,
+                      3,
+                      10,
+                      11,
+                      12
+                    ],
+                    "start_time": "00:00",
+                    "value": 0.0432
+                  },
+                  {
+                    "duration": "4 hours",
+                    "months": [
+                      1,
+                      2,
+                      3,
+                      10,
+                      11,
+                      12
+                    ],
+                    "start_time": "02:00",
+                    "value": 0.0173
+                  },
+                  {
+                    "duration": "11 hours",
+                    "months": [
+                      1,
+                      2,
+                      3,
+                      10,
+                      11,
+                      12
+                    ],
+                    "start_time": "06:00",
+                    "value": 0.0432
+                  },
+                  {
+                    "duration": "3 hours",
+                    "months": [
+                      1,
+                      2,
+                      3,
+                      10,
+                      11,
+                      12
+                    ],
+                    "start_time": "17:00",
+                    "value": 0.0596
+                  },
+                  {
+                    "duration": "4 hours",
+                    "months": [
+                      1,
+                      2,
+                      3,
+                      10,
+                      11,
+                      12
+                    ],
+                    "start_time": "20:00",
+                    "value": 0.0432
+                  }
+                ]
+              }
+            ]
+          },
+          "dimming_power_w": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Dimming Power W",
+            "description": "Power a controllable device may still draw while dimmed [W] (4.2 kW, or 0.4 x connected power for larger devices).",
+            "default": 4200.0
+          },
+          "dimming_hold_hours": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Dimming Hold Hours",
+            "description": "While a dimming signal is active, assume it lasts this long from now [h].",
+            "default": 1.0
+          }
+        },
+        "type": "object",
+        "title": "GridControl14aSettings",
+        "description": "\u00a714a EnWG grid fee module and dimming of controllable consumers."
       },
       "GridInterpolatorBackend": {
         "type": "string",
