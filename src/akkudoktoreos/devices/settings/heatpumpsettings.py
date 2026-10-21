@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pydantic import Field, computed_field, field_validator
+from pydantic import Field, computed_field, field_validator, model_validator
 
 from akkudoktoreos.config.configabc import (
     SettingsBaseModel,
@@ -157,6 +157,22 @@ class HeatPumpUnitSettings(SettingsBaseModel):
             "description": "Flow above tank temperature while charging hot water [K]."
         },
     )
+    max_dhw_c: float = Field(
+        default=60.0,
+        json_schema_extra={
+            "description": (
+                "Highest hot water temperature the heat pump reaches by itself (compressor, "
+                "without heating rod) [degC]; caps every hot water setpoint of the heat pump."
+            )
+        },
+    )
+    forced_overshoot_k: float = Field(
+        default=1.0,
+        ge=0,
+        json_schema_extra={
+            "description": "FORCED mode (SG Ready 4) heats until comfort.max_c + this offset [K]."
+        },
+    )
 
 
 def _default_draw_profile() -> list[float]:
@@ -196,8 +212,38 @@ class HeatPumpDhwSettings(SettingsBaseModel):
             )
         },
     )
+    raised_setpoint_c: Optional[float] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "Hot water setpoint while space heating is RAISED (SG Ready 3), if the heat "
+                "pump raises hot water on SG Ready; None = RAISED leaves hot water alone."
+            )
+        },
+    )
+    forced_setpoint_c: Optional[float] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "Hot water setpoint while space heating is FORCED (SG Ready 4); None = "
+                "FORCED leaves hot water alone."
+            )
+        },
+    )
     rod_power_w: float = Field(
-        default=0.0, ge=0, json_schema_extra={"description": "Heating rod power [W]; 0 = no rod."}
+        default=0.0,
+        ge=0,
+        json_schema_extra={"description": "External heating rod power [W]; 0 = no rod."},
+    )
+    rod_targets_c: list[float] = Field(
+        default_factory=lambda: [60.0, 70.0],
+        json_schema_extra={
+            "description": (
+                "Target temperatures the optimizer may give the heating rod [degC]; one "
+                "hot water option per value. Ignored without a rod."
+            ),
+            "examples": [[60.0, 70.0], [55.0], [65.0]],
+        },
     )
     rod_max_c: float = Field(
         default=70.0,
@@ -210,7 +256,11 @@ class HeatPumpDhwSettings(SettingsBaseModel):
         default=7,
         ge=1,
         json_schema_extra={
-            "description": "Reach legionella_c at least every N days (by the rod); None disables."
+            "description": (
+                "Reach legionella_c at least every N days; None disables (e.g. the heat pump "
+                "runs its own legionella program). Planned with whatever reaches the "
+                "temperature: a rod target or a raised/forced heat pump setpoint."
+            )
         },
     )
     draw_profile_wh: list[float] = Field(
@@ -224,6 +274,17 @@ class HeatPumpDhwSettings(SettingsBaseModel):
         if len(value) != 24 or any(v < 0 for v in value):
             raise ValueError("draw_profile_wh needs 24 non-negative hourly values.")
         return value
+
+    @field_validator("rod_targets_c")
+    @classmethod
+    def validate_rod_targets(cls, value: list[float]) -> list[float]:
+        return sorted(set(float(v) for v in value))
+
+    @model_validator(mode="after")
+    def validate_rod_targets_below_max(self) -> "HeatPumpDhwSettings":
+        if any(target > self.rod_max_c for target in self.rod_targets_c):
+            raise ValueError("rod_targets_c must not exceed rod_max_c.")
+        return self
 
     def draw_wh(self, start: DateTime, slot_hours: float) -> float:
         """Tapped energy in the slot starting at ``start`` [Wh]."""
@@ -275,22 +336,41 @@ class HeatPumpOptimizationSettings(SettingsBaseModel):
         min_length=1,
         json_schema_extra={
             "description": (
-                "Space heating modes the optimizer may choose: 0 REDUCED (SG Ready 1, "
-                "blocked), 1 NORMAL (SG Ready 2), 2 RAISED (SG Ready 3), 3 PREHEAT "
-                "(SG Ready 3 with all valves forced open; needs the KNX forced position)."
+                "Space heating modes the optimizer may choose: 0 REDUCED (room may cool to "
+                "the comfort minimum), 1 NORMAL, 2 RAISED (setpoint + raised_offset_k), "
+                "3 PREHEAT (comfort maximum with all valves forced open), 4 FORCED (forced "
+                "on, full capacity up to comfort maximum + forced_overshoot_k). Which "
+                "signal executes a mode is set in sg_ready_states."
             ),
-            "examples": [[0, 1, 2], [0, 1, 2, 3]],
+            "examples": [[0, 1, 2], [0, 1, 2, 3, 4], [1, 2]],
         },
     )
     dhw_modes: list[int] = Field(
-        default_factory=lambda: [0, 1, 2, 3],
+        default_factory=lambda: [0, 1, 2],
         min_length=1,
         json_schema_extra={
             "description": (
                 "Hot water modes the optimizer may choose: 0 HOLD (heat pump controller), "
-                "1 HEAT_PUMP (Warmwasser PUSH), 2 ROD_60, 3 ROD_70. Rod modes are dropped "
-                "while dhw.rod_power_w is 0."
+                "1 HEAT_PUMP (charge to the heat pump setpoint now, e.g. a PUSH contact), "
+                "2 ROD (heating rod to one of dhw.rod_targets_c; dropped without a rod)."
             ),
+            "examples": [[0, 1, 2], [0, 1], [0]],
+        },
+    )
+    sg_ready_states: dict[str, int] = Field(
+        default_factory=lambda: {
+            "REDUCED": 1,
+            "NORMAL": 2,
+            "RAISED": 3,
+            "PREHEAT": 3,
+            "FORCED": 4,
+        },
+        json_schema_extra={
+            "description": (
+                "SG Ready state reported for each heating mode (solution key "
+                "'<id>_sg_ready_state'). Adapt to the heat pump, e.g. REDUCED: 2 if the "
+                "heat pump must never be blocked."
+            )
         },
     )
     comfort_penalty_amt_per_kh: float = Field(
@@ -334,12 +414,30 @@ class HeatPumpOptimizationSettings(SettingsBaseModel):
         },
     )
 
-    @field_validator("heating_modes", "dhw_modes")
+    @field_validator("heating_modes")
     @classmethod
-    def validate_modes(cls, value: list[int]) -> list[int]:
-        if any(mode not in (0, 1, 2, 3) for mode in value):
-            raise ValueError("Modes are 0..3.")
+    def validate_heating_modes(cls, value: list[int]) -> list[int]:
+        if any(mode not in (0, 1, 2, 3, 4) for mode in value):
+            raise ValueError("Heating modes are 0..4.")
         return sorted(set(value))
+
+    @field_validator("dhw_modes")
+    @classmethod
+    def validate_dhw_modes(cls, value: list[int]) -> list[int]:
+        if any(mode not in (0, 1, 2) for mode in value):
+            raise ValueError("Hot water modes are 0..2.")
+        return sorted(set(value))
+
+    @field_validator("sg_ready_states")
+    @classmethod
+    def validate_sg_ready_states(cls, value: dict[str, int]) -> dict[str, int]:
+        defaults = {"REDUCED": 1, "NORMAL": 2, "RAISED": 3, "PREHEAT": 3, "FORCED": 4}
+        unknown = set(value) - set(defaults)
+        if unknown:
+            raise ValueError(f"Unknown heating modes in sg_ready_states: {sorted(unknown)}.")
+        if any(state not in (1, 2, 3, 4) for state in value.values()):
+            raise ValueError("SG Ready states are 1..4.")
+        return {**defaults, **value}
 
 
 class HeatPumpCommonSettings(DevicesBaseSettings):
@@ -429,6 +527,8 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
                 flow_spread_k=unit.flow_spread_k,
                 dhw_heat_w=unit.dhw_heat_w,
                 dhw_flow_overshoot_k=unit.dhw_flow_overshoot_k,
+                max_dhw_c=unit.max_dhw_c,
+                forced_overshoot_k=unit.forced_overshoot_k,
             ),
             comfort=ComfortParameters(raised_offset_k=self.comfort.raised_offset_k),
             dhw=DhwControlParameters(
@@ -437,6 +537,8 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
                 min_c=dhw.min_c,
                 rod_power_w=dhw.rod_power_w,
                 rod_max_c=dhw.rod_max_c,
+                raised_setpoint_c=dhw.raised_setpoint_c,
+                forced_setpoint_c=dhw.forced_setpoint_c,
             ),
             slot_hours=slot_hours,
         )

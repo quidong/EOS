@@ -17,15 +17,22 @@ Space heating (``HeatingMode``):
   operation"), at most the comfort maximum.
 - ``PREHEAT``: room target = comfort maximum with all valves forced open;
   charges the screed for later hours.
+- ``FORCED``: SG Ready "forced on" (state 4): the heat pump runs at full
+  capacity until the room reaches comfort maximum + ``forced_overshoot_k``.
+
+``RAISED`` and ``FORCED`` can also raise the hot water setpoint, as many heat
+pumps do on SG Ready 3/4 (``DhwControlParameters.raised_setpoint_c`` /
+``forced_setpoint_c``; None = the mode leaves hot water alone).
 
 Hot water (``DhwMode``):
 
 - ``HOLD``: no active charging; the heat pump only reheats when the tank falls
   below its switch-on temperature (setpoint minus hysteresis), as the heat pump
   controller would do on its own.
-- ``HEAT_PUMP``: charge to the heat pump setpoint now ("Warmwasser PUSH").
-- ``ROD_60`` / ``ROD_70``: the heating rod charges to 60 / 70 degC. The heat pump
-  never charges above its own setpoint (protects the compressor).
+- ``HEAT_PUMP``: charge to the heat pump setpoint now (e.g. "Warmwasser PUSH").
+- ``ROD``: the heating rod charges to a target temperature given per slot
+  (``rod_target_c``). The heat pump itself never charges above
+  ``HeatPumpParameters.max_dhw_c``.
 
 Comfort repair: if a mode would let the room fall below its comfort minimum or
 the tank below its minimum, the simulator raises the heat delivery as the
@@ -61,6 +68,7 @@ class HeatingMode(IntEnum):
     NORMAL = 1
     RAISED = 2
     PREHEAT = 3
+    FORCED = 4
 
 
 class DhwMode(IntEnum):
@@ -68,8 +76,7 @@ class DhwMode(IntEnum):
 
     HOLD = 0
     HEAT_PUMP = 1
-    ROD_60 = 2
-    ROD_70 = 3
+    ROD = 2
 
 
 @dataclass(frozen=True)
@@ -103,6 +110,12 @@ class HeatPumpParameters:
     slab_time_constant_h: float = 1.0
     """Time constant of the screed temperature correction [h]."""
 
+    max_dhw_c: float = 60.0
+    """Highest hot water temperature the heat pump reaches by itself [degC]."""
+
+    forced_overshoot_k: float = 1.0
+    """FORCED mode heats until comfort maximum + this offset [K]."""
+
 
 @dataclass(frozen=True)
 class ComfortParameters:
@@ -129,6 +142,13 @@ class DhwControlParameters:
     """Heating rod power [W]; 0 disables the rod."""
 
     rod_max_c: float = 70.0
+    """Highest tank temperature the rod may reach [degC]."""
+
+    raised_setpoint_c: Optional[float] = None
+    """Hot water setpoint while heating is RAISED (SG Ready 3); None = unchanged."""
+
+    forced_setpoint_c: Optional[float] = None
+    """Hot water setpoint while heating is FORCED (SG Ready 4); None = unchanged."""
 
 
 @dataclass
@@ -231,7 +251,22 @@ class HeatPumpSystem:
             return setpoint
         if mode == HeatingMode.RAISED:
             return min(setpoint + self.comfort.raised_offset_k, high)
+        if mode == HeatingMode.FORCED:
+            return high + self.hp.forced_overshoot_k
         return high
+
+    def dhw_setpoint_c(self, heating_mode: HeatingMode) -> float:
+        """Heat pump hot water setpoint in effect for the heating mode."""
+        setpoint = self.dhw.setpoint_c
+        if heating_mode == HeatingMode.RAISED and self.dhw.raised_setpoint_c is not None:
+            setpoint = max(setpoint, self.dhw.raised_setpoint_c)
+        elif heating_mode == HeatingMode.FORCED and self.dhw.forced_setpoint_c is not None:
+            setpoint = max(setpoint, self.dhw.forced_setpoint_c)
+        return min(setpoint, self.hp.max_dhw_c)
+
+    def reachable_dhw_c(self, heating_modes: "list[int] | tuple[int, ...]") -> float:
+        """Highest tank temperature the heat pump reaches with the given heating modes."""
+        return max(self.dhw_setpoint_c(HeatingMode(mode)) for mode in heating_modes)
 
     def _space_heat_capacity_w(self, outdoor_c: float, slab_c: float) -> tuple[float, float, float]:
         """Max space heat [W] within thermal, electric and flow limits; (heat, flow, cop)."""
@@ -279,13 +314,24 @@ class HeatPumpSystem:
         inputs: SlotInputs,
         heating_mode: HeatingMode = HeatingMode.NORMAL,
         dhw_mode: DhwMode = DhwMode.HOLD,
+        rod_target_c: Optional[float] = None,
     ) -> SlotResult:
-        """Advance one slot."""
+        """Advance one slot.
+
+        Args:
+            state: Thermal state at the start of the slot.
+            inputs: Exogenous inputs of the slot.
+            heating_mode: Space heating mode.
+            dhw_mode: Hot water mode.
+            rod_target_c: Rod target temperature in ``DhwMode.ROD``; defaults
+                to ``rod_max_c``.
+        """
         dt = self.dt
         notes: list[str] = []
         gains = self.building.gains_w(inputs.ghi_w_per_m2)
 
         # --- Hot water: decide heat pump share of the slot ---------------
+        hp_setpoint = self.dhw_setpoint_c(heating_mode)
         switch_on_c = self.dhw.setpoint_c - self.dhw.hysteresis_k
         # The controller checks continuously: a tank that falls below the
         # switch-on temperature within this slot starts a charge in this slot.
@@ -295,13 +341,18 @@ class HeatPumpSystem:
             or self.tank.step(state.dhw_c, 0.0, inputs.draw_wh) < switch_on_c
         )
         forced_dhw = False
-        if dhw_mode == DhwMode.HEAT_PUMP and state.dhw_c < self.dhw.setpoint_c - 0.2:
+        raised_dhw = hp_setpoint > self.dhw.setpoint_c
+        if (dhw_mode == DhwMode.HEAT_PUMP or raised_dhw) and state.dhw_c < hp_setpoint - 0.2:
             hp_dhw_active = True
         elif hp_dhw_active and dhw_mode != DhwMode.HEAT_PUMP and not state.hp_dhw_charging:
             forced_dhw = True  # own controller reheats below switch-on temperature
 
-        rod_target = {DhwMode.ROD_60: 60.0, DhwMode.ROD_70: self.dhw.rod_max_c}.get(dhw_mode)
-        rod_target = min(rod_target, self.dhw.rod_max_c) if rod_target is not None else None
+        rod_target: Optional[float] = None
+        if dhw_mode == DhwMode.ROD:
+            rod_target = min(
+                rod_target_c if rod_target_c is not None else self.dhw.rod_max_c,
+                self.dhw.rod_max_c,
+            )
 
         # Rod first (it can run in parallel to the heat pump on the tank).
         rod_w = 0.0
@@ -315,11 +366,11 @@ class HeatPumpSystem:
         dhw_fraction = 0.0
         cop_dhw = 0.0
         if hp_dhw_active:
-            need = self.tank.heat_to_reach(state.dhw_c, self.dhw.setpoint_c, inputs.draw_wh) - rod_w
+            need = self.tank.heat_to_reach(state.dhw_c, hp_setpoint, inputs.draw_wh) - rod_w
             if need > 0:
                 hp_dhw_w = min(self.hp.dhw_heat_w, need)
                 dhw_fraction = hp_dhw_w / self.hp.dhw_heat_w
-                flow_dhw = (state.dhw_c + self.dhw.setpoint_c) / 2 + self.hp.dhw_flow_overshoot_k
+                flow_dhw = (state.dhw_c + hp_setpoint) / 2 + self.hp.dhw_flow_overshoot_k
                 cop_dhw = self.cop.cop(inputs.outdoor_c, flow_dhw)
             else:
                 hp_dhw_active = False
@@ -328,6 +379,9 @@ class HeatPumpSystem:
         _, _, room_max = self.comfort_band(inputs)
         room_target = self._room_target(heating_mode, inputs)
         wanted = self._space_heat_demand_w(state, inputs.outdoor_c, gains, room_target)
+        if heating_mode == HeatingMode.FORCED:
+            room_max = room_target  # forced on: heat beyond the comfort maximum
+            wanted = float("inf")  # full capacity
         minimum = self._space_heat_demand_w(
             state,
             inputs.outdoor_c,
@@ -385,7 +439,7 @@ class HeatPumpSystem:
             state.slab_c, state.room_c, space_w, inputs.outdoor_c, gains
         )
         dhw = self.tank.step(state.dhw_c, hp_dhw_w + rod_w, inputs.draw_wh)
-        still_charging = hp_dhw_active and dhw < self.dhw.setpoint_c - 0.1
+        still_charging = hp_dhw_active and dhw < hp_setpoint - 0.1
 
         comfort_violation = max(0.0, inputs.comfort_min_c - room) * dt
         dhw_violation = max(0.0, self.dhw.min_c - dhw) * dt

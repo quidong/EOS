@@ -1,6 +1,6 @@
 {
   "devices": {"inverters": {"fronius": {"device_id": "fronius", "max_power_w": 20000.0}}},
-  "load": {"loadakkudoktor": {"loadakkudoktor_year_energy_kwh": 10000.0}, "provider": "LoadAkkudoktor"},
+  "load": {"loadakkudoktor": {"loadakkudoktor_year_energy_kwh": 6800.0}, "provider": "LoadAkkudoktor"},
   "pvforecast": {
     "planes": [
       {"inverter_model": "10000", "loss": 0.0, "module_model": "465", "modules_per_string": 19, "peakpower": 8.835, "strings_per_inverter": 1, "surface_azimuth": 115.3, "surface_tilt": 20.0},

@@ -7,8 +7,9 @@ Sie wird erst nach Abstimmung angelegt. Nichts davon ist in HA aktiv.
 
 Pro Wärmepumpe kommen zwei Gene pro Stunde in das Genom:
 
-- ein **Heizmodus**: 0 REDUCED, 1 NORMAL, 2 RAISED, 3 PREHEAT;
-- ein **Warmwassermodus**: 0 HOLD, 1 HEAT_PUMP, 2 ROD_60, 3 ROD_70.
+- ein **Heizmodus** aus `optimization.heating_modes`: 0 REDUCED, 1 NORMAL, 2 RAISED, 3 PREHEAT, 4 FORCED;
+- eine **Warmwasser-Option** aus `optimization.dhw_modes`: 0 HOLD, 1 HEAT_PUMP, 2 ROD. Für ROD gibt es eine
+  Option je Zieltemperatur in `dhw.rod_targets_c` (z. B. `ROD_60`, `ROD_70`).
 
 Batterie, E-Auto, Geräte und Wärmepumpe werden gemeinsam optimiert. Der Strom von Wärmepumpe und Heizstab läuft
 im Energiefluss vor dem Wechselrichter mit, so wie jeder andere Verbraucher.
@@ -21,19 +22,56 @@ In die Fitness gehen zusätzlich ein:
 - Moduswechsel (wenig Relaisschalten);
 - der Wert der am Horizontende gespeicherten Wärme.
 
-| Modus | SG Ready | Kontakte | Bedeutung |
-|---|---|---|---|
-| REDUCED | 1 (Sperre) | K1 an, K2 aus | Raum darf bis Komfortminimum auskühlen |
-| NORMAL | 2 | K1 aus, K2 aus | Heizkurve wie heute |
-| RAISED | 3 | K1 aus, K2 an | Anhebung (SG-Ready-WW-Anhebung = Aus!) |
-| PREHEAT | 3 + Ventile offen | wie RAISED + KNX-Zwangsstellung | erst nach KNX-Umbau freigeben |
-| HEAT_PUMP | – | DE2 „Warmwasser PUSH“ (oder Modbus-Select, s. u.) | WW auf WP-Sollwert |
-| ROD_60 / ROD_70 | – | Heizstab-Freigabe + Zieltemperatur | Heizstab, WP nie über eigenen Sollwert |
+### Generisch konfigurierbar
 
-SG-Ready-Zustand 4 wird nie ausgegeben. Legionellen laufen nur über den Heizstab. Fällig wird ein Lauf nach
-`legionella_interval_days` (Standard 7) ab dem letzten Messwert ≥ 59,5 °C. Ohne Messhistorie wird kein Lauf verlangt.
+Nichts ist auf eine Anlage festgelegt; alles steht je Gerät unter `devices.heat_pumps.<id>`:
 
-## 2. EOS-Konfiguration (Vorschlag)
+| Was | Einstellung | Standard |
+|---|---|---|
+| Erlaubte Heizmodi | `optimization.heating_modes` | `[0, 1, 2]` |
+| SG-Ready-Zustand je Modus | `optimization.sg_ready_states` | REDUCED 1, NORMAL 2, RAISED 3, PREHEAT 3, FORCED 4 |
+| Erlaubte Warmwasser-Modi | `optimization.dhw_modes` | `[0, 1, 2]` |
+| Heizstab vorhanden | `dhw.rod_power_w` (0 = kein Heizstab, ROD entfällt) | 0 |
+| Heizstab-Zieltemperaturen | `dhw.rod_targets_c`, Obergrenze `dhw.rod_max_c` | `[60, 70]`, 70 |
+| WW-Sollwert der WP | `dhw.setpoint_c` bzw. Messwert `<id>-dhw-setpoint` | 45 |
+| WW-Anhebung bei SG 3 / SG 4 | `dhw.raised_setpoint_c` / `dhw.forced_setpoint_c` (None = keine) | None |
+| Höchste WW-Temperatur der WP | `unit.max_dhw_c` | 60 |
+| FORCED: Überhöhung über Komfortmax. | `unit.forced_overshoot_k` | 1 K |
+| Legionellen | `dhw.legionella_c`, `dhw.legionella_interval_days` (None = aus) | 60 °C, 7 Tage |
+| Komfortband | `comfort.setpoint_c`, `comfort.max_c`, `comfort.min_c` (Zeitfenster) | 21 / 22 / 19,5–20,5 |
+| Strafen | `optimization.*_penalty_*` | s. Konfigurationsdoku |
+
+Bedeutung der Modi:
+
+| Modus | SG Ready (Standard) | Bedeutung |
+|---|---|---|
+| REDUCED | 1 | Raum darf bis Komfortminimum auskühlen |
+| NORMAL | 2 | Heizkurve wie ohne EOS |
+| RAISED | 3 | Raumziel Sollwert + `raised_offset_k`; WW nur mit `raised_setpoint_c` |
+| PREHEAT | 3 + Ventile offen | Raumziel Komfortmaximum, alle Ventile offen (Lösungswert `valves_forced`) |
+| FORCED | 4 | volle Leistung bis Komfortmaximum + `forced_overshoot_k`; WW nur mit `forced_setpoint_c` |
+| HEAT_PUMP | – | WW jetzt auf WP-Sollwert laden (z. B. PUSH-Kontakt) |
+| ROD_xx | – | Heizstab bis xx °C |
+
+Legionellenläufe plant EOS mit allem, was die Temperatur erreicht: der niedrigsten passenden Heizstab-Stufe oder,
+ohne Heizstab, einem Heizmodus, dessen WW-Sollwert (`raised_setpoint_c`/`forced_setpoint_c`, begrenzt durch
+`unit.max_dhw_c`) reicht. Erreicht nichts die Temperatur, plant EOS keinen Lauf und schreibt das ins Log. Fällig
+wird ein Lauf nach `legionella_interval_days` ab dem letzten Messwert ≥ `legionella_c` − 0,5 K; ohne Messhistorie
+wird kein Lauf verlangt.
+
+### Unsere Anlage (WBB 12)
+
+| Modus | Kontakte | Hinweis |
+|---|---|---|
+| REDUCED | K1 an, K2 aus (H1/H2, SG 1) | |
+| NORMAL | beide aus | |
+| RAISED | K1 aus, K2 an (SG 3) | SG-Ready-WW-Anhebung in der WP = Aus |
+| PREHEAT | wie RAISED + KNX-Zwangsstellung | erst nach KNX-Umbau freigeben |
+| FORCED | beide an (SG 4) | nicht freigegeben (Fußbodenheizung nimmt die Leistung nicht ab) |
+| HEAT_PUMP | K3 → Koppelrelais → **DE2** „Warmwasser PUSH“ | entschieden: DE2, kein Modbus |
+| ROD_60 / ROD_70 | Heizstab-Freigabe + Zieltemperatur | Heizstab 3 kW nach Einbau |
+
+## 2. EOS-Konfiguration (Vorschlag für unsere Anlage)
 
 ```json
 {
@@ -41,12 +79,14 @@ SG-Ready-Zustand 4 wird nie ausgegeben. Legionellen laufen nur über den Heizsta
     "max_heat_pumps": 1,
     "heat_pumps": {
       "wbb12": {
-        "dhw": {"volume_l": 190, "setpoint_c": 45, "rod_power_w": 3000, "legionella_interval_days": 7},
+        "dhw": {"volume_l": 190, "setpoint_c": 45, "rod_power_w": 3000, "rod_targets_c": [60, 70],
+                "legionella_interval_days": 7},
+        "unit": {"max_dhw_c": 55},
         "comfort": {"setpoint_c": 21.0, "max_c": 22.0},
         "optimization": {
           "heating_modes": [0, 1, 2],
-          "dhw_modes": [0, 1, 2, 3],
-          "load_forecast_includes_heat_pump": true
+          "dhw_modes": [0, 1, 2],
+          "load_forecast_includes_heat_pump": false
         }
       }
     }
@@ -78,7 +118,12 @@ SG-Ready-Zustand 4 wird nie ausgegeben. Legionellen laufen nur über den Heizsta
 Hinweise zur Konfiguration:
 
 - **`rod_power_w`** erst auf 3000 setzen, wenn der Heizstab eingebaut ist. Mit 0 bietet EOS keine Heizstab-Modi an und plant keine Legionellenläufe.
-- **`load_forecast_includes_heat_pump: true`** ist eine Übergangslösung. Die Lastprognose (LoadAkkudoktor mit 10.000 kWh/a) enthält heute die Wärmepumpe. EOS zieht deshalb den Status-quo-Verbrauch ab. Besser ist eine Prognose ohne WP. Dafür als Lastquelle `sensor.eos_grundlast_ohne_wp_gesamt` verwenden, die Jahresenergie entsprechend senken und danach den Schalter auf `false` stellen.
+- **Lastprognose ohne Wärmepumpe (umgesetzt 21.10.2026):** `load.loadakkudoktor.loadakkudoktor_year_energy_kwh`
+  von 10.000 auf 6.800 kWh/a gesenkt. Grundlage: WP elektrisch laut Weishaupt-Statistik 2.387 kWh vom 1.1.
+  bis 21.10.; hochgerechnet auf das Jahr etwa 3.200 kWh. Backup: `/data/rl29/EOS.config.before-load-base.json`.
+  Deshalb `load_forecast_includes_heat_pump: false`. Die KNX-Zähler passen noch nicht zusammen
+  (19.10.: Hausverbrauch 5,1 kWh, `sensor.energie_warmepumpe` 3,0 kWh, Weishaupt-Statistik 12 kWh), daher
+  noch keine messwertgestützte Prognose (`LoadAkkudoktorAdjusted`) auf Basis von `sensor.eos_grundlast_ohne_wp_gesamt`.
 - **Gebäudeparameter** kommen aus `scripts/rl29/calibrate_heatpump.py`. Die Defaults sind Schätzwerte.
 - Ein **Estrich-Messwert** existiert nicht. EOS schätzt ihn dann aus dem Gleichgewicht.
 
@@ -158,7 +203,7 @@ Sicherheitsautomationen (Entwurf):
 4. **Ausfall.** Ist EOS länger als 30 min nicht aktuell (`sensor.eos_*` unverändert), alle Kontakte aus und damit Normalbetrieb.
 5. **Betriebsmodus.** Bei Kühlen oder Warmwasser (Sommer) keine SG-Anhebung. Nur Warmwasser und Heizstab werden umgesetzt.
 
-**Option ohne DE2-Verdrahtung:** `select.wh_warmwasser_warmwasser_push` existiert bereits über Modbus. Ein PUSH ist ein seltener Schreibzugriff (≤ 2×/Tag) und betrifft keinen Sollwert. Das ist eine vertretbare Ausnahme von „Modbus nur lesen“ – bitte entscheiden.
+**Warmwasser PUSH:** entschieden für den Kontakt DE2 (K3 über Koppelrelais); Modbus bleibt nur lesend.
 
 ## 5. Stack: HA direkt statt Bridge (Vorschlag)
 

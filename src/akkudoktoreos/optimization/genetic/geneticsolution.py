@@ -40,9 +40,12 @@ def _mode_value(name: Any) -> float:
     """Numeric value of a heating or hot water mode name (see heatpumpgenes)."""
     from akkudoktoreos.devices.thermal.heatpump import DhwMode, HeatingMode
 
-    for enum in (HeatingMode, DhwMode):
-        if isinstance(name, str) and name in enum.__members__:
-            return float(enum[name].value)
+    if isinstance(name, str):
+        if name.startswith("ROD"):
+            return float(DhwMode.ROD)
+        for enum in (HeatingMode, DhwMode):
+            if name in enum.__members__:
+                return float(enum[name].value)
     return float(name)
 
 
