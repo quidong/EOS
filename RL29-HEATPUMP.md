@@ -186,8 +186,22 @@ Hinweise:
   `sensor.wh_eingange_ausgange_sg_ready_1/2` sind nur lesbar. Der Modbus-Weg bildet SG Ready deshalb über die
   Betriebsart des Heizkreises nach. Damit „Angehoben“ wirkt, muss die **Raumsolltemperatur Komfort** in der
   WP einmalig über **Normal** liegen. Heute stehen beide auf 23 °C (Absenk 22,5 °C).
-- **Kontakte.** Nach der Verdrahtung (K1/K2 → H1/H2, K3 → DE2) kommen zwei Skripte für den Kontakt-Weg dazu;
-  danach wird nur `input_select.eos_wp_ubertragungsweg` umgestellt.
+- **Kontakte (geplant, SG Ready 1.1).** Die SG-Eingänge werden als „Leistungsbegr. SGR 1.1“
+  konfiguriert (Eingänge → Eingang SGR1, wird auf SGR2 übertragen). Damit gilt laut Anleitung
+  (Kap. 6.7.7.3):
+
+  | Zustand | SGR1 (H1) | SGR2 (H2) |
+  |---|---|---|
+  | 1 Leistungsbegrenzung (Eingänge → Leistungsbegrenzung, 4,2 kW) | geschlossen | beliebig |
+  | 2 Normalbetrieb | offen | offen |
+  | 3 Erhöhter Betrieb | offen | geschlossen |
+
+  Es gibt keinen Zustand „Sperre“ und keinen „Zwangsbetrieb“ (also auch keine Elektroheizung über SG 4).
+  Das MVV-Steuerrelais (§14a) schaltet SGR1. HA schaltet nur SGR2 für „Angehoben“. Sind beide
+  geschlossen, gewinnt die Leistungsbegrenzung – eine Verriegelung ist nicht nötig.
+  „Reduziert“ läuft auch dann über Modbus (Betriebsart Absenk). **DE2** bleibt „Warmwasser PUSH“
+  (K3 über Koppelrelais), **DE1** „Taupunktwächter“. Danach wird nur
+  `input_select.eos_wp_ubertragungsweg` umgestellt; für SG 1 muss das Mapping dann auf 2 zeigen.
 - **Heizstab.** Die Umsetzung folgt nach dem Einbau (Modbus über den Proxy).
 - **Wirkung.** Die Automationen tun erst etwas, wenn EOS die Sensoren `sensor.eos_wbb12_heating_mode` und
   `sensor.eos_wbb12_dhw_mode` liefert (neues Image + Wärmepumpen-Konfiguration) **und** der Hauptschalter an ist.
