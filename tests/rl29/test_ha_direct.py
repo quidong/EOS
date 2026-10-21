@@ -135,3 +135,31 @@ def test_pv_provider_own_settings_win(config_eos, monkeypatch):
     PVForecastHomeAssistant.reset_instance()
     provider = PVForecastHomeAssistant()
     assert provider._api_base_and_token() == ("http://other:8123/api", "own")
+
+
+class TestStateToFloat:
+    """Binary HA states can be device measurements (e.g. a dimming signal)."""
+
+    @pytest.mark.parametrize(
+        ("state", "expected"),
+        [
+            ("on", 1.0),
+            ("off", 0.0),
+            ("ON", 1.0),
+            ("true", 1.0),
+            ("False", 0.0),
+            ("21.5", 21.5),
+            (" 3 ", 3.0),
+        ],
+    )
+    def test_conversion(self, state, expected):
+        from akkudoktoreos.adapter.homeassistant import state_to_float
+
+        assert state_to_float(state) == expected
+
+    @pytest.mark.parametrize("state", ["unavailable", "unknown", "abc"])
+    def test_non_numeric_raises(self, state):
+        from akkudoktoreos.adapter.homeassistant import state_to_float
+
+        with pytest.raises(ValueError):
+            state_to_float(state)
