@@ -59,17 +59,28 @@ ohne Heizstab, einem Heizmodus, dessen WW-Sollwert (`raised_setpoint_c`/`forced_
 wird ein Lauf nach `legionella_interval_days` ab dem letzten Messwert ≥ `legionella_c` − 0,5 K; ohne Messhistorie
 wird kein Lauf verlangt.
 
-### Unsere Anlage (WBB 12)
+### Schnittstelle EOS → Steuerung
 
-| Modus | Kontakte | Hinweis |
-|---|---|---|
-| REDUCED | K1 an, K2 aus (H1/H2, SG 1) | |
-| NORMAL | beide aus | |
-| RAISED | K1 aus, K2 an (SG 3) | SG-Ready-WW-Anhebung in der WP = Aus |
-| PREHEAT | wie RAISED + KNX-Zwangsstellung | erst nach KNX-Umbau freigeben |
-| FORCED | beide an (SG 4) | nicht freigegeben (Fußbodenheizung nimmt die Leistung nicht ab) |
-| HEAT_PUMP | K3 → Koppelrelais → **DE2** „Warmwasser PUSH“ | entschieden: DE2, kein Modbus |
-| ROD_60 / ROD_70 | Heizstab-Freigabe + Zieltemperatur | Heizstab 3 kW nach Einbau |
+EOS entscheidet nur, **was** die Wärmepumpe tun soll. **Wie** das bei der Anlage ankommt (Relaiskontakte,
+Modbus, KNX, Hersteller-API), entscheidet die Steuerung – bei uns Home Assistant (Abschnitt 4). EOS kennt
+keine Kontakte, Register oder Gruppenadressen.
+
+Signale je Viertelstunde (Lösungsschlüssel, in HA als `sensor.eos_<schlüssel>`):
+
+| Schlüssel | Bedeutung |
+|---|---|
+| `<id>_heating_mode` | 0 REDUCED, 1 NORMAL, 2 RAISED, 3 PREHEAT, 4 FORCED |
+| `<id>_sg_ready_state` | SG-Ready-Zustand 1–4 laut `optimization.sg_ready_states` |
+| `<id>_valves_forced` | 1 = alle Heizkreisventile öffnen (PREHEAT) |
+| `<id>_dhw_mode` | 0 HOLD, 1 HEAT_PUMP, 2 ROD |
+| `<id>_dhw_charge` | 1 = Warmwasser jetzt auf WP-Sollwert laden |
+| `<id>_rod_target_c` | Heizstab-Zieltemperatur, 0 = aus |
+| `<id>_energy_wh`, `<id>_rod_energy_wh` | geplanter Strom WP + Heizstab, Heizstab allein |
+| `<id>_room_temperature_c`, `<id>_slab_temperature_c`, `<id>_dhw_temperature_c` | erwartete Temperaturen |
+
+Zusätzlich gibt es FRBC-Anweisungen je Aktor: `<id>_space_heating` mit dem Heizmodus und `<id>_dhw` mit
+HOLD, HEAT_PUMP oder ROD_<Temperatur>. In HA erscheinen sie als `sensor.eos_<id>_space_heating` und
+`sensor.eos_<id>_dhw`.
 
 ## 2. EOS-Konfiguration (Vorschlag für unsere Anlage)
 
@@ -100,7 +111,7 @@ wird kein Lauf verlangt.
       },
       "solution_entity_ids": [
         "sensor.eos_wbb12_sg_ready_state",
-        "sensor.eos_wbb12_dhw_push",
+        "sensor.eos_wbb12_dhw_charge",
         "sensor.eos_wbb12_rod_target_c",
         "sensor.eos_wbb12_valves_forced",
         "sensor.eos_wbb12_room_temperature_c",
@@ -158,19 +169,32 @@ python3 scripts/rl29/gridfee_14a.py --module module1_3 --device wbb12 \
 
 ## 4. HA-Dispatcher (ENTWURF – nicht angelegt)
 
-Voraussetzungen:
+In HA wird entschieden, über welchen Weg jedes Signal an die Anlage geht. Das ist pro Signal umschaltbar,
+ohne EOS anzufassen. Vorschlag: ein `input_select` je Signal (z. B. `input_select.wp_sg_ready_weg`)
+und ein Skript je Weg.
 
-- 4-fach-Aktor verdrahtet: K1/K2 an H1/H2, K3 über Koppelrelais an DE2.
-- Heizstab-Aktor vorhanden.
+| Signal | Mögliche Wege bei der WBB 12 | Stand |
+|---|---|---|
+| SG-Ready-Zustand | Kontakte H1/H2 (K1/K2 des 4-fach-Aktors) **oder** Modbus (falls die WP SG Ready per Register annimmt) | Kontakte vorgesehen, Weg in HA wählbar |
+| WW jetzt laden | Kontakt DE2 „Warmwasser PUSH“ (K3 über Koppelrelais) **oder** Modbus `select.wh_warmwasser_warmwasser_push` | DE2 vorgesehen, Weg in HA wählbar |
+| Ventile offen | KNX-Zwangsstellung | nach ETS-Umbau |
+| Heizstab-Ziel | Modbus über den Proxy (my-PV) | nach Einbau |
 
-Die Entitätsnamen `switch.wp_sg_k1` usw. sind Platzhalter.
+Unsere Anlage:
+
+- Die SG-Ready-WW-Anhebung in der WP steht auf „Aus“.
+- FORCED (SG 4) ist in EOS nicht freigegeben, weil die Fußbodenheizung die Leistung nicht abnimmt.
+- PREHEAT wird erst nach dem KNX-Umbau freigegeben.
+
+Der folgende Entwurf zeigt den Weg über Kontakte. Für Modbus tauscht man nur die Aktionen im jeweiligen
+Skript aus. Die Entitätsnamen `switch.wp_sg_k1` usw. sind Platzhalter.
 
 ```yaml
 alias: EOS – Wärmepumpe Modi umsetzen
 mode: queued
 triggers:
   - trigger: state
-    entity_id: [sensor.eos_wbb12_sg_ready_state, sensor.eos_wbb12_dhw_push, sensor.eos_wbb12_rod_target_c]
+    entity_id: [sensor.eos_wbb12_sg_ready_state, sensor.eos_wbb12_dhw_charge, sensor.eos_wbb12_rod_target_c]
   - trigger: time_pattern
     minutes: /5
 conditions:
@@ -212,7 +236,7 @@ Sicherheitsautomationen (Entwurf):
 4. **Ausfall.** Ist EOS länger als 30 min nicht aktuell (`sensor.eos_*` unverändert), alle Kontakte aus und damit Normalbetrieb.
 5. **Betriebsmodus.** Bei Kühlen oder Warmwasser (Sommer) keine SG-Anhebung. Nur Warmwasser und Heizstab werden umgesetzt.
 
-**Warmwasser PUSH:** entschieden für den Kontakt DE2 (K3 über Koppelrelais); Modbus bleibt nur lesend.
+**Warmwasser laden:** Der Weg (DE2-Kontakt oder Modbus-Select) wird in HA gewählt, siehe Tabelle oben.
 
 ## 5. Stack: HA direkt statt Bridge (Vorschlag)
 

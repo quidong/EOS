@@ -235,7 +235,7 @@ class TestSeedsAndMutation:
         )
         result = plan_result(plan, genes)
         assert result["sg_ready_state"] == [1, 2, 3, 2]
-        assert result["dhw_push"] == [False, True, False, False]
+        assert result["dhw_charge"] == [False, True, False, False]
         assert result["rod_target_c"] == [0.0, 0.0, 60.0, 70.0]
         assert result["heating_mode"][0] == "REDUCED"
         assert 4 not in result["sg_ready_state"]
@@ -436,7 +436,7 @@ class TestOptimizer:
         for column in (
             "wbb12_heating_mode",
             "wbb12_sg_ready_state",
-            "wbb12_dhw_push",
+            "wbb12_dhw_charge",
             "wbb12_rod_target_c",
             "wbb12_energy_wh",
             "wbb12_room_temperature_c",

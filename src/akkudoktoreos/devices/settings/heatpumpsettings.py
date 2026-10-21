@@ -351,7 +351,7 @@ class HeatPumpOptimizationSettings(SettingsBaseModel):
         json_schema_extra={
             "description": (
                 "Hot water modes the optimizer may choose: 0 HOLD (heat pump controller), "
-                "1 HEAT_PUMP (charge to the heat pump setpoint now, e.g. a PUSH contact), "
+                "1 HEAT_PUMP (charge to the heat pump setpoint now), "
                 "2 ROD (heating rod to one of dhw.rod_targets_c; dropped without a rod)."
             ),
             "examples": [[0, 1, 2], [0, 1], [0]],
@@ -368,8 +368,9 @@ class HeatPumpOptimizationSettings(SettingsBaseModel):
         json_schema_extra={
             "description": (
                 "SG Ready state reported for each heating mode (solution key "
-                "'<id>_sg_ready_state'). Adapt to the heat pump, e.g. REDUCED: 2 if the "
-                "heat pump must never be blocked."
+                "'<id>_sg_ready_state'), e.g. REDUCED: 2 if the heat pump must never be "
+                "blocked. EOS only reports the state; how it is transmitted (contacts, "
+                "Modbus, ...) is up to the controller."
             )
         },
     )

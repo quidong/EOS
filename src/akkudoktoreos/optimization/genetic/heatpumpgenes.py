@@ -3,9 +3,13 @@
 The heat pump is optimized jointly with battery, EV and appliances: every
 configured heat pump adds two blocks of genes to the genome, one space heating
 mode and one hot water mode per gene period (one hour). The genome stays
-compact (48 h horizon: 96 genes per heat pump) and the modes match what the
-actuators can execute without frequent switching (SG Ready relays, the
-"Warmwasser PUSH" contact and the heating rod).
+compact (48 h horizon: 96 genes per heat pump) and the modes change rarely.
+
+EOS only decides *what* the heat pump should do. The solution carries
+abstract signals per slot (heating mode, SG Ready state, charge hot water now,
+rod target temperature, valves forced open); *how* they reach the heat pump
+(relay contacts, Modbus, KNX, a vendor API) is decided by the controller, e.g.
+Home Assistant.
 
 Per candidate, the thermal model (``akkudoktoreos.devices.thermal``)
 turns the modes into the electric load of heat pump and heating rod per slot.
@@ -842,7 +846,7 @@ def plan_result(plan: HeatPumpRunPlan, genes: Sequence[int]) -> dict[str, Any]:
     result = dict(detail)
     result["sg_ready_state"] = [states[name] for name in heating_names]
     result["valves_forced"] = [HeatingMode[name] == HeatingMode.PREHEAT for name in heating_names]
-    result["dhw_push"] = [name == DhwMode.HEAT_PUMP.name for name in dhw_names]
+    result["dhw_charge"] = [name == DhwMode.HEAT_PUMP.name for name in dhw_names]
     result["summary"] = {
         "extra_cost_amt": float(outcome.extra_cost),
         "comfort_violation_kh": float(outcome.comfort_kh),

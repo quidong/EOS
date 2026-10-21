@@ -29,7 +29,7 @@ Hot water (``DhwMode``):
 - ``HOLD``: no active charging; the heat pump only reheats when the tank falls
   below its switch-on temperature (setpoint minus hysteresis), as the heat pump
   controller would do on its own.
-- ``HEAT_PUMP``: charge to the heat pump setpoint now (e.g. "Warmwasser PUSH").
+- ``HEAT_PUMP``: charge to the heat pump setpoint now (hot water boost).
 - ``ROD``: the heating rod charges to a target temperature given per slot
   (``rod_target_c``). The heat pump itself never charges above
   ``HeatPumpParameters.max_dhw_c``.

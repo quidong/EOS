@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610210469672640"
+    "version": "v0.3.0.dev2610211131382109"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -10240,7 +10240,7 @@
             },
             "type": "object",
             "title": "Heat Pumps",
-            "description": "Per heat pump device_id (RL29 fork): schedule and predicted states per slot - heating_mode, dhw_mode, sg_ready_state, dhw_push, rod_target_c, valves_forced, electric_wh, hp_electric_wh, rod_electric_wh, room_c, slab_c, dhw_c, flow_c, cop_space - and a summary."
+            "description": "Per heat pump device_id (RL29 fork): schedule and predicted states per slot - heating_mode, dhw_mode, sg_ready_state, dhw_charge, rod_target_c, valves_forced, electric_wh, hp_electric_wh, rod_electric_wh, room_c, slab_c, dhw_c, flow_c, cop_space - and a summary."
           },
           "appliance_deadline_missed": {
             "additionalProperties": {
@@ -11117,7 +11117,7 @@
             "type": "array",
             "minItems": 1,
             "title": "Dhw Modes",
-            "description": "Hot water modes the optimizer may choose: 0 HOLD (heat pump controller), 1 HEAT_PUMP (charge to the heat pump setpoint now, e.g. a PUSH contact), 2 ROD (heating rod to one of dhw.rod_targets_c; dropped without a rod).",
+            "description": "Hot water modes the optimizer may choose: 0 HOLD (heat pump controller), 1 HEAT_PUMP (charge to the heat pump setpoint now), 2 ROD (heating rod to one of dhw.rod_targets_c; dropped without a rod).",
             "examples": [
               [
                 0,
@@ -11139,7 +11139,7 @@
             },
             "type": "object",
             "title": "Sg Ready States",
-            "description": "SG Ready state reported for each heating mode (solution key '<id>_sg_ready_state'). Adapt to the heat pump, e.g. REDUCED: 2 if the heat pump must never be blocked."
+            "description": "SG Ready state reported for each heating mode (solution key '<id>_sg_ready_state'), e.g. REDUCED: 2 if the heat pump must never be blocked. EOS only reports the state; how it is transmitted (contacts, Modbus, ...) is up to the controller."
           },
           "comfort_penalty_amt_per_kh": {
             "type": "number",
