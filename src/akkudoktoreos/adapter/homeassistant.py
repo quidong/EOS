@@ -31,6 +31,19 @@ HEADERS = {
 
 HOMEASSISTANT_ENTITY_ID_PREFIX = "sensor.eos_"
 
+# RL29 fork: binary entities (binary_sensor, switch, input_boolean) are device
+# measurements too, e.g. a grid operator dimming signal ("<id>-power-limited").
+_BINARY_STATES = {"on": 1.0, "off": 0.0, "true": 1.0, "false": 0.0, "open": 1.0, "closed": 0.0}
+
+
+def state_to_float(state: str) -> float:
+    """Numeric value of a Home Assistant state; on/off style states map to 1/0."""
+    text = str(state).strip()
+    binary = _BINARY_STATES.get(text.lower())
+    if binary is not None:
+        return binary
+    return float(text)
+
 
 def homeassistant_api(
     base_url: Optional[str], token: Optional[str], purpose: str = "adapter.homeassistant"
@@ -568,7 +581,7 @@ class HomeAssistantAdapter(AdapterProvider):
                             state = self.get_entity_state(entity_id)
                             logger.debug(f"Entity {entity_id}: {state}")
                             if state:
-                                measurement_value = float(state)
+                                measurement_value = state_to_float(state)
                                 await self.measurement.update_value(
                                     self.ems_start_datetime, measurement_key, measurement_value
                                 )
