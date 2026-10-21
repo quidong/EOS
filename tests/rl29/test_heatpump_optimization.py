@@ -234,11 +234,12 @@ class TestSeedsAndMutation:
             [DhwMode.HOLD, DhwMode.HEAT_PUMP, (DhwMode.ROD, 60.0), (DhwMode.ROD, 70.0)],
         )
         result = plan_result(plan, genes)
-        assert result["sg_ready_state"] == [1, 2, 3, 2]
-        assert result["dhw_charge"] == [False, True, False, False]
+        assert result["dhw_mode"] == ["HOLD", "HEAT_PUMP", "ROD_60", "ROD_70"]
         assert result["rod_target_c"] == [0.0, 0.0, 60.0, 70.0]
         assert result["heating_mode"][0] == "REDUCED"
-        assert 4 not in result["sg_ready_state"]
+        # Signal mapping (SG Ready, valves, hot water command) is the controller's job.
+        for key in ("sg_ready_state", "valves_forced", "dhw_charge"):
+            assert key not in result
         assert len(result["room_c"]) == 4
         assert result["summary"]["electric_wh"] == pytest.approx(sum(result["electric_wh"]))
 
@@ -254,7 +255,7 @@ class TestGenericConfiguration:
         forced = plan.evaluate(forced_genes)
         assert sum(forced.electric_wh) > sum(raised.electric_wh)
         result = plan_result(plan, forced_genes)
-        assert set(result["sg_ready_state"]) == {4}
+        assert set(result["heating_mode"]) == {"FORCED"}
         # Heats beyond the comfort maximum by at most the overshoot (+ model lag).
         assert max(result["room_c"]) > 22.0
         assert max(result["room_c"]) < 22.0 + 1.0 + 0.5
@@ -265,13 +266,10 @@ class TestGenericConfiguration:
         genes = plan.genes_for_modes([HeatingMode.FORCED] * 24, [DhwMode.HOLD] * 24)
         assert set(plan.modes(genes)[0]) == {HeatingMode.RAISED}
 
-    def test_sg_ready_mapping_is_configurable(self):
-        plan = make_plan(optimization={"sg_ready_states": {"REDUCED": 2, "RAISED": 4}})
-        genes = plan.genes_for_modes(
-            [HeatingMode.REDUCED, HeatingMode.NORMAL, HeatingMode.RAISED, HeatingMode.NORMAL] * 6,
-            [DhwMode.HOLD] * 24,
-        )
-        assert plan_result(plan, genes)["sg_ready_state"][:4] == [2, 2, 4, 2]
+    def test_sg_ready_mapping_is_not_an_eos_setting(self):
+        """Which SG Ready state executes a mode is mapped in the controller."""
+        settings = HeatPumpCommonSettings(device_id="hp")
+        assert "sg_ready_states" not in type(settings.optimization).model_fields
 
     def test_custom_rod_targets(self):
         plan = make_plan(dhw={"rod_targets_c": [65.0, 55.0], "rod_max_c": 65.0})
@@ -333,8 +331,6 @@ class TestGenericConfiguration:
         [
             {"optimization": {"heating_modes": [5]}},
             {"optimization": {"dhw_modes": [3]}},
-            {"optimization": {"sg_ready_states": {"NORMAL": 5}}},
-            {"optimization": {"sg_ready_states": {"BOOST": 3}}},
             {"dhw": {"rod_targets_c": [75.0], "rod_max_c": 70.0}},
         ],
     )
@@ -435,15 +431,15 @@ class TestOptimizer:
         table = (await solution.optimization_solution()).solution.to_dataframe()
         for column in (
             "wbb12_heating_mode",
-            "wbb12_sg_ready_state",
-            "wbb12_dhw_charge",
+            "wbb12_dhw_mode",
             "wbb12_rod_target_c",
             "wbb12_energy_wh",
             "wbb12_room_temperature_c",
             "wbb12_dhw_temperature_c",
         ):
             assert column in table.columns
-        assert set(table["wbb12_sg_ready_state"]) <= {1.0, 2.0, 3.0}
+        assert set(table["wbb12_heating_mode"]) <= {0.0, 1.0, 2.0}
+        assert "wbb12_sg_ready_state" not in table.columns
         plan = solution.energy_management_plan()
         actuators = {
             instruction.actuator_id

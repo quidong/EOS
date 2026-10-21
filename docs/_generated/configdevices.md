@@ -271,13 +271,6 @@ config path from ``self.device_id`` without needing an external index.
                            1,
                            2
                        ],
-                       "sg_ready_states": {
-                           "REDUCED": 1,
-                           "NORMAL": 2,
-                           "RAISED": 3,
-                           "PREHEAT": 3,
-                           "FORCED": 4
-                       },
                        "comfort_penalty_amt_per_kh": 1.0,
                        "dhw_penalty_amt_per_kh": 0.5,
                        "legionella_penalty_amt": 2.0,
@@ -566,13 +559,6 @@ config path from ``self.device_id`` without needing an external index.
                            1,
                            2
                        ],
-                       "sg_ready_states": {
-                           "REDUCED": 1,
-                           "NORMAL": 2,
-                           "RAISED": 3,
-                           "PREHEAT": 3,
-                           "FORCED": 4
-                       },
                        "comfort_penalty_amt_per_kh": 1.0,
                        "dhw_penalty_amt_per_kh": 0.5,
                        "legionella_penalty_amt": 2.0,
