@@ -180,7 +180,9 @@
                        "max_flow_c": 45.0,
                        "flow_spread_k": 3.0,
                        "dhw_heat_w": 5000.0,
-                       "dhw_flow_overshoot_k": 7.0
+                       "dhw_flow_overshoot_k": 7.0,
+                       "max_dhw_c": 60.0,
+                       "forced_overshoot_k": 1.0
                    },
                    "dhw": {
                        "volume_l": 190.0,
@@ -189,7 +191,13 @@
                        "setpoint_c": 45.0,
                        "hysteresis_k": 5.0,
                        "min_c": 38.0,
+                       "raised_setpoint_c": null,
+                       "forced_setpoint_c": null,
                        "rod_power_w": 3000.0,
+                       "rod_targets_c": [
+                           60.0,
+                           70.0
+                       ],
                        "rod_max_c": 70.0,
                        "legionella_c": 60.0,
                        "legionella_interval_days": 7,
@@ -265,9 +273,15 @@
                        "dhw_modes": [
                            0,
                            1,
-                           2,
-                           3
+                           2
                        ],
+                       "sg_ready_states": {
+                           "REDUCED": 1,
+                           "NORMAL": 2,
+                           "RAISED": 3,
+                           "PREHEAT": 3,
+                           "FORCED": 4
+                       },
                        "comfort_penalty_amt_per_kh": 1.0,
                        "dhw_penalty_amt_per_kh": 0.5,
                        "legionella_penalty_amt": 2.0,

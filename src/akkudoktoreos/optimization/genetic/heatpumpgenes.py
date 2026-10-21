@@ -45,16 +45,15 @@ from akkudoktoreos.devices.thermal.heatpump import (
 )
 from akkudoktoreos.optimization.genetic.geneticabc import GeneticParametersBaseModel
 
-# SG Ready state per space heating mode. State 4 (forced on) is never used:
-# the underfloor heating cannot take the heat away fast enough.
-SG_READY_STATE = {
-    HeatingMode.REDUCED: 1,
-    HeatingMode.NORMAL: 2,
-    HeatingMode.RAISED: 3,
-    HeatingMode.PREHEAT: 3,
+# SG Ready state reported per space heating mode; configurable per device
+# (devices.heat_pumps.<id>.optimization.sg_ready_states).
+DEFAULT_SG_READY_STATES = {
+    "REDUCED": 1,
+    "NORMAL": 2,
+    "RAISED": 3,
+    "PREHEAT": 3,
+    "FORCED": 4,
 }
-
-ROD_MODES = (DhwMode.ROD_60, DhwMode.ROD_70)
 
 
 class GeneticHeatPumpParameters(GeneticParametersBaseModel):
@@ -104,6 +103,28 @@ def _nearest(allowed: Sequence[int], wanted: int) -> int:
     return best
 
 
+@dataclass(frozen=True)
+class DhwOption:
+    """One hot water choice of a gene period: a mode and, for the rod, its target."""
+
+    mode: DhwMode
+    rod_target_c: Optional[float] = None
+
+    @property
+    def label(self) -> str:
+        """Operation mode id, e.g. ``HOLD``, ``HEAT_PUMP``, ``ROD_60``."""
+        if self.mode == DhwMode.ROD and self.rod_target_c is not None:
+            return f"ROD_{self.rod_target_c:g}"
+        return self.mode.name
+
+
+def dhw_mode_value(label: str) -> float:
+    """Numeric hot water mode of an operation mode id (``ROD_60`` -> 2)."""
+    if label.startswith("ROD"):
+        return float(DhwMode.ROD)
+    return float(DhwMode[label])
+
+
 @dataclass
 class HeatPumpOutcome:
     """Result of the thermal simulation of one heat pump gene combination."""
@@ -130,7 +151,7 @@ class HeatPumpRunPlan:
     initial: ThermalState
     slots_per_gene: int
     heating_modes: tuple[int, ...]
-    dhw_modes: tuple[int, ...]
+    dhw_options: tuple[DhwOption, ...]
     comfort_penalty: float
     dhw_penalty: float
     legionella_penalty: float
@@ -143,6 +164,7 @@ class HeatPumpRunPlan:
     legionella_deadline_slot: Optional[int] = None
     """Slot by which the tank has to reach legionella_c; None = no requirement."""
     load_includes_heat_pump: bool = False
+    sg_ready_states: dict[str, int] = field(default_factory=lambda: dict(DEFAULT_SG_READY_STATES))
     _cache: dict[tuple[int, ...], HeatPumpOutcome] = field(default_factory=dict, repr=False)
 
     CACHE_SIZE = 20000
@@ -162,25 +184,76 @@ class HeatPumpRunPlan:
     def upper_bounds(self) -> list[int]:
         """Highest gene value per gene."""
         return [len(self.heating_modes) - 1] * self.n_periods + [
-            len(self.dhw_modes) - 1
+            len(self.dhw_options) - 1
         ] * self.n_periods
 
-    def genes_for_modes(self, heating: Sequence[int], dhw: Sequence[int]) -> list[int]:
-        """Encode mode values per period (nearest allowed mode)."""
-        return [_nearest(self.heating_modes, mode) for mode in heating] + [
-            _nearest(self.dhw_modes, mode) for mode in dhw
+    # --- option lookup -------------------------------------------------
+
+    def heating_index(self, mode: int) -> int:
+        """Gene value of the allowed heating mode closest to ``mode``."""
+        return _nearest(self.heating_modes, int(mode))
+
+    def dhw_index(self, mode: int, rod_target_c: Optional[float] = None) -> int:
+        """Gene value of the hot water option closest to ``mode`` (and rod target)."""
+        candidates = [i for i, o in enumerate(self.dhw_options) if o.mode == mode]
+        if not candidates:
+            # Fall back to the closest mode value (ROD -> HEAT_PUMP -> HOLD).
+            modes = [int(o.mode) for o in self.dhw_options]
+            return _nearest(modes, int(mode))
+        if rod_target_c is None:
+            return candidates[0]
+        return min(
+            candidates,
+            key=lambda i: abs((self.dhw_options[i].rod_target_c or 0.0) - rod_target_c),
+        )
+
+    def rod_index_reaching(self, temperature_c: float) -> Optional[int]:
+        """Lowest rod option whose target reaches ``temperature_c``."""
+        reaching = [
+            i
+            for i, o in enumerate(self.dhw_options)
+            if o.mode == DhwMode.ROD and (o.rod_target_c or 0.0) >= temperature_c - 0.5
         ]
+        if not reaching:
+            return None
+        return min(reaching, key=lambda i: self.dhw_options[i].rod_target_c or 0.0)
+
+    def heating_mode_reaching_dhw(self, temperature_c: float) -> Optional[int]:
+        """Allowed heating mode whose hot water setpoint reaches ``temperature_c``."""
+        reaching = [
+            mode
+            for mode in self.heating_modes
+            if self.system.dhw_setpoint_c(HeatingMode(mode)) >= temperature_c - 0.5
+        ]
+        return min(reaching) if reaching else None
+
+    def genes_for_modes(self, heating: Sequence[int], dhw: Sequence[Any]) -> list[int]:
+        """Encode modes per period.
+
+        ``heating`` holds heating mode values; ``dhw`` holds ``DhwOption``,
+        ``(mode, rod_target)`` tuples or plain hot water mode values (the
+        lowest rod target for ``DhwMode.ROD``).
+        """
+        dhw_genes = []
+        for entry in dhw:
+            if isinstance(entry, DhwOption):
+                dhw_genes.append(self.dhw_index(entry.mode, entry.rod_target_c))
+            elif isinstance(entry, tuple):
+                dhw_genes.append(self.dhw_index(entry[0], entry[1]))
+            else:
+                dhw_genes.append(self.dhw_index(int(entry)))
+        return [self.heating_index(mode) for mode in heating] + dhw_genes
 
     def default_genes(self) -> list[int]:
         """Status quo: NORMAL heating, hot water left to the heat pump controller."""
         n = self.n_periods
         return self.genes_for_modes([HeatingMode.NORMAL] * n, [DhwMode.HOLD] * n)
 
-    def modes(self, genes: Sequence[int]) -> tuple[list[HeatingMode], list[DhwMode]]:
-        """Mode per period."""
+    def modes(self, genes: Sequence[int]) -> tuple[list[HeatingMode], list[DhwOption]]:
+        """Heating mode and hot water option per period."""
         n = self.n_periods
         heating = [HeatingMode(self.heating_modes[int(g)]) for g in genes[:n]]
-        dhw = [DhwMode(self.dhw_modes[int(g)]) for g in genes[n : 2 * n]]
+        dhw = [self.dhw_options[int(g)] for g in genes[n : 2 * n]]
         return heating, dhw
 
     # ------------------------------------------------------------------
@@ -219,6 +292,7 @@ class HeatPumpRunPlan:
             for name in (
                 "heating_mode",
                 "dhw_mode",
+                "rod_target_c",
                 "electric_wh",
                 "hp_electric_wh",
                 "rod_electric_wh",
@@ -234,7 +308,8 @@ class HeatPumpRunPlan:
                 rows[name] = []
         for slot, inputs in enumerate(self.inputs):
             period = slot // spg
-            result = step(state, inputs, heating[period], dhw[period])
+            option = dhw[period]
+            result = step(state, inputs, heating[period], option.mode, option.rod_target_c)
             state = result.state
             energy = result.hp_electric_wh + result.rod_electric_wh
             electric.append(energy)
@@ -246,7 +321,12 @@ class HeatPumpRunPlan:
                 reached_by_deadline = True
             if detail:
                 rows["heating_mode"].append(heating[period].name)
-                rows["dhw_mode"].append(dhw[period].name)
+                rows["dhw_mode"].append(option.label)
+                rows["rod_target_c"].append(
+                    float(option.rod_target_c)
+                    if option.mode == DhwMode.ROD and option.rod_target_c
+                    else 0.0
+                )
                 rows["electric_wh"].append(energy)
                 rows["hp_electric_wh"].append(result.hp_electric_wh)
                 rows["rod_electric_wh"].append(result.rod_electric_wh)
@@ -316,8 +396,9 @@ class HeatPumpRunPlan:
 
         Status quo, PV-led (raise heating and charge hot water while PV covers
         it, heating rod on large surplus), price-led (raise in cheap, reduce in
-        expensive hours) and both combined. A due legionella heat-up is placed
-        on the best rod hours before its deadline in each of them.
+        expensive hours) and both combined. Only allowed modes are used. A due
+        legionella heat-up is placed on the best hours before its deadline in
+        each of them.
         """
         n = self.n_periods
         spg = self.slots_per_gene
@@ -336,77 +417,101 @@ class HeatPumpRunPlan:
         low = ordered[len(ordered) // 4]
         high = ordered[(3 * len(ordered)) // 4]
         rod_wh = self.system.dhw.rod_power_w
-        preheat_allowed = HeatingMode.PREHEAT in self.heating_modes
+        rods = [i for i, o in enumerate(self.dhw_options) if o.mode == DhwMode.ROD]
+        lowest_rod = (
+            min(rods, key=lambda i: self.dhw_options[i].rod_target_c or 0.0) if rods else None
+        )
+        hold = self.dhw_index(DhwMode.HOLD)
+        push = self.dhw_index(DhwMode.HEAT_PUMP)
+        allowed = set(self.heating_modes)
+
+        def strongest(*modes: int) -> int:
+            for mode in modes:
+                if mode in allowed:
+                    return mode
+            return HeatingMode.NORMAL
 
         def pv_modes(p: int) -> tuple[Optional[int], Optional[int]]:
-            if surplus[p] > 2500 and preheat_allowed:
-                heat: Optional[int] = HeatingMode.PREHEAT
+            heat: Optional[int] = None
+            if surplus[p] > 2500:
+                heat = strongest(HeatingMode.PREHEAT, HeatingMode.RAISED)
             elif surplus[p] > 1000:
-                heat = HeatingMode.RAISED
-            else:
-                heat = None
+                heat = strongest(HeatingMode.RAISED)
             water: Optional[int] = None
-            if rod_wh > 0 and surplus[p] > rod_wh + 500:
-                water = DhwMode.ROD_60
+            if lowest_rod is not None and surplus[p] > rod_wh + 500:
+                water = lowest_rod
             elif surplus[p] > 1500:
-                water = DhwMode.HEAT_PUMP
+                water = push
             return heat, water
 
         def price_modes(p: int) -> tuple[int, int]:
             if price[p] <= low:
-                return HeatingMode.RAISED, DhwMode.HEAT_PUMP
+                return strongest(HeatingMode.RAISED), push
             if price[p] >= high:
-                return HeatingMode.REDUCED, DhwMode.HOLD
-            return HeatingMode.NORMAL, DhwMode.HOLD
+                return strongest(HeatingMode.REDUCED), hold
+            return HeatingMode.NORMAL, hold
 
-        status_quo = ([HeatingMode.NORMAL] * n, [DhwMode.HOLD] * n)
+        normal = self.heating_index(HeatingMode.NORMAL)
+        status_quo = ([normal] * n, [hold] * n)
         pv_led: tuple[list[int], list[int]] = ([], [])
         price_led: tuple[list[int], list[int]] = ([], [])
         combined: tuple[list[int], list[int]] = ([], [])
         for p in range(n):
             heat_pv, water_pv = pv_modes(p)
             heat_price, water_price = price_modes(p)
-            pv_led[0].append(heat_pv if heat_pv is not None else HeatingMode.NORMAL)
-            pv_led[1].append(water_pv if water_pv is not None else DhwMode.HOLD)
-            price_led[0].append(heat_price)
+            pv_led[0].append(self.heating_index(heat_pv if heat_pv is not None else 1))
+            pv_led[1].append(water_pv if water_pv is not None else hold)
+            price_led[0].append(self.heating_index(heat_price))
             price_led[1].append(water_price)
-            combined[0].append(heat_pv if heat_pv is not None else heat_price)
+            combined[0].append(self.heating_index(heat_pv if heat_pv is not None else heat_price))
             combined[1].append(water_pv if water_pv is not None else water_price)
 
-        candidates = []
-        for heat, water in (status_quo, pv_led, price_led, combined):
-            water = list(water)
-            self._place_legionella(water, surplus, price)
-            candidates.append(self.genes_for_modes(heat, water))
         unique: dict[tuple[int, ...], list[int]] = {}
-        for genes in candidates:
+        for heat, water in (status_quo, pv_led, price_led, combined):
+            heat, water = list(heat), list(water)
+            self._place_legionella(heat, water, surplus, price)
+            genes = heat + water
             unique.setdefault(tuple(genes), genes)
         return list(unique.values())
 
-    def _place_legionella(self, water: list[int], surplus: list[float], price: list[float]) -> None:
-        """Put the rod on the two best consecutive periods before the deadline."""
+    def _place_legionella(
+        self, heat: list[int], water: list[int], surplus: list[float], price: list[float]
+    ) -> None:
+        """Plan a due legionella heat-up on the two best periods before the deadline.
+
+        Uses the lowest rod target that reaches the temperature; without one,
+        a heating mode whose hot water setpoint reaches it (SG Ready raise) with
+        an active hot water charge. ``heat`` and ``water`` hold gene values.
+        """
         deadline = self.legionella_deadline_slot
-        if deadline is None or not any(mode in ROD_MODES for mode in self.dhw_modes):
+        if deadline is None:
+            return
+        rod = self.rod_index_reaching(self.legionella_c)
+        mode = None if rod is not None else self.heating_mode_reaching_dhw(self.legionella_c)
+        if rod is None and mode is None:
             return
         last_period = max(0, min(self.n_periods - 1, (deadline - 1) // self.slots_per_gene))
-        if any(water[p] in ROD_MODES for p in range(last_period + 1)):
+        if rod is not None and any(water[p] == rod for p in range(last_period + 1)):
             return
-        if last_period < 1:
-            water[0] = DhwMode.ROD_60
-            return
-        candidates = range(last_period)
-        best = max(candidates, key=lambda p: (surplus[p] + surplus[p + 1], -price[p]))
-        water[best] = DhwMode.ROD_60
-        water[best + 1] = DhwMode.ROD_60
+        periods = [0] if last_period < 1 else None
+        if periods is None:
+            best = max(range(last_period), key=lambda p: (surplus[p] + surplus[p + 1], -price[p]))
+            periods = [best, best + 1]
+        for p in periods:
+            if rod is not None:
+                water[p] = rod
+            elif mode is not None:
+                heat[p] = self.heating_index(mode)
+                water[p] = self.dhw_index(DhwMode.HEAT_PUMP)
 
     def mutate(self, genes: list[int], rng: random.Random | Any = random) -> bool:
         """Change a single period or a block of periods in one dimension."""
         n = self.n_periods
         dimension = rng.randrange(2)
-        upper = (len(self.heating_modes) if dimension == 0 else len(self.dhw_modes)) - 1
+        upper = (len(self.heating_modes) if dimension == 0 else len(self.dhw_options)) - 1
         if upper <= 0:
             dimension = 1 - dimension
-            upper = (len(self.heating_modes) if dimension == 0 else len(self.dhw_modes)) - 1
+            upper = (len(self.heating_modes) if dimension == 0 else len(self.dhw_options)) - 1
             if upper <= 0:
                 return False
         offset = dimension * n
@@ -587,12 +692,19 @@ def build_run_plan(
     )
     initial = ThermalState(slab_c=slab, room_c=room, dhw_c=dhw)
 
-    # Allowed modes; rod modes only with a rod.
+    # Allowed modes; one rod option per configured target, only with a rod.
     opt = settings.optimization
     heating_modes = tuple(opt.heating_modes)
-    dhw_modes = tuple(
-        mode for mode in opt.dhw_modes if mode not in ROD_MODES or settings.dhw.rod_power_w > 0
-    ) or (int(DhwMode.HOLD),)
+    options: list[DhwOption] = []
+    for mode in opt.dhw_modes:
+        if mode == DhwMode.ROD:
+            if settings.dhw.rod_power_w > 0:
+                options.extend(
+                    DhwOption(DhwMode.ROD, target) for target in settings.dhw.rod_targets_c
+                )
+        else:
+            options.append(DhwOption(DhwMode(mode)))
+    dhw_options = tuple(options) or (DhwOption(DhwMode.HOLD),)
 
     # Value of stored heat: average import price over the horizon divided by
     # the COP the heat pump would need to deliver the heat later.
@@ -606,10 +718,24 @@ def build_run_plan(
     cop_space = system.cop.cop(mean_outdoor, flow_ref)
     cop_dhw = system.cop.cop(mean_outdoor, system.dhw.setpoint_c + system.hp.dhw_flow_overshoot_k)
 
-    # Legionella requirement (only with a rod that may run).
+    # Legionella requirement, only if some allowed option reaches the
+    # temperature: a rod target or a raised/forced heat pump setpoint.
     deadline_slot: Optional[int] = None
     interval_days = settings.dhw.legionella_interval_days
-    if interval_days is not None and any(mode in ROD_MODES for mode in dhw_modes):
+    legionella_c = settings.dhw.legionella_c
+    reachable = any(
+        o.mode == DhwMode.ROD and (o.rod_target_c or 0.0) >= legionella_c - 0.5 for o in dhw_options
+    ) or (
+        any(o.mode == DhwMode.HEAT_PUMP for o in dhw_options)
+        and system.reachable_dhw_c(heating_modes) >= legionella_c - 0.5
+    )
+    if interval_days is not None and not reachable:
+        logger.info(
+            "Heat pump {}: no allowed mode reaches {} degC; legionella heat-up not planned.",
+            parameters.device_id,
+            legionella_c,
+        )
+    if interval_days is not None and reachable:
         since = parameters.hours_since_legionella
         if since is None:
             logger.info(
@@ -629,7 +755,7 @@ def build_run_plan(
         initial=initial,
         slots_per_gene=max(1, round(1.0 / slot_hours)),
         heating_modes=heating_modes,
-        dhw_modes=dhw_modes,
+        dhw_options=dhw_options,
         comfort_penalty=opt.comfort_penalty_amt_per_kh,
         dhw_penalty=opt.dhw_penalty_amt_per_kh,
         legionella_penalty=opt.legionella_penalty_amt,
@@ -639,6 +765,7 @@ def build_run_plan(
         legionella_c=settings.dhw.legionella_c,
         legionella_deadline_slot=deadline_slot,
         load_includes_heat_pump=opt.load_forecast_includes_heat_pump,
+        sg_ready_states=dict(opt.sg_ready_states),
     )
 
 
@@ -648,21 +775,11 @@ def plan_result(plan: HeatPumpRunPlan, genes: Sequence[int]) -> dict[str, Any]:
     detail = outcome.detail or {}
     heating_names = detail.get("heating_mode", [])
     dhw_names = detail.get("dhw_mode", [])
-    rod_max = plan.system.dhw.rod_max_c
-    rod_target = []
-    for name in dhw_names:
-        mode = DhwMode[name]
-        if mode == DhwMode.ROD_60:
-            rod_target.append(min(60.0, rod_max))
-        elif mode == DhwMode.ROD_70:
-            rod_target.append(rod_max)
-        else:
-            rod_target.append(0.0)
+    states = {**DEFAULT_SG_READY_STATES, **plan.sg_ready_states}
     result = dict(detail)
-    result["sg_ready_state"] = [SG_READY_STATE[HeatingMode[name]] for name in heating_names]
+    result["sg_ready_state"] = [states[name] for name in heating_names]
     result["valves_forced"] = [HeatingMode[name] == HeatingMode.PREHEAT for name in heating_names]
-    result["dhw_push"] = [DhwMode[name] == DhwMode.HEAT_PUMP for name in dhw_names]
-    result["rod_target_c"] = rod_target
+    result["dhw_push"] = [name == DhwMode.HEAT_PUMP.name for name in dhw_names]
     result["summary"] = {
         "extra_cost_amt": float(outcome.extra_cost),
         "comfort_violation_kh": float(outcome.comfort_kh),

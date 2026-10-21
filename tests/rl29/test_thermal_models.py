@@ -229,7 +229,7 @@ class TestHeatPumpSystem:
         sim = system()
         state = ThermalState(21.0, 20.0, 35.0)
         limited = SlotInputs(**{**COLD.__dict__, "max_electric_w": 1500.0})
-        result = sim.step(state, limited, HeatingMode.PREHEAT, DhwMode.ROD_70)
+        result = sim.step(state, limited, HeatingMode.PREHEAT, DhwMode.ROD)
         assert result.electric_wh <= 1500.0 * 0.25 + 1e-6
         assert "power limit" in result.notes
         # The rod is cut before space heating.
@@ -247,7 +247,7 @@ class TestHeatPumpSystem:
     def test_rod_charges_to_70(self):
         sim = system()
         state = ThermalState(23.0, 21.0, 45.0)
-        state, results = run(sim, state, COLD, (HeatingMode.NORMAL, DhwMode.ROD_70), 48)
+        state, results = run(sim, state, COLD, (HeatingMode.NORMAL, DhwMode.ROD), 48)
         assert state.dhw_c == pytest.approx(70.0, abs=0.3)
         rod_kwh = sum(r.rod_electric_wh for r in results) / 1000
         # 25 K x 0.221 kWh/K plus standby losses and tapping-free hours.

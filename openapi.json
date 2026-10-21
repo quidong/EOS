@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610202272112784"
+    "version": "v0.3.0.dev2610210475020436"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -10648,12 +10648,56 @@
             "description": "Comfort minimum of the tank [degC]; below the heat pump switch-on temperature, which the tank briefly undershoots while tapping.",
             "default": 38.0
           },
+          "raised_setpoint_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raised Setpoint C",
+            "description": "Hot water setpoint while space heating is RAISED (SG Ready 3), if the heat pump raises hot water on SG Ready; None = RAISED leaves hot water alone."
+          },
+          "forced_setpoint_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forced Setpoint C",
+            "description": "Hot water setpoint while space heating is FORCED (SG Ready 4); None = FORCED leaves hot water alone."
+          },
           "rod_power_w": {
             "type": "number",
             "minimum": 0.0,
             "title": "Rod Power W",
-            "description": "Heating rod power [W]; 0 = no rod.",
+            "description": "External heating rod power [W]; 0 = no rod.",
             "default": 0.0
+          },
+          "rod_targets_c": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Rod Targets C",
+            "description": "Target temperatures the optimizer may give the heating rod [degC]; one hot water option per value. Ignored without a rod.",
+            "examples": [
+              [
+                60.0,
+                70.0
+              ],
+              [
+                55.0
+              ],
+              [
+                65.0
+              ]
+            ]
           },
           "rod_max_c": {
             "type": "number",
@@ -10678,7 +10722,7 @@
               }
             ],
             "title": "Legionella Interval Days",
-            "description": "Reach legionella_c at least every N days (by the rod); None disables.",
+            "description": "Reach legionella_c at least every N days; None disables (e.g. the heat pump runs its own legionella program). Planned with whatever reaches the temperature: a rod target or a raised/forced heat pump setpoint.",
             "default": 7
           },
           "draw_profile_wh": {
@@ -10703,7 +10747,7 @@
             "type": "array",
             "minItems": 1,
             "title": "Heating Modes",
-            "description": "Space heating modes the optimizer may choose: 0 REDUCED (SG Ready 1, blocked), 1 NORMAL (SG Ready 2), 2 RAISED (SG Ready 3), 3 PREHEAT (SG Ready 3 with all valves forced open; needs the KNX forced position).",
+            "description": "Space heating modes the optimizer may choose: 0 REDUCED (room may cool to the comfort minimum), 1 NORMAL, 2 RAISED (setpoint + raised_offset_k), 3 PREHEAT (comfort maximum with all valves forced open), 4 FORCED (forced on, full capacity up to comfort maximum + forced_overshoot_k). Which signal executes a mode is set in sg_ready_states.",
             "examples": [
               [
                 0,
@@ -10714,7 +10758,12 @@
                 0,
                 1,
                 2,
-                3
+                3,
+                4
+              ],
+              [
+                1,
+                2
               ]
             ]
           },
@@ -10725,7 +10774,29 @@
             "type": "array",
             "minItems": 1,
             "title": "Dhw Modes",
-            "description": "Hot water modes the optimizer may choose: 0 HOLD (heat pump controller), 1 HEAT_PUMP (Warmwasser PUSH), 2 ROD_60, 3 ROD_70. Rod modes are dropped while dhw.rod_power_w is 0."
+            "description": "Hot water modes the optimizer may choose: 0 HOLD (heat pump controller), 1 HEAT_PUMP (charge to the heat pump setpoint now, e.g. a PUSH contact), 2 ROD (heating rod to one of dhw.rod_targets_c; dropped without a rod).",
+            "examples": [
+              [
+                0,
+                1,
+                2
+              ],
+              [
+                0,
+                1
+              ],
+              [
+                0
+              ]
+            ]
+          },
+          "sg_ready_states": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Sg Ready States",
+            "description": "SG Ready state reported for each heating mode (solution key '<id>_sg_ready_state'). Adapt to the heat pump, e.g. REDUCED: 2 if the heat pump must never be blocked."
           },
           "comfort_penalty_amt_per_kh": {
             "type": "number",
@@ -10831,6 +10902,19 @@
             "title": "Dhw Flow Overshoot K",
             "description": "Flow above tank temperature while charging hot water [K].",
             "default": 7.0
+          },
+          "max_dhw_c": {
+            "type": "number",
+            "title": "Max Dhw C",
+            "description": "Highest hot water temperature the heat pump reaches by itself (compressor, without heating rod) [degC]; caps every hot water setpoint of the heat pump.",
+            "default": 60.0
+          },
+          "forced_overshoot_k": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Forced Overshoot K",
+            "description": "FORCED mode (SG Ready 4) heats until comfort.max_c + this offset [K].",
+            "default": 1.0
           }
         },
         "type": "object",

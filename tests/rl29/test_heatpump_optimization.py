@@ -47,7 +47,8 @@ def make_plan(
     prices: list[float] | None = None,
     **settings: Any,
 ):
-    device = HeatPumpCommonSettings(device_id="wbb12", dhw={"rod_power_w": rod_w}, **settings)
+    dhw = {"rod_power_w": rod_w, **settings.pop("dhw", {})}
+    device = HeatPumpCommonSettings(device_id="wbb12", dhw=dhw, **settings)
     params = GeneticHeatPumpParameters(
         device_id="wbb12",
         settings=device,
@@ -78,11 +79,11 @@ class TestRunPlan:
         assert plan.n_genes == 48
         heating, dhw = plan.modes(plan.default_genes())
         assert set(heating) == {HeatingMode.NORMAL}
-        assert set(dhw) == {DhwMode.HOLD}
+        assert {option.mode for option in dhw} == {DhwMode.HOLD}
         assert plan.valid(plan.default_genes())
         # Default modes: PREHEAT needs the KNX forced valve position first.
         assert plan.heating_modes == (0, 1, 2)
-        assert plan.dhw_modes == (0, 1, 2, 3)
+        assert [o.label for o in plan.dhw_options] == ["HOLD", "HEAT_PUMP", "ROD_60", "ROD_70"]
 
     def test_quarter_hour_slots_share_hourly_genes(self):
         plan = make_plan(n_slots=96, slot_hours=0.25)
@@ -91,7 +92,7 @@ class TestRunPlan:
 
     def test_rod_modes_need_a_rod(self):
         plan = make_plan(rod_w=0.0)
-        assert plan.dhw_modes == (0, 1)
+        assert [o.label for o in plan.dhw_options] == ["HOLD", "HEAT_PUMP"]
         assert plan.legionella_deadline_slot is None
 
     def test_status_quo_keeps_comfort(self):
@@ -148,7 +149,7 @@ class TestRunPlan:
                 "windows": [{"start_time": "17:00", "duration": "2 hours", "value": 1500}]
             },
         )
-        genes = plan.genes_for_modes([HeatingMode.RAISED] * 24, [DhwMode.ROD_70] * 24)
+        genes = plan.genes_for_modes([HeatingMode.RAISED] * 24, [(DhwMode.ROD, 70.0)] * 24)
         outcome = plan.evaluate(genes)
         # T0 is 10:00 local: slots 7 and 8 are 17:00 and 18:00.
         assert outcome.electric_wh[7] <= 1500.0 + 1e-6
@@ -173,7 +174,7 @@ class TestLegionella:
         assert outcome.legionella_ok is True
         assert outcome.extra_cost < status_quo.extra_cost
         _, dhw = plan.modes(seeds[0])
-        assert any(mode in (DhwMode.ROD_60, DhwMode.ROD_70) for mode in dhw[:12])
+        assert any(option.mode == DhwMode.ROD for option in dhw[:12])
 
     def test_overdue_heat_up_is_required_within_the_horizon(self):
         plan = make_plan(hours_since_legionella=30 * 24)
@@ -188,7 +189,7 @@ class TestSeedsAndMutation:
         seeds = plan.heuristic_genes(pv, [300.0] * 24, [0.0003] * 24)
         heating, dhw = plan.modes(seeds[1])
         assert all(mode == HeatingMode.RAISED for mode in heating[2:6])
-        assert all(mode == DhwMode.ROD_60 for mode in dhw[2:6])
+        assert all(option.label == "ROD_60" for option in dhw[2:6])
         assert heating[10] == HeatingMode.NORMAL
 
     def test_price_led_seed_follows_prices(self):
@@ -230,7 +231,7 @@ class TestSeedsAndMutation:
         plan = make_plan(n_slots=4)
         genes = plan.genes_for_modes(
             [HeatingMode.REDUCED, HeatingMode.NORMAL, HeatingMode.RAISED, HeatingMode.NORMAL],
-            [DhwMode.HOLD, DhwMode.HEAT_PUMP, DhwMode.ROD_60, DhwMode.ROD_70],
+            [DhwMode.HOLD, DhwMode.HEAT_PUMP, (DhwMode.ROD, 60.0), (DhwMode.ROD, 70.0)],
         )
         result = plan_result(plan, genes)
         assert result["sg_ready_state"] == [1, 2, 3, 2]
@@ -240,6 +241,106 @@ class TestSeedsAndMutation:
         assert 4 not in result["sg_ready_state"]
         assert len(result["room_c"]) == 4
         assert result["summary"]["electric_wh"] == pytest.approx(sum(result["electric_wh"]))
+
+
+class TestGenericConfiguration:
+    """Nothing is specific to one installation: modes, signals and targets are set per device."""
+
+    def test_forced_mode_sg_ready_4_when_allowed(self):
+        plan = make_plan(optimization={"heating_modes": [0, 1, 2, 3, 4]})
+        assert HeatingMode.FORCED in plan.heating_modes
+        raised = plan.evaluate(plan.genes_for_modes([HeatingMode.RAISED] * 24, [DhwMode.HOLD] * 24))
+        forced_genes = plan.genes_for_modes([HeatingMode.FORCED] * 24, [DhwMode.HOLD] * 24)
+        forced = plan.evaluate(forced_genes)
+        assert sum(forced.electric_wh) > sum(raised.electric_wh)
+        result = plan_result(plan, forced_genes)
+        assert set(result["sg_ready_state"]) == {4}
+        # Heats beyond the comfort maximum by at most the overshoot (+ model lag).
+        assert max(result["room_c"]) > 22.0
+        assert max(result["room_c"]) < 22.0 + 1.0 + 0.5
+
+    def test_forced_mode_not_offered_by_default(self):
+        plan = make_plan()
+        assert HeatingMode.FORCED not in plan.heating_modes
+        genes = plan.genes_for_modes([HeatingMode.FORCED] * 24, [DhwMode.HOLD] * 24)
+        assert set(plan.modes(genes)[0]) == {HeatingMode.RAISED}
+
+    def test_sg_ready_mapping_is_configurable(self):
+        plan = make_plan(optimization={"sg_ready_states": {"REDUCED": 2, "RAISED": 4}})
+        genes = plan.genes_for_modes(
+            [HeatingMode.REDUCED, HeatingMode.NORMAL, HeatingMode.RAISED, HeatingMode.NORMAL] * 6,
+            [DhwMode.HOLD] * 24,
+        )
+        assert plan_result(plan, genes)["sg_ready_state"][:4] == [2, 2, 4, 2]
+
+    def test_custom_rod_targets(self):
+        plan = make_plan(dhw={"rod_targets_c": [65.0, 55.0], "rod_max_c": 65.0})
+        assert [o.label for o in plan.dhw_options] == ["HOLD", "HEAT_PUMP", "ROD_55", "ROD_65"]
+        genes = plan.genes_for_modes([HeatingMode.NORMAL] * 24, [(DhwMode.ROD, 55.0)] * 24)
+        result = plan_result(plan, genes)
+        assert set(result["rod_target_c"]) == {55.0}
+        assert max(result["dhw_c"]) == pytest.approx(55.0, abs=0.6)
+
+    def test_without_rod_and_push_only_hold_remains(self):
+        plan = make_plan(rod_w=0.0, optimization={"dhw_modes": [0]})
+        assert [o.label for o in plan.dhw_options] == ["HOLD"]
+        assert plan.upper_bounds()[-1] == 0
+
+    def test_rod_below_legionella_temperature_plans_no_legionella(self):
+        plan = make_plan(
+            hours_since_legionella=7 * 24 - 12, dhw={"rod_targets_c": [55.0], "rod_max_c": 55.0}
+        )
+        assert plan.legionella_deadline_slot is None
+
+    def test_legionella_by_heat_pump_on_sg_ready_4(self):
+        """No external rod: the heat pump reaches 62 degC on forced operation."""
+        plan = make_plan(
+            rod_w=0.0,
+            hours_since_legionella=7 * 24 - 12,
+            dhw={"forced_setpoint_c": 62.0},
+            unit={"max_dhw_c": 65.0},
+            optimization={"heating_modes": [0, 1, 2, 4]},
+        )
+        assert plan.legionella_deadline_slot == 12
+        seeds = plan.heuristic_genes([0.0] * 24, [300.0] * 24, [0.0003] * 24)
+        outcome = plan.evaluate(seeds[0])
+        assert outcome.legionella_ok is True
+        heating, dhw = plan.modes(seeds[0])
+        assert HeatingMode.FORCED in heating[:12]
+        assert any(option.mode == DhwMode.HEAT_PUMP for option in dhw[:12])
+
+    def test_heat_pump_dhw_capped_by_its_maximum(self):
+        plan = make_plan(
+            rod_w=0.0,
+            dhw={"raised_setpoint_c": 70.0},
+            unit={"max_dhw_c": 52.0},
+        )
+        genes = plan.genes_for_modes([HeatingMode.RAISED] * 24, [DhwMode.HEAT_PUMP] * 24)
+        result = plan_result(plan, genes)
+        assert max(result["dhw_c"]) <= 52.0 + 0.1
+        assert max(result["dhw_c"]) > 50.0
+
+    def test_raised_setpoint_off_leaves_hot_water_alone(self):
+        plan = make_plan(rod_w=0.0)
+        normal = plan_result(plan, plan.default_genes())
+        raised = plan_result(
+            plan, plan.genes_for_modes([HeatingMode.RAISED] * 24, [DhwMode.HOLD] * 24)
+        )
+        assert max(raised["dhw_c"]) == pytest.approx(max(normal["dhw_c"]), abs=0.2)
+
+    @pytest.mark.parametrize(
+        "settings",
+        [
+            {"optimization": {"heating_modes": [5]}},
+            {"optimization": {"dhw_modes": [3]}},
+            {"optimization": {"sg_ready_states": {"NORMAL": 5}}},
+            {"optimization": {"sg_ready_states": {"BOOST": 3}}},
+            {"dhw": {"rod_targets_c": [75.0], "rod_max_c": 70.0}},
+        ],
+    )
+    def test_invalid_settings_rejected(self, settings):
+        with pytest.raises(ValueError):
+            HeatPumpCommonSettings(device_id="hp", **settings)
 
 
 # ----------------------------------------------------------------------
@@ -356,7 +457,7 @@ class TestOptimizer:
             if isinstance(instruction, FRBCInstruction)
             and instruction.actuator_id == "wbb12_space_heating"
         }
-        assert modes <= {"REDUCED", "NORMAL", "RAISED", "PREHEAT"}
+        assert modes <= {"REDUCED", "NORMAL", "RAISED", "PREHEAT", "FORCED"}
 
     def test_joint_optimization_beats_status_quo(self, config_eos: ConfigEOS):
         """Cheap first hours, expensive evening: heat early, coast later."""

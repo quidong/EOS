@@ -1,9 +1,0 @@
-{
-    "general": {
-        "version": "0.3.0.dev2610202286989377",
-        "data_output_subpath": "output"
-    },
-    "cache": {
-        "subpath": "cache"
-    }
-}
