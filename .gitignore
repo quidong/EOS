@@ -269,3 +269,4 @@ tests/testdata/docs/
 
 # FastHTML session key
 .sesskey
+EOS.config.[0-9]*
