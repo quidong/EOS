@@ -180,6 +180,13 @@ HA übernimmt das Mapping (Modus → Signal) und den Übertragungsweg. Angelegt 
 | `automation.eos_warmepumpe_heizmodus_umsetzen` | setzt `sensor.eos_wp_sg_ready_soll` (2 min entprellt) über den gewählten Weg um |
 | `automation.eos_warmepumpe_warmwasser_laden` | löst die WW-Ladung aus, wenn EOS HEAT_PUMP plant |
 
+| `binary_sensor.wp_drosselung_ss14a` (KNX 9/1/0) | §14a-Sperre vom MVV-Binäreingang; geht als `wbb12-power-limited` an EOS |
+| `binary_sensor.wp_sg1_h1_status` (KNX 9/1/11) | Status H1 (nur die Sperre schaltet H1) |
+| `switch.wp_sg2_h2_anhebung` (KNX 9/1/20, Status 9/1/21) | H2 = SG Ready „Erhöhter Betrieb“ |
+| `switch.wp_warmwasser_push_de2` (KNX 9/1/30, Status 9/1/31) | DE2 = Warmwasser PUSH |
+| `script.eos_wp_sg_ready_kontakte` | Kontakt-Weg: SG 3/4 → H2 ein, sonst aus; Absenkung (SG 1) weiter über Modbus |
+| `script.eos_wp_warmwasser_laden_kontakte` | Kontakt-Weg: DE2 für 60 min schließen |
+
 Hinweise:
 
 - **SG Ready per Modbus.** Die WBB 12 nimmt SG Ready nur über die Klemmen H1/H2 an; die Modbus-Werte
