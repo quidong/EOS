@@ -9,6 +9,7 @@
 | ---- | -------------------- | ---- | --------- | ------- | ----------- |
 | elecfeefixed | `EOS_ELECFEE__ELECFEEFIXED` | `ElecFeeFixedCommonSettings` | `rw` | `required` | Fixed electricity fees provider settings. |
 | elecfeeimport | `EOS_ELECFEE__ELECFEEIMPORT` | `ElecFeeImportCommonSettings` | `rw` | `required` | Electricity fees import provider settings. |
+| grid_control_14a | `EOS_ELECFEE__GRID_CONTROL_14A` | `GridControl14aSettings` | `rw` | `required` | §14a EnWG grid fee module (none, module1, module2, module1_3) and dimming of controllable consumers (RL29 fork). Module 3 prices are applied to the fixed fee provider. |
 | provider | `EOS_ELECFEE__PROVIDER` | `Optional[str]` | `rw` | `None` | Electricity fee provider id of provider to be used. |
 | providers | | `list[str]` | `ro` | `N/A` | Available electricity fee provider ids. |
 :::
@@ -40,6 +41,17 @@
            "elecfeeimport": {
                "import_file_path": null,
                "import_json": null
+           },
+           "grid_control_14a": {
+               "module": "none",
+               "controllable_device_ids": [],
+               "regular_network_amt_kwh": null,
+               "module2_reduction_percent": 60.0,
+               "module3_network_amt_kwh": {
+                   "windows": []
+               },
+               "dimming_power_w": 4200.0,
+               "dimming_hold_hours": 1.0
            }
        }
    }
@@ -73,10 +85,147 @@
                "import_file_path": null,
                "import_json": null
            },
+           "grid_control_14a": {
+               "module": "none",
+               "controllable_device_ids": [],
+               "regular_network_amt_kwh": null,
+               "module2_reduction_percent": 60.0,
+               "module3_network_amt_kwh": {
+                   "windows": []
+               },
+               "dimming_power_w": 4200.0,
+               "dimming_hold_hours": 1.0
+           },
            "providers": [
                "ElecFeeFixed",
                "ElecFeeImport"
            ]
+       }
+   }
+```
+<!-- pyml enable line-length -->
+
+### §14a EnWG grid fee module and dimming of controllable consumers
+
+<!-- pyml disable line-length -->
+:::{table} elecfee::grid_control_14a
+:widths: 10 10 5 5 30
+:align: left
+
+| Name | Type | Read-Only | Default | Description |
+| ---- | ---- | --------- | ------- | ----------- |
+| controllable_device_ids | `list[str]` | `rw` | `required` | Device ids registered as controllable consumers (e.g. the heat pump). They are dimmed on a grid operator signal; with module 2 they are separately metered. |
+| dimming_hold_hours | `float` | `rw` | `1.0` | While a dimming signal is active, assume it lasts this long from now [h]. |
+| dimming_power_w | `float` | `rw` | `4200.0` | Power a controllable device may still draw while dimmed [W] (4.2 kW, or 0.4 x connected power for larger devices). |
+| module | `Literal['none', 'module1', 'module2', 'module1_3']` | `rw` | `none` | Grid fee module: 'none', 'module1' (flat reduction), 'module2' (separate meter, reduced network energy price), 'module1_3' (module 1 plus time-variable network energy price). |
+| module2_reduction_percent | `float` | `rw` | `60.0` | Module 2: reduction of the network energy price of the device [%]. |
+| module3_network_amt_kwh | `ValueTimeWindowSequence` | `rw` | `required` | Module 3: network energy price by time window [currency/kWh, net]; use 'months' to restrict windows to the quarters with module 3 prices. Times without a window keep the regular network energy price. |
+| regular_network_amt_kwh | `Optional[float]` | `rw` | `None` | Regular network energy price contained in the configured consumption fee [currency/kWh, net]. Needed for module 2 and module 3. |
+:::
+<!-- pyml enable line-length -->
+
+<!-- pyml disable no-emphasis-as-heading -->
+**Example Input/Output**
+<!-- pyml enable no-emphasis-as-heading -->
+
+<!-- pyml disable line-length -->
+```json
+   {
+       "elecfee": {
+           "grid_control_14a": {
+               "module": "none",
+               "controllable_device_ids": [
+                   "wbb12"
+               ],
+               "regular_network_amt_kwh": 0.075,
+               "module2_reduction_percent": 60.0,
+               "module3_network_amt_kwh": {
+                   "windows": [
+                       {
+                           "start_time": "00:00:00.000000",
+                           "duration": "2 hours",
+                           "day_of_week": null,
+                           "date": null,
+                           "months": [
+                               1,
+                               2,
+                               3,
+                               10,
+                               11,
+                               12
+                           ],
+                           "locale": null,
+                           "value": 0.0432
+                       },
+                       {
+                           "start_time": "02:00:00.000000",
+                           "duration": "4 hours",
+                           "day_of_week": null,
+                           "date": null,
+                           "months": [
+                               1,
+                               2,
+                               3,
+                               10,
+                               11,
+                               12
+                           ],
+                           "locale": null,
+                           "value": 0.0173
+                       },
+                       {
+                           "start_time": "06:00:00.000000",
+                           "duration": "11 hours",
+                           "day_of_week": null,
+                           "date": null,
+                           "months": [
+                               1,
+                               2,
+                               3,
+                               10,
+                               11,
+                               12
+                           ],
+                           "locale": null,
+                           "value": 0.0432
+                       },
+                       {
+                           "start_time": "17:00:00.000000",
+                           "duration": "3 hours",
+                           "day_of_week": null,
+                           "date": null,
+                           "months": [
+                               1,
+                               2,
+                               3,
+                               10,
+                               11,
+                               12
+                           ],
+                           "locale": null,
+                           "value": 0.0596
+                       },
+                       {
+                           "start_time": "20:00:00.000000",
+                           "duration": "4 hours",
+                           "day_of_week": null,
+                           "date": null,
+                           "months": [
+                               1,
+                               2,
+                               3,
+                               10,
+                               11,
+                               12
+                           ],
+                           "locale": null,
+                           "value": 0.0432
+                       }
+                   ]
+               },
+               "dimming_power_w": 4200.0,
+               "dimming_hold_hours": 1.0
+           }
        }
    }
 ```

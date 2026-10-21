@@ -85,6 +85,32 @@ class GeneticHeatPumpParameters(GeneticParametersBaseModel):
             "description": "Hot water setpoint read from the heat pump; None = configuration."
         },
     )
+    power_limited_w: Optional[float] = Field(
+        default=None,
+        gt=0,
+        json_schema_extra={
+            "description": (
+                "Active §14a dimming: electric limit of heat pump plus rod from now [W]; "
+                "None = not dimmed."
+            )
+        },
+    )
+    power_limited_hours: float = Field(
+        default=1.0,
+        gt=0,
+        json_schema_extra={"description": "Assumed remaining duration of the dimming [h]."},
+    )
+    separate_meter_price_reduction_amt_wh: Optional[float] = Field(
+        default=None,
+        ge=0,
+        json_schema_extra={
+            "description": (
+                "§14a module 2: the heat pump has its own meter; its import price is the "
+                "household price minus this reduction [currency/Wh, gross]. It then cannot "
+                "use PV or battery energy. None = shared meter."
+            )
+        },
+    )
     hours_since_legionella: Optional[float] = Field(
         default=None,
         ge=0,
@@ -138,6 +164,8 @@ class HeatPumpOutcome:
     legionella_ok: Optional[bool] = None
     mode_changes: int = 0
     stored_heat_credit: float = 0.0
+    separate_meter_cost: float = 0.0
+    """§14a module 2: cost of the separately metered energy [currency]."""
     detail: Optional[dict[str, Any]] = None
 
 
@@ -164,6 +192,8 @@ class HeatPumpRunPlan:
     legionella_deadline_slot: Optional[int] = None
     """Slot by which the tank has to reach legionella_c; None = no requirement."""
     load_includes_heat_pump: bool = False
+    separate_meter_price_per_wh: Optional[list[float]] = None
+    """§14a module 2: own meter, price per slot; its energy is not part of the house balance."""
     sg_ready_states: dict[str, int] = field(default_factory=lambda: dict(DEFAULT_SG_READY_STATES))
     _cache: dict[tuple[int, ...], HeatPumpOutcome] = field(default_factory=dict, repr=False)
 
@@ -364,8 +394,13 @@ class HeatPumpRunPlan:
                 shortfall = max(0.0, self.legionella_c - max_dhw)
                 legionella_cost = self.legionella_penalty * (1.0 + shortfall / 10.0)
 
+        separate_cost = 0.0
+        if self.separate_meter_price_per_wh is not None:
+            prices = self.separate_meter_price_per_wh
+            separate_cost = sum(e * prices[i] for i, e in enumerate(electric) if i < len(prices))
         extra = (
-            comfort_kh * self.comfort_penalty
+            separate_cost
+            + comfort_kh * self.comfort_penalty
             + dhw_kh * self.dhw_penalty
             + legionella_cost
             + changes * self.mode_change_penalty
@@ -379,6 +414,7 @@ class HeatPumpRunPlan:
             legionella_ok=legionella_ok,
             mode_changes=changes,
             stored_heat_credit=credit,
+            separate_meter_cost=separate_cost,
             detail=rows if detail else None,
         )
 
@@ -591,6 +627,11 @@ class HeatPumpGeneLayout:
         for plan, part in zip(self.plans, self.split(genes)):
             outcome = plan.evaluate(part)
             extra += outcome.extra_cost
+            if plan.separate_meter_price_per_wh is not None:
+                # Own meter: not part of the house energy balance.
+                if total is None:
+                    total = [0.0] * len(outcome.electric_wh)
+                continue
             if total is None:
                 total = list(outcome.electric_wh)
             else:
@@ -672,6 +713,26 @@ def build_run_plan(
     if not inputs:
         raise ValueError("Heat pump run plan needs at least one slot.")
 
+    # Active §14a dimming: limit the first slots.
+    if parameters.power_limited_w is not None:
+        limited_slots = max(1, math.ceil(parameters.power_limited_hours / slot_hours))
+        for slot_input in inputs[:limited_slots]:
+            current = slot_input.max_electric_w
+            slot_input.max_electric_w = (
+                parameters.power_limited_w
+                if current is None
+                else min(current, parameters.power_limited_w)
+            )
+
+    # §14a module 2: own meter with reduced price.
+    separate_prices: Optional[list[float]] = None
+    if parameters.separate_meter_price_reduction_amt_wh is not None:
+        reduction = parameters.separate_meter_price_reduction_amt_wh
+        separate_prices = [
+            max(0.0, float(price_per_wh[i]) - reduction) if i < len(price_per_wh) else 0.0
+            for i in range(len(inputs))
+        ]
+
     # Initial state: measurements, otherwise plausible defaults.
     first = inputs[0]
     room = (
@@ -708,7 +769,8 @@ def build_run_plan(
 
     # Value of stored heat: average import price over the horizon divided by
     # the COP the heat pump would need to deliver the heat later.
-    prices = [p for p in price_per_wh[: len(inputs)] if p is not None and math.isfinite(p)]
+    price_source = separate_prices if separate_prices is not None else price_per_wh[: len(inputs)]
+    prices = [p for p in price_source if p is not None and math.isfinite(p)]
     mean_price = sum(prices) / len(prices) if prices else 0.0
     mean_outdoor = sum(i.outdoor_c for i in inputs) / len(inputs)
     gains_mean = system.building.gains_w(0.0)
@@ -764,7 +826,8 @@ def build_run_plan(
         tank_heat_value=mean_price / cop_dhw if cop_dhw > 0 else 0.0,
         legionella_c=settings.dhw.legionella_c,
         legionella_deadline_slot=deadline_slot,
-        load_includes_heat_pump=opt.load_forecast_includes_heat_pump,
+        load_includes_heat_pump=opt.load_forecast_includes_heat_pump and separate_prices is None,
+        separate_meter_price_per_wh=separate_prices,
         sg_ready_states=dict(opt.sg_ready_states),
     )
 
@@ -788,6 +851,8 @@ def plan_result(plan: HeatPumpRunPlan, genes: Sequence[int]) -> dict[str, Any]:
         "legionella_deadline_slot": plan.legionella_deadline_slot,
         "mode_changes": int(outcome.mode_changes),
         "stored_heat_credit_amt": float(outcome.stored_heat_credit),
+        "separate_meter": plan.separate_meter_price_per_wh is not None,
+        "separate_meter_cost_amt": float(outcome.separate_meter_cost),
         "electric_wh": float(sum(outcome.electric_wh)),
     }
     for key, values in list(result.items()):
