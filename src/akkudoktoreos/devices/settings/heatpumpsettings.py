@@ -339,8 +339,9 @@ class HeatPumpOptimizationSettings(SettingsBaseModel):
                 "Space heating modes the optimizer may choose: 0 REDUCED (room may cool to "
                 "the comfort minimum), 1 NORMAL, 2 RAISED (setpoint + raised_offset_k), "
                 "3 PREHEAT (comfort maximum with all valves forced open), 4 FORCED (forced "
-                "on, full capacity up to comfort maximum + forced_overshoot_k). Which "
-                "signal executes a mode is set in sg_ready_states."
+                "on, full capacity up to comfort maximum + forced_overshoot_k). EOS reports the "
+                "mode; how it is executed (e.g. which SG Ready state) is mapped by the "
+                "controller."
             ),
             "examples": [[0, 1, 2], [0, 1, 2, 3, 4], [1, 2]],
         },
@@ -355,23 +356,6 @@ class HeatPumpOptimizationSettings(SettingsBaseModel):
                 "2 ROD (heating rod to one of dhw.rod_targets_c; dropped without a rod)."
             ),
             "examples": [[0, 1, 2], [0, 1], [0]],
-        },
-    )
-    sg_ready_states: dict[str, int] = Field(
-        default_factory=lambda: {
-            "REDUCED": 1,
-            "NORMAL": 2,
-            "RAISED": 3,
-            "PREHEAT": 3,
-            "FORCED": 4,
-        },
-        json_schema_extra={
-            "description": (
-                "SG Ready state reported for each heating mode (solution key "
-                "'<id>_sg_ready_state'), e.g. REDUCED: 2 if the heat pump must never be "
-                "blocked. EOS only reports the state; how it is transmitted (contacts, "
-                "Modbus, ...) is up to the controller."
-            )
         },
     )
     comfort_penalty_amt_per_kh: float = Field(
@@ -428,17 +412,6 @@ class HeatPumpOptimizationSettings(SettingsBaseModel):
         if any(mode not in (0, 1, 2) for mode in value):
             raise ValueError("Hot water modes are 0..2.")
         return sorted(set(value))
-
-    @field_validator("sg_ready_states")
-    @classmethod
-    def validate_sg_ready_states(cls, value: dict[str, int]) -> dict[str, int]:
-        defaults = {"REDUCED": 1, "NORMAL": 2, "RAISED": 3, "PREHEAT": 3, "FORCED": 4}
-        unknown = set(value) - set(defaults)
-        if unknown:
-            raise ValueError(f"Unknown heating modes in sg_ready_states: {sorted(unknown)}.")
-        if any(state not in (1, 2, 3, 4) for state in value.values()):
-            raise ValueError("SG Ready states are 1..4.")
-        return {**defaults, **value}
 
 
 class HeatPumpCommonSettings(DevicesBaseSettings):

@@ -53,9 +53,6 @@ def _mode_value(name: Any) -> float:
 HEAT_PUMP_SOLUTION_COLUMNS: list[tuple[str, str, Any]] = [
     ("heating_mode", "heating_mode", _mode_value),
     ("dhw_mode", "dhw_mode", _mode_value),
-    ("sg_ready_state", "sg_ready_state", float),
-    ("dhw_charge", "dhw_charge", lambda v: 1.0 if v else 0.0),
-    ("valves_forced", "valves_forced", lambda v: 1.0 if v else 0.0),
     ("rod_target_c", "rod_target_c", float),
     ("energy_wh", "electric_wh", float),
     ("rod_energy_wh", "rod_electric_wh", float),
@@ -504,8 +501,7 @@ class GeneticSolution(ConfigMixin, GeneticParametersBaseModel):
         json_schema_extra={
             "description": (
                 "Per heat pump device_id (RL29 fork): schedule and predicted states per "
-                "slot - heating_mode, dhw_mode, sg_ready_state, dhw_charge, rod_target_c, "
-                "valves_forced, electric_wh, hp_electric_wh, rod_electric_wh, room_c, "
+                "slot - heating_mode, dhw_mode, rod_target_c, electric_wh, hp_electric_wh, rod_electric_wh, room_c, "
                 "slab_c, dhw_c, flow_c, cop_space - and a summary."
             )
         },

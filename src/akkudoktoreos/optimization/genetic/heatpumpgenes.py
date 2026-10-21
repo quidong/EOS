@@ -5,11 +5,11 @@ configured heat pump adds two blocks of genes to the genome, one space heating
 mode and one hot water mode per gene period (one hour). The genome stays
 compact (48 h horizon: 96 genes per heat pump) and the modes change rarely.
 
-EOS only decides *what* the heat pump should do. The solution carries
-abstract signals per slot (heating mode, SG Ready state, charge hot water now,
-rod target temperature, valves forced open); *how* they reach the heat pump
-(relay contacts, Modbus, KNX, a vendor API) is decided by the controller, e.g.
-Home Assistant.
+EOS only decides *what* the heat pump should do. The solution carries the
+modes per slot (heating mode, hot water mode, rod target temperature). The
+controller (e.g. Home Assistant) maps them to signals - which SG Ready state,
+which valves, which hot water command - and decides how they reach the heat
+pump (relay contacts, Modbus, KNX, a vendor API).
 
 Per candidate, the thermal model (``akkudoktoreos.devices.thermal``)
 turns the modes into the electric load of heat pump and heating rod per slot.
@@ -48,16 +48,6 @@ from akkudoktoreos.devices.thermal.heatpump import (
     ThermalState,
 )
 from akkudoktoreos.optimization.genetic.geneticabc import GeneticParametersBaseModel
-
-# SG Ready state reported per space heating mode; configurable per device
-# (devices.heat_pumps.<id>.optimization.sg_ready_states).
-DEFAULT_SG_READY_STATES = {
-    "REDUCED": 1,
-    "NORMAL": 2,
-    "RAISED": 3,
-    "PREHEAT": 3,
-    "FORCED": 4,
-}
 
 
 class GeneticHeatPumpParameters(GeneticParametersBaseModel):
@@ -198,7 +188,6 @@ class HeatPumpRunPlan:
     load_includes_heat_pump: bool = False
     separate_meter_price_per_wh: Optional[list[float]] = None
     """§14a module 2: own meter, price per slot; its energy is not part of the house balance."""
-    sg_ready_states: dict[str, int] = field(default_factory=lambda: dict(DEFAULT_SG_READY_STATES))
     _cache: dict[tuple[int, ...], HeatPumpOutcome] = field(default_factory=dict, repr=False)
 
     CACHE_SIZE = 20000
@@ -832,7 +821,6 @@ def build_run_plan(
         legionella_deadline_slot=deadline_slot,
         load_includes_heat_pump=opt.load_forecast_includes_heat_pump and separate_prices is None,
         separate_meter_price_per_wh=separate_prices,
-        sg_ready_states=dict(opt.sg_ready_states),
     )
 
 
@@ -840,13 +828,7 @@ def plan_result(plan: HeatPumpRunPlan, genes: Sequence[int]) -> dict[str, Any]:
     """Per-slot schedule and states of the chosen genes, for the solution."""
     outcome = plan.evaluate(genes, detail=True)
     detail = outcome.detail or {}
-    heating_names = detail.get("heating_mode", [])
-    dhw_names = detail.get("dhw_mode", [])
-    states = {**DEFAULT_SG_READY_STATES, **plan.sg_ready_states}
     result = dict(detail)
-    result["sg_ready_state"] = [states[name] for name in heating_names]
-    result["valves_forced"] = [HeatingMode[name] == HeatingMode.PREHEAT for name in heating_names]
-    result["dhw_charge"] = [name == DhwMode.HEAT_PUMP.name for name in dhw_names]
     result["summary"] = {
         "extra_cost_amt": float(outcome.extra_cost),
         "comfort_violation_kh": float(outcome.comfort_kh),
