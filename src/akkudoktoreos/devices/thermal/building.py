@@ -24,7 +24,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-from scipy.linalg import expm
 
 
 @dataclass(frozen=True)
@@ -86,6 +85,10 @@ class BuildingModel:
         aug = np.zeros((n + m, n + m))
         aug[:n, :n] = a * self.slot_hours
         aug[:n, n:] = b * self.slot_hours
+        # scipy is a heavy optional import; load it only when a model is built
+        # (keeps the server start lean, see tests/test_lazy_imports.py).
+        from scipy.linalg import expm
+
         phi = expm(aug)
         self.ad = phi[:n, :n]
         self.bd = phi[:n, n:]
