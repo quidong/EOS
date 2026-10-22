@@ -560,14 +560,12 @@ class HeatPumpCalibrationSettings(SettingsBaseModel):
     )
     fit_building: bool = Field(
         default=True,
-        json_schema_extra={"description": "Fit building.loss_w_per_k, solar_aperture_m2 and internal_gains_w."},
+        json_schema_extra={
+            "description": "Fit building.loss_w_per_k, solar_aperture_m2 and internal_gains_w."
+        },
     )
-    fit_cop: bool = Field(
-        default=True, json_schema_extra={"description": "Fit unit.cop_scale."}
-    )
-    fit_dhw: bool = Field(
-        default=True, json_schema_extra={"description": "Fit dhw.loss_w_per_k."}
-    )
+    fit_cop: bool = Field(default=True, json_schema_extra={"description": "Fit unit.cop_scale."})
+    fit_dhw: bool = Field(default=True, json_schema_extra={"description": "Fit dhw.loss_w_per_k."})
     weather_from_prediction: bool = Field(
         default=True,
         json_schema_extra={
@@ -615,12 +613,16 @@ class HeatPumpCalibrationSettings(SettingsBaseModel):
         default=0.3,
         gt=0,
         le=1,
-        json_schema_extra={"description": "Lower clamp of the fitted loss, relative to the configured value."},
+        json_schema_extra={
+            "description": "Lower clamp of the fitted loss, relative to the configured value."
+        },
     )
     loss_max_factor: float = Field(
         default=3.0,
         ge=1,
-        json_schema_extra={"description": "Upper clamp of the fitted loss, relative to the configured value."},
+        json_schema_extra={
+            "description": "Upper clamp of the fitted loss, relative to the configured value."
+        },
     )
     cop_min_heat_w: float = Field(
         default=3000.0,
@@ -678,9 +680,7 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
     comfort: HeatPumpComfortSettings = Field(default_factory=HeatPumpComfortSettings)
     optimization: HeatPumpOptimizationSettings = Field(default_factory=HeatPumpOptimizationSettings)
     cooling: HeatPumpCoolingSettings = Field(default_factory=HeatPumpCoolingSettings)
-    calibration: HeatPumpCalibrationSettings = Field(
-        default_factory=HeatPumpCalibrationSettings
-    )
+    calibration: HeatPumpCalibrationSettings = Field(default_factory=HeatPumpCalibrationSettings)
     power_limit_w: Optional[ValueTimeWindowSequence] = Field(
         default=None,
         json_schema_extra={
