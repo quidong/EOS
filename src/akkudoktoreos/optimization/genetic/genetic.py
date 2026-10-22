@@ -4,6 +4,7 @@ import ctypes
 import ctypes.util
 import gc
 import math
+from pathlib import Path
 import multiprocessing
 import os
 import random
@@ -1206,6 +1207,13 @@ class GeneticOptimization(OptimizationBase):
             for device in heat_pumps
         ]
         self.heat_pump_layout = HeatPumpGeneLayout(plans)
+        # RL29 fork: plans of calibrated heat pumps are recorded for plan vs actual.
+        self._hp_record_plan_ids = {
+            device.device_id
+            for device in heat_pumps
+            if getattr(device.settings, "calibration", None) and device.settings.calibration.enabled
+        }
+        self._hp_slot_starts = starts
         # A load forecast that still contains the heat pump would count it
         # twice: subtract the status quo consumption.
         load = self.simulation.load_energy_array
@@ -4530,6 +4538,17 @@ class GeneticOptimization(OptimizationBase):
                 logger.info(
                     "Heat pump {}: {}", plan.device_id, heat_pump_results[plan.device_id]["summary"]
                 )
+                if plan.device_id in getattr(self, "_hp_record_plan_ids", set()):
+                    from akkudoktoreos.devices.heatpumpplanactual import record_plan
+
+                    record_plan(
+                        plan.device_id,
+                        Path(self.config.general.data_folder_path),
+                        self.ems.observation_datetime or self.ems.start_datetime,
+                        getattr(self, "_hp_slot_starts", []),
+                        self.slot_duration_h,
+                        heat_pump_results[plan.device_id],
+                    )
 
         # Deprecated single-device hourly start (kept for backward compatibility).
         # Only meaningful for the legacy case: exactly one appliance on the hourly
