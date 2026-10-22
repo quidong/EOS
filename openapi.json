@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610211116010521"
+    "version": "v0.3.0.dev2610220892705839"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -11139,6 +11139,20 @@
             "title": "Comfort Penalty Amt Per Kh",
             "description": "Cost of a room below its comfort minimum [currency per K*h].",
             "default": 1.0
+          },
+          "overheat_penalty_amt_per_kh": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Overheat Penalty Amt Per Kh",
+            "description": "Cost of a room above its comfort maximum [currency per K*h]. Keeps PREHEAT/FORCED from overheating the rooms; heat above the comfort maximum also earns no stored-heat credit.",
+            "default": 0.5
+          },
+          "active_mode_penalty_amt_per_h": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Active Mode Penalty Amt Per H",
+            "description": "Cost per hour of an active mode (heating RAISED/PREHEAT/FORCED, hot water HEAT_PUMP/ROD) [currency/h]. Where a mode changes nothing, the plan then shows NORMAL/HOLD instead of an arbitrary active mode.",
+            "default": 0.01
           },
           "dhw_penalty_amt_per_kh": {
             "type": "number",

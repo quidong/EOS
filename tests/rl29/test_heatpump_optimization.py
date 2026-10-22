@@ -157,6 +157,83 @@ class TestRunPlan:
         assert max(outcome.electric_wh) > 1500.0
 
 
+class TestComfortMaximum:
+    """Rooms above the comfort maximum cost comfort and store no valuable heat."""
+
+    @staticmethod
+    def plan_from(initial_room_c: float, n_slots: int = 6, outdoor: float = 5.0, **opt: Any):
+        device = HeatPumpCommonSettings(
+            device_id="wbb12",
+            optimization={"heating_modes": [0, 1, 2, 3, 4], **opt},
+        )
+        params = GeneticHeatPumpParameters(
+            device_id="wbb12", settings=device, initial_room_c=initial_room_c, initial_dhw_c=45.0
+        )
+        starts = [T0.add(hours=i) for i in range(n_slots)]
+        return build_run_plan(
+            params, starts, 1.0, [outdoor] * n_slots, [0.0] * n_slots, [0.0003] * n_slots
+        )
+
+    def test_forced_heating_beyond_the_maximum_is_penalized(self):
+        plan = self.plan_from(21.0, n_slots=12)
+        n = plan.n_periods
+        forced = plan.evaluate(plan.genes_for_modes([HeatingMode.FORCED] * n, [DhwMode.HOLD] * n))
+        normal = plan.evaluate(plan.default_genes())
+        assert normal.overheat_kh == 0.0
+        assert forced.overheat_kh > 0.5
+        assert plan.overheat_penalty == pytest.approx(0.5)
+        assert forced.extra_cost > normal.extra_cost
+
+    def test_room_heat_above_the_maximum_earns_no_credit(self):
+        plan = self.plan_from(21.0, n_slots=8, overheat_penalty_amt_per_kh=0.0)
+        n = plan.n_periods
+        genes = plan.genes_for_modes([HeatingMode.FORCED] * n, [DhwMode.HOLD] * n)
+        outcome = plan.evaluate(genes, detail=True)
+        assert outcome.detail is not None
+        room_end = outcome.detail["room_c"][-1]
+        slab_end = outcome.detail["slab_c"][-1]
+        room_max = plan.system.comfort_band(plan.inputs[-1])[2]
+        assert room_end > room_max
+        building = plan.system.building
+        expected = (
+            building.stored_heat_wh(slab_end, room_max, 0.0)
+            - building.stored_heat_wh(plan.initial.slab_c, plan.initial.room_c, 0.0)
+        ) * plan.building_heat_value
+        tank = plan.system.tank
+        expected += (
+            tank.stored_heat_wh(outcome.detail["dhw_c"][-1], 0.0)
+            - tank.stored_heat_wh(plan.initial.dhw_c, 0.0)
+        ) * plan.tank_heat_value
+        assert outcome.stored_heat_credit == pytest.approx(expected)
+
+    def test_modes_without_effect_are_reported_as_normal(self):
+        """Room already above the FORCED target: FORCED changes nothing but costs."""
+        plan = self.plan_from(23.5, n_slots=3, outdoor=12.0)
+        n = plan.n_periods
+        forced = plan.evaluate(plan.genes_for_modes([HeatingMode.FORCED] * n, [DhwMode.HOLD] * n))
+        normal = plan.evaluate(plan.default_genes())
+        assert forced.electric_wh == pytest.approx(normal.electric_wh)
+        assert forced.active_hours == pytest.approx(3.0)
+        assert normal.active_hours == 0.0
+        assert forced.extra_cost - normal.extra_cost == pytest.approx(3 * 0.01)
+
+    def test_hot_water_charge_counts_as_active(self):
+        plan = self.plan_from(21.0, n_slots=4)
+        n = plan.n_periods
+        charge = plan.evaluate(
+            plan.genes_for_modes([HeatingMode.NORMAL] * n, [DhwMode.HEAT_PUMP] * n)
+        )
+        assert charge.active_hours == pytest.approx(4.0)
+
+    def test_plan_result_reports_overheat(self):
+        plan = self.plan_from(21.0, n_slots=12)
+        n = plan.n_periods
+        genes = plan.genes_for_modes([HeatingMode.FORCED] * n, [DhwMode.HOLD] * n)
+        summary = plan_result(plan, genes)["summary"]
+        assert summary["overheat_kh"] > 0
+        assert summary["active_hours"] == pytest.approx(12.0)
+
+
 class TestLegionella:
     def test_unknown_history_requires_nothing(self):
         assert make_plan(hours_since_legionella=None).legionella_deadline_slot is None
@@ -473,6 +550,26 @@ class TestOptimizer:
         hp = np.asarray(solution.result.heat_pump_wh_per_hour)
         cheap, expensive = hp[:3].mean(), hp[5:].mean()
         assert cheap > expensive
+
+    def test_pv_surplus_does_not_overheat_the_rooms(self, config_eos: ConfigEOS):
+        """Regression (22.10.2026): cheap PV hours led to FORCED all day and 24 degC rooms."""
+        configure(config_eos, hours=12)
+        slots = 12
+        prices = [0.00026] * 6 + [0.00045] * 6
+        pv = [3500.0] * 6 + [0.0] * 6
+        params = parameters(
+            hours=slots,
+            prices=prices,
+            heat_pumps=[heat_pump(optimization={"heating_modes": [0, 1, 2, 3, 4]})],
+        )
+        params.ems.pv_forecast_wh = pv
+        optimizer = GeneticOptimization(fixed_seed=5)
+        solution = optimizer.optimize_ems(params, ngen=30, individuals=40)
+        schedule = solution.heat_pumps["wbb12"]
+        assert max(schedule["room_c"]) <= 22.0 + 1.0
+        assert schedule["summary"]["overheat_kh"] < 3.0
+        # Evening hours without heat demand are not labelled FORCED.
+        assert schedule["heating_mode"][-3:].count("FORCED") == 0
 
     def test_warm_start_with_heat_pump_genes(self, config_eos: ConfigEOS):
         configure(config_eos)
