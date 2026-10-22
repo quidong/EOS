@@ -196,12 +196,12 @@ Vorheizen: Komfortmaximum, Forciert: Komfortmaximum + 1 K).
 | Regel | Wo | Einstellung |
 |---|---|---|
 | Nur im Betriebsmodus Haus „Heizen“ | Soll-Sensor | – |
-| EOS-Plan fehlt oder älter als 45 min → SG 2 | Soll-Sensor | – |
+| EOS-Plan fehlt oder älter als 45 min → SG 2 (neueste Meldung von `heating_mode`, `room_temperature_c` oder `dhw_mode`, `last_reported`) | Soll-Sensor | – |
 | Keine Absenkung bei kältestem Raum < 19,5 °C oder Feuchtewarnung | Soll-Sensor | – |
 | Keine Anhebung ab wärmstem Raum ≥ Max | Soll-Sensor | `input_number.eos_wp_max_raumtemperatur` (23,5 °C) |
 | Absenkung höchstens X min, danach gleich lange gesperrt | Automation + Soll-Sensor | `input_number.eos_wp_max_absenkdauer` (180 min) |
 | Höchstens N Umschaltungen/Tag, danach nur Normal | Automation | `input_number.eos_wp_max_umschaltungen_pro_tag` (12) |
-| Mindesthaltezeit (Rückkehr zu Normal immer sofort) | Automation | `input_number.eos_wp_mindesthaltezeit` (55 min) |
+| Mindesthaltezeit (Rückkehr zu Normal immer sofort; 30 s Toleranz, damit der 5-min-Takt genau nach Ablauf schaltet) | Automation | `input_number.eos_wp_mindesthaltezeit` (55 min) |
 | Manueller Eingriff an Betriebsart/H2 → Pause + Push | Automation | `input_number.eos_wp_pause_nach_eingriff` (240 min) |
 | Höchstens N Warmwasserladungen/Tag | Automation | `input_number.eos_wp_max_warmwasserladungen_pro_tag` (2) |
 | DE2 > 90 min zu → öffnen + Push | Überwachung | – |
