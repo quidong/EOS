@@ -19,6 +19,7 @@ import pytest_asyncio
 
 from akkudoktoreos.config.config import ConfigEOS
 from akkudoktoreos.core.coreabc import get_ems, get_measurement
+from akkudoktoreos.devices.heatpumpcalibration import _as_datetime
 from akkudoktoreos.devices.heatpumpplanactual import (
     KEEP_HOURS,
     RECORD_HOURS,
@@ -204,7 +205,9 @@ def test_optimizer_records_the_plan_of_a_calibrated_heat_pump(
             },
         }
     )
-    get_ems(init=True).set_start_datetime(to_datetime("2026-11-03T00:00:00+01:00"))
+    # Start of day in the configured timezone (whatever other tests left behind):
+    # the forecast arrays are indexed from the start of the day.
+    get_ems(init=True).set_start_datetime(to_datetime("2026-11-03T00:00:00"))
     slots = 8
 
     def params(enabled: bool):
@@ -244,4 +247,4 @@ def test_optimizer_records_the_plan_of_a_calibrated_heat_pump(
     assert rows["electric_wh"] == pytest.approx(solution.heat_pumps["wbb12"]["electric_wh"])
     assert rows["heating_mode"] == solution.heat_pumps["wbb12"]["heating_mode"]
     assert len(rows["room_c"]) == slots
-    assert plans[0]["start"].startswith("2026-11-02T23:00:00+00:00")
+    assert plans[0]["start"] == _as_datetime(get_ems().start_datetime).isoformat()
