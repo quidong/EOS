@@ -220,6 +220,13 @@ class SlotInputs:
     """Electric power available for cooling in this slot, e.g. PV surplus; None = no limit."""
     dewpoint_c: Optional[float] = None
     """Room dew point [degC]; limits the cooling flow temperature."""
+    raised_c: Optional[float] = None
+    """Room target of RAISED in this slot; None = setpoint + raised_offset_k. Holiday mode
+    sets the normal setpoint so that RAISED heats the house back up before the return."""
+    dhw_off: bool = False
+    """Hot water switched off (RL29 fork, holiday mode): the heat pump controller does
+    not reheat on its own and the tank comfort minimum does not apply; only a planned
+    HEAT_PUMP or ROD charge heats the tank."""
 
 
 @dataclass
@@ -302,6 +309,8 @@ class HeatPumpSystem:
         if mode == HeatingMode.NORMAL:
             return setpoint
         if mode == HeatingMode.RAISED:
+            if inputs.raised_c is not None:
+                return min(max(inputs.raised_c, setpoint), high)
             return min(setpoint + self.comfort.raised_offset_k, high)
         if mode == HeatingMode.FORCED:
             return high + self.hp.forced_overshoot_k
@@ -418,11 +427,15 @@ class HeatPumpSystem:
         switch_on_c = self.dhw.setpoint_c - self.dhw.hysteresis_k
         # The controller checks continuously: a tank that falls below the
         # switch-on temperature within this slot starts a charge in this slot.
-        hp_dhw_active = (
-            state.hp_dhw_charging
-            or state.dhw_c < switch_on_c
-            or self.tank.step(state.dhw_c, 0.0, inputs.draw_wh) < switch_on_c
+        hp_dhw_active = state.hp_dhw_charging or (
+            not inputs.dhw_off
+            and (
+                state.dhw_c < switch_on_c
+                or self.tank.step(state.dhw_c, 0.0, inputs.draw_wh) < switch_on_c
+            )
         )
+        if inputs.dhw_off and state.hp_dhw_forced:
+            hp_dhw_active = False  # an own-controller charge ends when hot water is switched off
         forced_dhw = False
         raised_dhw = hp_setpoint > self.dhw.setpoint_c
         if (dhw_mode == DhwMode.HEAT_PUMP or raised_dhw) and state.dhw_c < hp_setpoint - 0.2:
@@ -552,7 +565,7 @@ class HeatPumpSystem:
 
         comfort_violation = max(0.0, inputs.comfort_min_c - room) * dt
         overheat = max(0.0, room - self.comfort_band(inputs)[2]) * dt
-        dhw_violation = max(0.0, self.dhw.min_c - dhw) * dt
+        dhw_violation = 0.0 if inputs.dhw_off else max(0.0, self.dhw.min_c - dhw) * dt
 
         return SlotResult(
             state=ThermalState(slab, room, dhw, still_charging, still_forced),

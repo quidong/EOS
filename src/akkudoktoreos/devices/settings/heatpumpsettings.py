@@ -564,6 +564,56 @@ class HeatPumpOptimizationSettings(SettingsBaseModel):
         return sorted(set(value))
 
 
+class HeatPumpAwaySettings(SettingsBaseModel):
+    """Holiday mode (RL29 fork): reduced comfort until the return, then back on time.
+
+    The controller reports ``<device_id>-away`` (1 = away) and optionally
+    ``<device_id>-return-ts`` (Unix time of the return, 0 = unknown) and
+    ``<device_id>-away-room-temperature`` (room temperature to hold while away,
+    e.g. the reduced setpoint of the heating circuit). Until the return the
+    comfort minimum and the NORMAL setpoint are the away temperature and hot water
+    can be switched off; from the return on the normal comfort band and hot water
+    minimum apply again. The optimizer therefore heats the building and the tank
+    up before the return in the cheapest hours (PREHEAT/FORCED, HEAT_PUMP), as
+    soon as the return lies within the horizon. With an unknown return the whole
+    horizon counts as away.
+    """
+
+    room_c: float = Field(
+        default=20.0,
+        json_schema_extra={
+            "description": (
+                "Room temperature held while away [degC]; overridden by the measurement "
+                "'<device_id>-away-room-temperature'."
+            ),
+            "examples": [20.0, 18.0],
+        },
+    )
+    dhw_off: bool = Field(
+        default=True,
+        json_schema_extra={
+            "description": (
+                "Hot water is switched off while away: no reheating by the heat pump "
+                "controller, no tank minimum, no tapping; the tank is charged back to the "
+                "setpoint before the return."
+            )
+        },
+    )
+    cooling_max_c: float = Field(
+        default=28.0,
+        json_schema_extra={
+            "description": "Cooling season: room temperature tolerated while away [degC]."
+        },
+    )
+    max_age_hours: float = Field(
+        default=48.0,
+        gt=0,
+        json_schema_extra={
+            "description": "An away measurement older than this is ignored (treated as at home) [h]."
+        },
+    )
+
+
 class HeatPumpCalibrationSettings(SettingsBaseModel):
     """Automatic calibration of the model from measured operation (RL29 fork).
 
@@ -743,6 +793,7 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
     optimization: HeatPumpOptimizationSettings = Field(default_factory=HeatPumpOptimizationSettings)
     cooling: HeatPumpCoolingSettings = Field(default_factory=HeatPumpCoolingSettings)
     calibration: HeatPumpCalibrationSettings = Field(default_factory=HeatPumpCalibrationSettings)
+    away: HeatPumpAwaySettings = Field(default_factory=HeatPumpAwaySettings)
     power_limit_w: Optional[ValueTimeWindowSequence] = Field(
         default=None,
         json_schema_extra={
@@ -798,6 +849,11 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
         ]
         if self.cooling.enabled:
             keys += [self.measurement_key_cooling_season, self.measurement_key_dewpoint]
+        keys += [
+            self.measurement_key_away,
+            self.measurement_key_return_ts,
+            self.measurement_key_away_room_temperature,
+        ]
         if self.calibration.enabled:
             keys += [k for k in self.calibration_measurement_keys.values() if k not in keys]
         return keys
@@ -823,6 +879,24 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
     def measurement_key_cooling_season(self) -> str:
         """1 = cooling season (the controller has switched the system to cooling)."""
         return f"{self.device_id}-cooling-season"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def measurement_key_away(self) -> str:
+        """1 = holiday mode (nobody at home until the return)."""
+        return f"{self.device_id}-away"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def measurement_key_return_ts(self) -> str:
+        """Unix time of the return from holiday, 0 = unknown."""
+        return f"{self.device_id}-return-ts"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def measurement_key_away_room_temperature(self) -> str:
+        """Room temperature to hold while away [degC]."""
+        return f"{self.device_id}-away-room-temperature"
 
     @computed_field  # type: ignore[prop-decorator]
     @property

@@ -321,6 +321,12 @@ config path from ``self.device_id`` without needing an external index.
                        "cop_min_scale": 0.5,
                        "cop_max_scale": 1.5
                    },
+                   "away": {
+                       "room_c": 20.0,
+                       "dhw_off": true,
+                       "cooling_max_c": 28.0,
+                       "max_age_hours": 48.0
+                   },
                    "power_limit_w": null
                }
            },
@@ -658,6 +664,12 @@ config path from ``self.device_id`` without needing an external index.
                        "cop_min_scale": 0.5,
                        "cop_max_scale": 1.5
                    },
+                   "away": {
+                       "room_c": 20.0,
+                       "dhw_off": true,
+                       "cooling_max_c": 28.0,
+                       "max_age_hours": 48.0
+                   },
                    "power_limit_w": null,
                    "measurement_key_room_temperature": "wbb12-room-temperature",
                    "measurement_key_slab_temperature": "wbb12-slab-temperature",
@@ -669,7 +681,10 @@ config path from ``self.device_id`` without needing an external index.
                        "wbb12-slab-temperature",
                        "wbb12-dhw-temperature",
                        "wbb12-dhw-setpoint",
-                       "wbb12-power-limited"
+                       "wbb12-power-limited",
+                       "wbb12-away",
+                       "wbb12-return-ts",
+                       "wbb12-away-room-temperature"
                    ],
                    "calibration_measurement_keys": {
                        "outdoor_c": "wbb12-outdoor-temperature",
@@ -682,6 +697,9 @@ config path from ``self.device_id`` without needing an external index.
                        "ghi_w_per_m2": "wbb12-ghi"
                    },
                    "measurement_key_cooling_season": "wbb12-cooling-season",
+                   "measurement_key_away": "wbb12-away",
+                   "measurement_key_return_ts": "wbb12-return-ts",
+                   "measurement_key_away_room_temperature": "wbb12-away-room-temperature",
                    "measurement_key_dewpoint": "wbb12-dewpoint"
                }
            },
@@ -702,7 +720,10 @@ config path from ``self.device_id`` without needing an external index.
                "wbb12-slab-temperature",
                "wbb12-dhw-temperature",
                "wbb12-dhw-setpoint",
-               "wbb12-power-limited"
+               "wbb12-power-limited",
+               "wbb12-away",
+               "wbb12-return-ts",
+               "wbb12-away-room-temperature"
            ]
        }
    }

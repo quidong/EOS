@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610222173699185"
+    "version": "v0.3.0.dev2610222344565658"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -9480,6 +9480,37 @@
             ],
             "title": "Dewpoint C",
             "description": "Measured room dew point [degC]."
+          },
+          "away": {
+            "type": "boolean",
+            "title": "Away",
+            "description": "RL29 fork: holiday mode is active (reduced comfort until away_until).",
+            "default": false
+          },
+          "away_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Away Until",
+            "description": "Return from holiday; slots before it use the away settings. None with away = the whole horizon is away (return unknown)."
+          },
+          "away_room_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Away Room C",
+            "description": "Room temperature held while away [degC]; None = away.room_c."
           }
         },
         "additionalProperties": false,
@@ -10671,6 +10702,42 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "HeatPumpAwaySettings": {
+        "properties": {
+          "room_c": {
+            "type": "number",
+            "title": "Room C",
+            "description": "Room temperature held while away [degC]; overridden by the measurement '<device_id>-away-room-temperature'.",
+            "default": 20.0,
+            "examples": [
+              20.0,
+              18.0
+            ]
+          },
+          "dhw_off": {
+            "type": "boolean",
+            "title": "Dhw Off",
+            "description": "Hot water is switched off while away: no reheating by the heat pump controller, no tank minimum, no tapping; the tank is charged back to the setpoint before the return.",
+            "default": true
+          },
+          "cooling_max_c": {
+            "type": "number",
+            "title": "Cooling Max C",
+            "description": "Cooling season: room temperature tolerated while away [degC].",
+            "default": 28.0
+          },
+          "max_age_hours": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Max Age Hours",
+            "description": "An away measurement older than this is ignored (treated as at home) [h].",
+            "default": 48.0
+          }
+        },
+        "type": "object",
+        "title": "HeatPumpAwaySettings",
+        "description": "Holiday mode (RL29 fork): reduced comfort until the return, then back on time.\n\nThe controller reports ``<device_id>-away`` (1 = away) and optionally\n``<device_id>-return-ts`` (Unix time of the return, 0 = unknown) and\n``<device_id>-away-room-temperature`` (room temperature to hold while away,\ne.g. the reduced setpoint of the heating circuit). Until the return the\ncomfort minimum and the NORMAL setpoint are the away temperature and hot water\ncan be switched off; from the return on the normal comfort band and hot water\nminimum apply again. The optimizer therefore heats the building and the tank\nup before the return in the cheapest hours (PREHEAT/FORCED, HEAT_PUMP), as\nsoon as the return lies within the horizon. With an unknown return the whole\nhorizon counts as away."
+      },
       "HeatPumpBuildingSettings": {
         "properties": {
           "slab_capacity_wh_per_k": {
@@ -10976,6 +11043,9 @@
           "calibration": {
             "$ref": "#/components/schemas/HeatPumpCalibrationSettings"
           },
+          "away": {
+            "$ref": "#/components/schemas/HeatPumpAwaySettings"
+          },
           "power_limit_w": {
             "anyOf": [
               {
@@ -11037,6 +11107,9 @@
           },
           "calibration": {
             "$ref": "#/components/schemas/HeatPumpCalibrationSettings"
+          },
+          "away": {
+            "$ref": "#/components/schemas/HeatPumpAwaySettings"
           },
           "power_limit_w": {
             "anyOf": [
@@ -11109,6 +11182,24 @@
             "description": "1 = cooling season (the controller has switched the system to cooling).",
             "readOnly": true
           },
+          "measurement_key_away": {
+            "type": "string",
+            "title": "Measurement Key Away",
+            "description": "1 = holiday mode (nobody at home until the return).",
+            "readOnly": true
+          },
+          "measurement_key_return_ts": {
+            "type": "string",
+            "title": "Measurement Key Return Ts",
+            "description": "Unix time of the return from holiday, 0 = unknown.",
+            "readOnly": true
+          },
+          "measurement_key_away_room_temperature": {
+            "type": "string",
+            "title": "Measurement Key Away Room Temperature",
+            "description": "Room temperature to hold while away [degC].",
+            "readOnly": true
+          },
           "measurement_key_dewpoint": {
             "type": "string",
             "title": "Measurement Key Dewpoint",
@@ -11126,6 +11217,9 @@
           "measurement_keys",
           "calibration_measurement_keys",
           "measurement_key_cooling_season",
+          "measurement_key_away",
+          "measurement_key_return_ts",
+          "measurement_key_away_room_temperature",
           "measurement_key_dewpoint"
         ],
         "title": "HeatPumpCommonSettings",

@@ -630,8 +630,38 @@ class ConfigOptimizationRequest(
                 logger.info(
                     "Heat pump {}: cooling season, dew point {} degC.", device.device_id, dewpoint
                 )
+        # Holiday mode (RL29 fork).
+        away = False
+        away_until: Optional[DateTime] = None
+        away_room: Optional[float] = None
+        away_age = device.away.max_age_hours * 3600
+        flag = await self._latest_measurement(
+            device.measurement_key_away, observation_time, away_age
+        )
+        if flag is not None and flag >= 0.5:
+            return_ts = await self._latest_measurement(
+                device.measurement_key_return_ts, observation_time, away_age
+            )
+            if return_ts is not None and return_ts > 0:
+                away_until = to_datetime(return_ts, in_timezone=self.config.general.timezone)
+            away = away_until is None or away_until.timestamp() > observation_time.timestamp()
+            room_value = await self._latest_measurement(
+                device.measurement_key_away_room_temperature, observation_time, 7 * 24 * 3600
+            )
+            if room_value is not None and 10.0 <= room_value <= 24.0:
+                away_room = room_value
+            if away:
+                logger.info(
+                    "Heat pump {}: holiday mode until {}, room {} degC.",
+                    device.device_id,
+                    away_until.isoformat() if away_until is not None else "unknown",
+                    away_room if away_room is not None else device.away.room_c,
+                )
         return GeneticHeatPumpParameters(
             device_id=device.device_id,
+            away=away,
+            away_until=away_until if away else None,
+            away_room_c=away_room,
             cooling_season=cooling_season,
             dewpoint_c=dewpoint,
             settings=device,

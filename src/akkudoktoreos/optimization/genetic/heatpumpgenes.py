@@ -48,6 +48,7 @@ from akkudoktoreos.devices.thermal.heatpump import (
     ThermalState,
 )
 from akkudoktoreos.optimization.genetic.geneticabc import GeneticParametersBaseModel
+from akkudoktoreos.utils.datetimeutil import DateTime
 
 
 class GeneticHeatPumpParameters(GeneticParametersBaseModel):
@@ -127,6 +128,27 @@ class GeneticHeatPumpParameters(GeneticParametersBaseModel):
     dewpoint_c: Optional[float] = Field(
         default=None,
         json_schema_extra={"description": "Measured room dew point [degC]."},
+    )
+    away: bool = Field(
+        default=False,
+        json_schema_extra={
+            "description": "RL29 fork: holiday mode is active (reduced comfort until away_until)."
+        },
+    )
+    away_until: Optional[DateTime] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "Return from holiday; slots before it use the away settings. None with away = "
+                "the whole horizon is away (return unknown)."
+            )
+        },
+    )
+    away_room_c: Optional[float] = Field(
+        default=None,
+        json_schema_extra={
+            "description": "Room temperature held while away [degC]; None = away.room_c."
+        },
     )
 
 
@@ -209,6 +231,8 @@ class HeatPumpRunPlan:
     """Cost of a room above its comfort maximum [currency per K*h]."""
     active_mode_penalty: float = 0.0
     """Cost per hour of an active mode; prefers NORMAL/HOLD where a mode changes nothing."""
+    away_slots: int = 0
+    """Holiday mode: number of slots before the return (0 = at home)."""
     tank_heat_value_above_setpoint: Optional[float] = None
     """Value of tank heat above the heat pump setpoint [currency/Wh]; None = tank_heat_value.
     Water the rod heated beyond the setpoint loses more and is valued with a discount."""
@@ -357,6 +381,7 @@ class HeatPumpRunPlan:
                 "comfort_min_c",
                 "comfort_max_c",
                 "outdoor_c",
+                "away",
             ):
                 rows[name] = []
         for slot, inputs in enumerate(self.inputs):
@@ -373,6 +398,11 @@ class HeatPumpRunPlan:
             if option.mode != DhwMode.HOLD:
                 active_hours += dt
             dhw_kh += result.dhw_violation_kh
+            if slot == self.away_slots - 1 and self.away_slots < len(self.inputs):
+                # Holiday mode: hot water has to be ready at the return, not only after
+                # the heat pump's own reheat in the first hour at home.
+                shortfall = max(0.0, system.dhw.min_c - state.dhw_c)
+                dhw_kh += shortfall * RETURN_READY_HOURS
             if state.dhw_c > max_dhw:
                 max_dhw = state.dhw_c
             if deadline is not None and slot < deadline and state.dhw_c >= self.legionella_c - 0.5:
@@ -400,6 +430,7 @@ class HeatPumpRunPlan:
                 rows["comfort_min_c"].append(low)
                 rows["comfort_max_c"].append(high)
                 rows["outdoor_c"].append(inputs.outdoor_c)
+                rows["away"].append(1.0 if slot < self.away_slots else 0.0)
 
         # Mode changes between consecutive gene periods.
         n = self.n_periods
@@ -726,6 +757,9 @@ class HeatPumpGeneLayout:
 # ----------------------------------------------------------------------
 
 
+RETURN_READY_HOURS = 2.0
+"""Holiday mode: a tank below its minimum at the return counts as this many hours short."""
+
 TANK_DWELL_HOURS = 12.0
 """Typical time stored hot water waits until it is tapped; sets the loss discount
 on tank heat above the heat pump setpoint at the end of the horizon."""
@@ -833,6 +867,38 @@ def build_run_plan(
                 slot_input.cooling_budget_w = (
                     surplus if surplus >= cooling.min_pv_surplus_w else 0.0
                 )
+
+    # Holiday mode (RL29 fork): reduced comfort and hot water off until the return.
+    away_slots = 0
+    if parameters.away:
+        away = settings.away
+        room_away = parameters.away_room_c if parameters.away_room_c is not None else away.room_c
+        until = parameters.away_until
+        for i, (start, slot_input) in enumerate(zip(slot_starts, inputs)):
+            if until is not None and start.timestamp() >= until.timestamp():
+                break
+            away_slots = i + 1
+            if slot_input.cooling_season:
+                slot_input.setpoint_c = away.cooling_max_c
+                slot_input.comfort_max_c = max(away.cooling_max_c, slot_input.comfort_max_c or 0.0)
+            else:
+                normal_setpoint = slot_input.setpoint_c
+                slot_input.comfort_min_c = min(slot_input.comfort_min_c, room_away)
+                slot_input.setpoint_c = room_away
+                slot_input.raised_c = normal_setpoint  # RAISED heats back to normal
+                # comfort_max_c stays: PREHEAT/FORCED heat up towards the return
+            if away.dhw_off:
+                slot_input.dhw_off = True
+                slot_input.draw_wh = 0.0
+        logger.info(
+            "Heat pump {}: holiday mode, {} of {} slots away (return {}), room {} degC, hot water {}.",
+            parameters.device_id,
+            away_slots,
+            len(inputs),
+            until.isoformat() if until is not None else "unknown",
+            room_away,
+            "off" if away.dhw_off else "on",
+        )
 
     # Active §14a dimming: limit the first slots.
     if parameters.power_limited_w is not None:
@@ -971,6 +1037,7 @@ def build_run_plan(
         separate_meter_price_per_wh=separate_prices,
         overheat_penalty=opt.overheat_penalty_amt_per_kh,
         active_mode_penalty=opt.active_mode_penalty_amt_per_h,
+        away_slots=away_slots,
     )
 
 
@@ -992,6 +1059,7 @@ def plan_result(plan: HeatPumpRunPlan, genes: Sequence[int]) -> dict[str, Any]:
         "separate_meter": plan.separate_meter_price_per_wh is not None,
         "separate_meter_cost_amt": float(outcome.separate_meter_cost),
         "electric_wh": float(sum(outcome.electric_wh)),
+        "away_slots": int(plan.away_slots),
     }
     for key, values in list(result.items()):
         if isinstance(values, list):
