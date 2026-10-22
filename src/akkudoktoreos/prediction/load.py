@@ -9,6 +9,7 @@ from akkudoktoreos.core.coreabc import get_prediction
 from akkudoktoreos.prediction.loadabc import LoadProvider
 from akkudoktoreos.prediction.loadakkudoktor import LoadAkkudoktorCommonSettings
 from akkudoktoreos.prediction.loadimport import LoadImportCommonSettings
+from akkudoktoreos.prediction.loadmeasured import LoadMeasuredCommonSettings
 from akkudoktoreos.prediction.loadvrm import LoadVrmCommonSettings
 
 
@@ -19,7 +20,7 @@ def load_providers() -> list[str]:
     except Exception:
         # Prediction may not be initialized
         # Return at least provider used in example
-        return ["LoadAkkudoktor", "LoadVrm", "LoadImport"]
+        return ["LoadAkkudoktor", "LoadVrm", "LoadImport", "LoadMeasured"]
 
     return [
         provider.provider_id()
@@ -42,6 +43,13 @@ class LoadCommonSettings(SettingsBaseModel):
     loadakkudoktor: LoadAkkudoktorCommonSettings = Field(
         default_factory=LoadAkkudoktorCommonSettings,
         json_schema_extra={"description": "LoadAkkudoktor provider settings."},
+    )
+
+    loadmeasured: LoadMeasuredCommonSettings = Field(
+        default_factory=LoadMeasuredCommonSettings,
+        json_schema_extra={
+            "description": "LoadMeasured provider settings (RL29 fork: own measured history)."
+        },
     )
 
     loadimport: LoadImportCommonSettings = Field(

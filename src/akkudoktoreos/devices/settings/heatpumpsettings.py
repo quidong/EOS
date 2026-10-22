@@ -284,14 +284,30 @@ class HeatPumpDhwSettings(SettingsBaseModel):
     )
     draw_profile_wh: list[float] = Field(
         default_factory=_default_draw_profile,
-        json_schema_extra={"description": "Hot water tapped per hour of day, 24 values [Wh]."},
+        json_schema_extra={
+            "description": (
+                "Hot water tapped per hour of day, 24 values [Wh]; Monday to Friday when "
+                "draw_profile_weekend_wh is set. Prior of the learned profile (calibration)."
+            )
+        },
+    )
+    draw_profile_weekend_wh: Optional[list[float]] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "Hot water tapped per hour on Saturdays and Sundays, 24 values [Wh]; None = "
+                "draw_profile_wh holds every day."
+            )
+        },
     )
 
-    @field_validator("draw_profile_wh")
+    @field_validator("draw_profile_wh", "draw_profile_weekend_wh")
     @classmethod
-    def validate_profile(cls, value: list[float]) -> list[float]:
+    def validate_profile(cls, value: Optional[list[float]]) -> Optional[list[float]]:
+        if value is None:
+            return value
         if len(value) != 24 or any(v < 0 for v in value):
-            raise ValueError("draw_profile_wh needs 24 non-negative hourly values.")
+            raise ValueError("A draw profile needs 24 non-negative hourly values.")
         return value
 
     @field_validator("rod_targets_c")
@@ -306,8 +322,11 @@ class HeatPumpDhwSettings(SettingsBaseModel):
         return self
 
     def draw_wh(self, start: DateTime, slot_hours: float) -> float:
-        """Tapped energy in the slot starting at ``start`` [Wh]."""
-        return self.draw_profile_wh[start.hour] * slot_hours
+        """Tapped energy in the slot starting at ``start`` [Wh] (local hour and weekday)."""
+        profile = self.draw_profile_wh
+        if self.draw_profile_weekend_wh is not None and start.weekday() >= 5:
+            profile = self.draw_profile_weekend_wh
+        return profile[start.hour] * slot_hours
 
 
 def _default_comfort_min() -> ValueTimeWindowSequence:
@@ -678,6 +697,35 @@ class HeatPumpCalibrationSettings(SettingsBaseModel):
             )
         },
     )
+    fit_draw_profile: bool = Field(
+        default=True,
+        json_schema_extra={
+            "description": (
+                "Learn dhw.draw_profile_wh (and a weekend profile) from the tank temperature; "
+                "takes over once draw_min_days usable days exist."
+            )
+        },
+    )
+    draw_min_days: int = Field(
+        default=14,
+        ge=3,
+        json_schema_extra={
+            "description": "Usable days before the learned draw profile replaces the configured one.",
+            "examples": [14],
+        },
+    )
+    draw_quantile: Optional[float] = Field(
+        default=None,
+        gt=0,
+        lt=1,
+        json_schema_extra={
+            "description": (
+                "Statistic of the draw per hour over the days: None = mean (right for "
+                "tapping at varying times), else this quantile."
+            ),
+            "examples": [None, 0.5],
+        },
+    )
     weather_from_prediction: bool = Field(
         default=True,
         json_schema_extra={
@@ -780,6 +828,8 @@ class HeatPumpCalibrationSettings(SettingsBaseModel):
             cop_prior_hours=self.cop_prior_hours,
             cop_min_scale=self.cop_min_scale,
             cop_max_scale=self.cop_max_scale,
+            draw_min_days=self.draw_min_days,
+            draw_quantile=self.draw_quantile,
         )
 
 
@@ -926,6 +976,8 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
             standby_w=self.unit.standby_w,
             dhw_volume_l=self.dhw.volume_l,
             dhw_ambient_c=self.dhw.ambient_c,
+            draw_profile_wh=tuple(self.dhw.draw_profile_wh),
+            draw_profile_weekend_wh=tuple(self.dhw.draw_profile_weekend_wh or ()),
         )
 
     def calibrated(self, result: Optional[CalibrationResult]) -> "HeatPumpCommonSettings":
@@ -934,7 +986,9 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
         The configuration itself is never changed: it stays the prior of the
         next fit. Missing fits keep the configured value.
         """
-        if result is None or not (result.building or result.cop or result.dhw or result.emitter):
+        if result is None or not (
+            result.building or result.cop or result.dhw or result.emitter or result.draw
+        ):
             return self
         data = self.model_dump(exclude=set(type(self).model_computed_fields))
         if result.building:
@@ -947,6 +1001,10 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
             data["building"]["emitter_w_per_k"] = result.emitter.emitter_w_per_k
         if result.dhw:
             data["dhw"]["loss_w_per_k"] = result.dhw.loss_w_per_k
+        if result.draw:
+            data["dhw"]["draw_profile_wh"] = list(result.draw.profile_wh)
+            if result.draw.weekend_wh is not None:
+                data["dhw"]["draw_profile_weekend_wh"] = list(result.draw.weekend_wh)
         return type(self).model_validate(data)
 
     def to_system(

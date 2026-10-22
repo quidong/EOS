@@ -235,7 +235,8 @@
                            200.0,
                            80.0,
                            40.0
-                       ]
+                       ],
+                       "draw_profile_weekend_wh": null
                    },
                    "comfort": {
                        "setpoint_c": 21.0,
@@ -315,6 +316,9 @@
                        "fit_cop": true,
                        "fit_dhw": true,
                        "fit_emitter": true,
+                       "fit_draw_profile": true,
+                       "draw_min_days": 14,
+                       "draw_quantile": null,
                        "weather_from_prediction": true,
                        "min_days": 5,
                        "prior_weight_days": 7.0,
@@ -434,6 +438,13 @@
            "provider": "LoadAkkudoktor",
            "loadakkudoktor": {
                "loadakkudoktor_year_energy_kwh": null
+           },
+           "loadmeasured": {
+               "weeks": 6,
+               "min_days": 14,
+               "min_days_per_type": 3,
+               "quantile": 0.5,
+               "gap_threshold": 0.3
            },
            "loadimport": {
                "import_file_path": null,

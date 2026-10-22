@@ -4549,6 +4549,14 @@ class GeneticOptimization(OptimizationBase):
                         self.slot_duration_h,
                         heat_pump_results[plan.device_id],
                     )
+                    from akkudoktoreos.devices.heatpumpkpis import device_kpis
+
+                    try:
+                        heat_pump_results[plan.device_id]["kpis"] = device_kpis(
+                            plan.device_id, Path(self.config.general.data_folder_path)
+                        )
+                    except Exception as exc:  # diagnostics, never part of the run
+                        logger.debug("Heat pump {}: no KPIs: {}", plan.device_id, exc)
 
         # Deprecated single-device hourly start (kept for backward compatibility).
         # Only meaningful for the legacy case: exactly one appliance on the hourly

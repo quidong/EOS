@@ -156,7 +156,7 @@ def WeatherIrradianceForecast(
 def LoadForecast(predictions: pd.DataFrame, config: dict, date_time_tz: str, dark: bool) -> FT:
     source = ColumnDataSource(predictions)
     provider = config["load"]["provider"]
-    if provider == "LoadAkkudoktorAdjusted":
+    if provider in ("LoadAkkudoktorAdjusted", "LoadMeasured"):
         year_energy = config["load"]["loadakkudoktor"]["loadakkudoktor_year_energy_kwh"]
         provider = f"{provider}, {year_energy} kWh"
 
