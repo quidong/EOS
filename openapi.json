@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610221141614228"
+    "version": "v0.3.0.dev2610221803894781"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -10727,6 +10727,155 @@
         "title": "HeatPumpBuildingSettings",
         "description": "Two-node building model (screed + room)."
       },
+      "HeatPumpCalibrationSettings": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Fit building losses, solar aperture, internal gains, COP scale and tank loss from the measurements and plan with the fitted values. The configured values stay the prior; see the result in the log and in '<data folder>/rl29/heatpump_calibration.json'.",
+            "default": false,
+            "examples": [
+              false,
+              true
+            ]
+          },
+          "days": {
+            "type": "integer",
+            "maximum": 365.0,
+            "minimum": 3.0,
+            "title": "Days",
+            "description": "Length of the measurement window used for the fits [days].",
+            "default": 30,
+            "examples": [
+              30,
+              14
+            ]
+          },
+          "refit_hours": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Refit Hours",
+            "description": "Refit at most every this many hours; in between the stored fit is used.",
+            "default": 24.0,
+            "examples": [
+              24.0,
+              6.0
+            ]
+          },
+          "fit_building": {
+            "type": "boolean",
+            "title": "Fit Building",
+            "description": "Fit building.loss_w_per_k, solar_aperture_m2 and internal_gains_w.",
+            "default": true
+          },
+          "fit_cop": {
+            "type": "boolean",
+            "title": "Fit Cop",
+            "description": "Fit unit.cop_scale.",
+            "default": true
+          },
+          "fit_dhw": {
+            "type": "boolean",
+            "title": "Fit Dhw",
+            "description": "Fit dhw.loss_w_per_k.",
+            "default": true
+          },
+          "weather_from_prediction": {
+            "type": "boolean",
+            "title": "Weather From Prediction",
+            "description": "Fill hours without a measured outdoor temperature or irradiance from the weather provider (the values are stored as measurements, so the history builds up while EOS runs).",
+            "default": true,
+            "examples": [
+              true
+            ]
+          },
+          "min_days": {
+            "type": "integer",
+            "minimum": 2.0,
+            "title": "Min Days",
+            "description": "Minimum number of complete days for the building fit.",
+            "default": 5,
+            "examples": [
+              5
+            ]
+          },
+          "prior_weight_days": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Prior Weight Days",
+            "description": "Shrinkage of the building fit: the configured values weigh like this many measured days. 0 trusts the measurements alone.",
+            "default": 7.0,
+            "examples": [
+              7.0,
+              2.0,
+              0.0
+            ]
+          },
+          "outage_threshold": {
+            "type": "number",
+            "exclusiveMaximum": 1.0,
+            "minimum": 0.0,
+            "title": "Outage Threshold",
+            "description": "A day delivering less than this share of the healthy heat per kelvin although the model expects heating is excluded (heat pump off, manual operation). 0 disables the filter.",
+            "default": 0.4,
+            "examples": [
+              0.4
+            ]
+          },
+          "loss_min_factor": {
+            "type": "number",
+            "maximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Loss Min Factor",
+            "description": "Lower clamp of the fitted loss, relative to the configured value.",
+            "default": 0.3
+          },
+          "loss_max_factor": {
+            "type": "number",
+            "minimum": 1.0,
+            "title": "Loss Max Factor",
+            "description": "Upper clamp of the fitted loss, relative to the configured value.",
+            "default": 3.0
+          },
+          "cop_min_heat_w": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Cop Min Heat W",
+            "description": "Hours count for the COP fit only above this mean heat output [W]: the lowest compressor modulation, so the heat pump ran the whole hour.",
+            "default": 3000.0,
+            "examples": [
+              3000.0
+            ]
+          },
+          "cop_prior_hours": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Cop Prior Hours",
+            "description": "Shrinkage of the COP scale: the configured value weighs like this many hours.",
+            "default": 24.0,
+            "examples": [
+              24.0
+            ]
+          },
+          "cop_min_scale": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Cop Min Scale",
+            "description": "Lower clamp of the fitted COP scale.",
+            "default": 0.5
+          },
+          "cop_max_scale": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Cop Max Scale",
+            "description": "Upper clamp of the fitted COP scale.",
+            "default": 1.5
+          }
+        },
+        "type": "object",
+        "title": "HeatPumpCalibrationSettings",
+        "description": "Automatic calibration of the model from measured operation (RL29 fork).\n\nSame approach as the PV calibration: the configured parameters stay the\nprior, the measurements of a rolling window correct them, and every result\nis clipped to a band around the configuration. The fits need the\nmeasurements ``<id>-outdoor-temperature``, ``<id>-room-temperature``,\n``<id>-heat-power`` (thermal output [W]), ``<id>-electric-power`` [W],\n``<id>-flow-temperature``, ``<id>-dhw-temperature`` and optionally\n``<id>-dhw-heat-power`` and ``<id>-ghi`` [W/m\u00b2]. Hours without an outdoor\ntemperature or irradiance measurement are filled from the weather forecast\nprovider (``weather_from_prediction``), so the solar term needs no extra\nsensor. Power and temperature keys should be imported with their history\n(``adapter.homeassistant.device_measurement_history_keys``) so the hourly\nmeans are exact."
+      },
       "HeatPumpComfortSettings-Input": {
         "properties": {
           "setpoint_c": {
@@ -10818,6 +10967,9 @@
           "cooling": {
             "$ref": "#/components/schemas/HeatPumpCoolingSettings"
           },
+          "calibration": {
+            "$ref": "#/components/schemas/HeatPumpCalibrationSettings"
+          },
           "power_limit_w": {
             "anyOf": [
               {
@@ -10877,6 +11029,9 @@
           "cooling": {
             "$ref": "#/components/schemas/HeatPumpCoolingSettings"
           },
+          "calibration": {
+            "$ref": "#/components/schemas/HeatPumpCalibrationSettings"
+          },
           "power_limit_w": {
             "anyOf": [
               {
@@ -10933,6 +11088,15 @@
             "title": "Measurement Keys",
             "readOnly": true
           },
+          "calibration_measurement_keys": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Calibration Measurement Keys",
+            "description": "Measurement keys of the calibration by hourly sample field.",
+            "readOnly": true
+          },
           "measurement_key_cooling_season": {
             "type": "string",
             "title": "Measurement Key Cooling Season",
@@ -10954,6 +11118,7 @@
           "measurement_key_dhw_setpoint",
           "measurement_key_power_limited",
           "measurement_keys",
+          "calibration_measurement_keys",
           "measurement_key_cooling_season",
           "measurement_key_dewpoint"
         ],
@@ -11706,6 +11871,35 @@
             "x-scope": [
               "GENETIC"
             ]
+          },
+          "profile_duration_quantile": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.5,
+            "title": "Profile Duration Quantile",
+            "description": "RL29 fork: the planning length of a learned profile is this quantile of the recent run durations (1.0 = the longest run), so that a run planned against a deadline is finished in time even when the machine takes longer than on average.",
+            "default": 0.8,
+            "examples": [
+              0.8,
+              1.0
+            ],
+            "x-scope": [
+              "GENETIC"
+            ]
+          },
+          "profile_outlier_tolerance": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Profile Outlier Tolerance",
+            "description": "RL29 fork: once a program has three learned runs, a run whose energy or duration deviates more than this fraction from the recent median is not learned (interrupted measurement, wrong program code). Three rejected runs in a row are accepted again. 0 disables the check.",
+            "default": 0.4,
+            "examples": [
+              0.4,
+              0
+            ],
+            "x-scope": [
+              "GENETIC"
+            ]
           }
         },
         "type": "object",
@@ -12041,6 +12235,35 @@
             "default": 20.0,
             "examples": [
               20.0
+            ],
+            "x-scope": [
+              "GENETIC"
+            ]
+          },
+          "profile_duration_quantile": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.5,
+            "title": "Profile Duration Quantile",
+            "description": "RL29 fork: the planning length of a learned profile is this quantile of the recent run durations (1.0 = the longest run), so that a run planned against a deadline is finished in time even when the machine takes longer than on average.",
+            "default": 0.8,
+            "examples": [
+              0.8,
+              1.0
+            ],
+            "x-scope": [
+              "GENETIC"
+            ]
+          },
+          "profile_outlier_tolerance": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Profile Outlier Tolerance",
+            "description": "RL29 fork: once a program has three learned runs, a run whose energy or duration deviates more than this fraction from the recent median is not learned (interrupted measurement, wrong program code). Three rejected runs in a row are accepted again. 0 disables the check.",
+            "default": 0.4,
+            "examples": [
+              0.4,
+              0
             ],
             "x-scope": [
               "GENETIC"

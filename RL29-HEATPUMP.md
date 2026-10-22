@@ -135,8 +135,77 @@ Hinweise zur Konfiguration:
   Deshalb `load_forecast_includes_heat_pump: false`. Die KNX-Zähler passen noch nicht zusammen
   (19.10.: Hausverbrauch 5,1 kWh, `sensor.energie_warmepumpe` 3,0 kWh, Weishaupt-Statistik 12 kWh), daher
   noch keine messwertgestützte Prognose (`LoadAkkudoktorAdjusted`) auf Basis von `sensor.eos_grundlast_ohne_wp_gesamt`.
-- **Gebäudeparameter** kommen aus `scripts/rl29/calibrate_heatpump.py`. Die Defaults sind Schätzwerte.
+- **Gebäudeparameter** kommen aus `scripts/rl29/calibrate_heatpump.py` (erste Kalibrierung) und werden danach
+  automatisch aus den Messwerten nachgeführt (Abschnitt 2a). Die Defaults sind Schätzwerte.
 - Ein **Estrich-Messwert** existiert nicht. EOS schätzt ihn dann aus dem Gleichgewicht.
+
+## 2a. Automatische Kalibrierung (Fork, ab 22.10.2026)
+
+Gleicher Ansatz wie die PV-Kalibrierung, auf Wärme übertragen: Die konfigurierten Parameter bleiben der
+Ausgangspunkt (Prior), die Messwerte eines rollierenden Fensters korrigieren sie, und jedes Ergebnis wird auf
+ein Band um die Konfiguration begrenzt. EOS plant mit den angepassten Werten; die Konfiguration selbst wird
+nie geschrieben.
+
+| Fit | Daten | Methode |
+|---|---|---|
+| `building.loss_w_per_k`, `solar_aperture_m2`, `internal_gains_w` | Tagesmittel von Raum-, Außentemperatur, Heizwärme (ohne WW), Globalstrahlung | Regression `Q = H·ΔT − A·G − g`, mit Schrumpfung zur Konfiguration (`prior_weight_days`, Standard 7 Tage); Tage mit wenig Wärme trotz erwartetem Bedarf (WP aus, Handbetrieb) und Tage mit driftender Raumtemperatur (> 1 K) fliegen raus |
+| `unit.cop_scale` | Stunden mit Heizwärme ≥ `cop_min_heat_w` (3 kW = kleinste Modulation, WP lief durch) | Energiegewichtetes Verhältnis Messung/Kennfeld, Standby (`unit.standby_w`) vorher abgezogen; Schrumpfung mit `cop_prior_hours` (24 h) |
+| `dhw.loss_w_per_k` | Nächte 0–5 Uhr ohne Ladung und Zapfung | Exponentieller Abfall, Median über Nächte |
+
+Ohne Globalstrahlung in den Daten bleibt die Apertur auf dem konfigurierten Wert (sonst zählte die Sonne doppelt).
+
+Konfiguration und Messwerte:
+
+```json
+{
+  "devices": {"heat_pumps": {"wbb12": {
+    "calibration": {"enabled": true, "days": 30, "refit_hours": 24}
+  }}},
+  "adapter": {"homeassistant": {
+    "device_measurement_entity_ids": {
+      "wbb12-outdoor-temperature": "sensor.wh_system_aussentemperatur",
+      "wbb12-heat-power": "sensor.wh_warmepumpe_warmeleistung",
+      "wbb12-electric-power": "sensor.strom_warmepumpe",
+      "wbb12-flow-temperature": "sensor.wh_warmepumpe_vorlauftemperatur"
+    },
+    "device_measurement_history_keys": [
+      "wbb12-heat-power", "wbb12-electric-power", "wbb12-flow-temperature",
+      "wbb12-outdoor-temperature", "wbb12-room-temperature", "wbb12-dhw-temperature"
+    ]
+  }}
+}
+```
+
+- `wbb12-room-temperature` und `wbb12-dhw-temperature` sind schon da. Optional: `wbb12-dhw-heat-power`
+  (Wärme in den Speicher, sonst aus dem Temperaturanstieg geschätzt) und `wbb12-ghi` (Globalstrahlung).
+- Stunden ohne gemessene Außentemperatur oder Strahlung füllt EOS aus der Wetterprognose (Open-Meteo, letzte
+  48 h) und schreibt sie als Messwerte zurück. Die Strahlung braucht also keinen eigenen Sensor; die Historie
+  wächst mit jedem Lauf. `weather_from_prediction: false` schaltet das ab.
+- Die `device_measurement_history_keys` sind wichtig: ohne sie sieht EOS nur den Wert beim Lauf, mit ihnen den
+  ganzen HA-Verlauf, und die Stundenmittel stimmen.
+- Der WP-Strom aus der KNX-Messung (`sensor.strom_warmepumpe`) enthält den Standby; `unit.standby_w` (22 W) wird
+  im COP-Fit abgezogen. Der Weishaupt-Zähler wäre hier falsch (kein Kühlstrom, andere Erfassung).
+
+Ergebnis: `<EOS-Datenordner>/rl29/heatpump_calibration.json` (Werte, Diagnose, Zusammenfassung) und im Log
+`Heat pump wbb12 calibration over 30 days (...): loss 180 -> 172 W/K, aperture 0.0 -> 2.3 m2, gains 0 -> 150 W
+(27 days, MAE 310 -> 140 W); COP scale 1.000 -> 0.91 (143 h, measured 3.4 vs rated 3.7); tank loss 1.50 -> 1.72 W/K
+(21 nights)`. Steht dort `nothing fitted yet`, fehlen noch Tage; die Gründe stehen dahinter.
+
+Stellschrauben (alle unter `calibration`): `fit_building`/`fit_cop`/`fit_dhw` (einzeln abschaltbar),
+`min_days` (5), `prior_weight_days` (7; 0 = nur Messwerte), `outage_threshold` (0,4; 0 = aus),
+`loss_min_factor`/`loss_max_factor` (0,3/3,0), `cop_min_heat_w` (3000), `cop_prior_hours` (24),
+`cop_min_scale`/`cop_max_scale` (0,5/1,5).
+
+Erste Kalibrierung von Hand (bevor EOS 30 Tage Historie hat), mit Strahlung aus dem Open-Meteo-Archiv:
+
+```bash
+python3 scripts/rl29/calibrate_heatpump.py fetch --ha-url http://192.168.30.180:8123 --token "$HA_TOKEN" \
+  --days 30 --open-meteo 49.49,8.47 -o hp.csv
+python3 scripts/rl29/calibrate_heatpump.py fit hp.csv --device-id wbb12 --prior-loss 180 --prior-cop-scale 1.0
+```
+
+Die Ausgabe ist ein Konfigurations-Snippet für `devices.heat_pumps.wbb12`; die Werte werden dann zum neuen Prior
+der automatischen Kalibrierung.
 
 ## 3. §14a EnWG: Modul wählbar (keins, 1, 2, 1+3)
 

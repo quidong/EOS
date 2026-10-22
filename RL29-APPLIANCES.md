@@ -85,13 +85,28 @@ Ablauf bei jedem EOS-Lauf:
 
 1. Fertige Läufe erkennen: Leistung > `profile_power_threshold_w` (20 W), Pausen < 15 min gehören zum Lauf,
    ein Lauf gilt nach 15 min Ruhe als beendet. Das Programm ist der Code, der beim Start gesetzt war.
+   Läufe, die am Anfang des 2-Tage-Messfensters beginnen (Anfang unbekannt), werden nicht gelernt.
 2. Lernen (Online-Lernen): die ersten Läufe eines Programms werden gleich gewichtet gemittelt, danach
-   gleitender Mittelwert mit `profile_learning_rate` (0,3). Ausreißer wirken begrenzt, Änderungen werden
-   übernommen. Die Länge wird genauso gemittelt.
-3. Planen: Wartet ein Auftrag und gibt es ein gelerntes Profil für das gewählte Programm, plant EOS mit diesem
-   Profil, sonst mit der Konfiguration.
+   gleitender Mittelwert mit `profile_learning_rate` (0,3). Die Profile sind am Start ausgerichtet (die
+   Heizphase liegt immer am Anfang); ist ein Lauf länger als das Profil, wird das kürzere Profil mit dem
+   Mittel seines letzten Fünftels fortgesetzt, nicht mit Nullen (sonst würde Spülen/Schleudern mit jedem
+   Lauf Energie verlieren).
+3. Ausreißer: Ab dem dritten Lauf eines Programms wird ein Lauf verworfen, dessen Energie oder Dauer mehr als
+   `profile_outlier_tolerance` (40 %) vom Median der letzten Läufe abweicht (EOS-Neustart mitten im Lauf,
+   falscher Programm-Code). Der Lauf wird im Log gemeldet (`rejected as outlier`). Drei verworfene Läufe in
+   Folge heißen „das Programm hat sich geändert“: das Profil beginnt mit dem nächsten Lauf neu.
+   `profile_outlier_tolerance: 0` schaltet die Prüfung ab.
+4. Planlänge: Die Dauer, mit der EOS plant, ist das `profile_duration_quantile` (0,8) der letzten 20 Laufzeiten,
+   nicht der Mittelwert. Mit dem Mittelwert wäre jeder zweite Lauf später fertig als geplant und würde den
+   Termin (fertig bis 19:30) reißen. `1.0` plant mit dem längsten Lauf. Das Profil wird dafür mit dem Mittel
+   seines Endes verlängert.
+5. Planen: Wartet ein Auftrag und gibt es ein gelerntes Profil für das gewählte Programm, plant EOS mit diesem
+   Profil, sonst mit der Konfiguration. Im Log: `learned profile of program 3 (7 runs, 1650 Wh, 150 min)`.
 
-Speicher: `<EOS-Datenordner>/rl29/appliance_profiles.json` (je Gerät und Programm: Profil, Anzahl Läufe, Energie).
+Speicher: `<EOS-Datenordner>/rl29/appliance_profiles.json` (je Gerät und Programm: `power_w` Planprofil,
+`shape_w` gemitteltes Profil, `durations_s`/`energies_wh` der letzten Läufe, `runs`, `rejected`, `energy_wh`,
+`duration_s`, `last_run`). Bestehende Dateien aus der ersten Version werden weiterverwendet; `shape_w`,
+`durations_s` und `energies_wh` entstehen mit dem nächsten Lauf.
 
 Ausbaustufe: Sobald genug Läufe da sind, kann statt des Mittelwerts je Programm ein Regressionsmodell
 (Programm + Temperatur + Schleuderdrehzahl + Beladung → Profil) gelernt werden.

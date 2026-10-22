@@ -130,7 +130,9 @@ config path from ``self.device_id`` without needing an external index.
                    "request_max_age_seconds": 3600,
                    "learn_profiles": false,
                    "profile_learning_rate": 0.3,
-                   "profile_power_threshold_w": 20.0
+                   "profile_power_threshold_w": 20.0,
+                   "profile_duration_quantile": 0.8,
+                   "profile_outlier_tolerance": 0.4
                }
            },
            "max_home_appliances": 3,
@@ -295,6 +297,24 @@ config path from ``self.device_id`` without needing an external index.
                        "pv_only": true,
                        "min_pv_surplus_w": 500.0
                    },
+                   "calibration": {
+                       "enabled": false,
+                       "days": 30,
+                       "refit_hours": 24.0,
+                       "fit_building": true,
+                       "fit_cop": true,
+                       "fit_dhw": true,
+                       "weather_from_prediction": true,
+                       "min_days": 5,
+                       "prior_weight_days": 7.0,
+                       "outage_threshold": 0.4,
+                       "loss_min_factor": 0.3,
+                       "loss_max_factor": 3.0,
+                       "cop_min_heat_w": 3000.0,
+                       "cop_prior_hours": 24.0,
+                       "cop_min_scale": 0.5,
+                       "cop_max_scale": 1.5
+                   },
                    "power_limit_w": null
                }
            },
@@ -433,6 +453,8 @@ config path from ``self.device_id`` without needing an external index.
                    "learn_profiles": false,
                    "profile_learning_rate": 0.3,
                    "profile_power_threshold_w": 20.0,
+                   "profile_duration_quantile": 0.8,
+                   "profile_outlier_tolerance": 0.4,
                    "measurement_key_power": "dishwasher-power",
                    "measurement_key_program": "dishwasher-program",
                    "measurement_key_requested": "dishwasher-requested",
@@ -606,6 +628,24 @@ config path from ``self.device_id`` without needing an external index.
                        "pv_only": true,
                        "min_pv_surplus_w": 500.0
                    },
+                   "calibration": {
+                       "enabled": false,
+                       "days": 30,
+                       "refit_hours": 24.0,
+                       "fit_building": true,
+                       "fit_cop": true,
+                       "fit_dhw": true,
+                       "weather_from_prediction": true,
+                       "min_days": 5,
+                       "prior_weight_days": 7.0,
+                       "outage_threshold": 0.4,
+                       "loss_min_factor": 0.3,
+                       "loss_max_factor": 3.0,
+                       "cop_min_heat_w": 3000.0,
+                       "cop_prior_hours": 24.0,
+                       "cop_min_scale": 0.5,
+                       "cop_max_scale": 1.5
+                   },
                    "power_limit_w": null,
                    "measurement_key_room_temperature": "wbb12-room-temperature",
                    "measurement_key_slab_temperature": "wbb12-slab-temperature",
@@ -619,6 +659,16 @@ config path from ``self.device_id`` without needing an external index.
                        "wbb12-dhw-setpoint",
                        "wbb12-power-limited"
                    ],
+                   "calibration_measurement_keys": {
+                       "outdoor_c": "wbb12-outdoor-temperature",
+                       "room_c": "wbb12-room-temperature",
+                       "heat_w": "wbb12-heat-power",
+                       "electric_w": "wbb12-electric-power",
+                       "flow_c": "wbb12-flow-temperature",
+                       "dhw_c": "wbb12-dhw-temperature",
+                       "dhw_heat_w": "wbb12-dhw-heat-power",
+                       "ghi_w_per_m2": "wbb12-ghi"
+                   },
                    "measurement_key_cooling_season": "wbb12-cooling-season",
                    "measurement_key_dewpoint": "wbb12-dewpoint"
                }
