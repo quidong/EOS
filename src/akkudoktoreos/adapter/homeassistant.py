@@ -625,6 +625,12 @@ class HomeAssistantAdapter(AdapterProvider):
             # Retrieve measurements necessary for device simulations
             entity_ids = self.config.adapter.homeassistant.device_measurement_entity_ids
             if entity_ids:
+                # RL29 fork: device states are judged against the unrounded run
+                # time (``observation_datetime``) with ``measurement_max_age_seconds``.
+                # Stamping them with the slot start (rounded down to the full hour
+                # with 1 h slots) made them "stale" in every run later than
+                # max_age into the slot, so the optimizer fell back to defaults.
+                observed_at = self.ems.observation_datetime
                 known_keys = self.measurement.record_keys_writable
                 for (
                     configured_key,
@@ -651,7 +657,7 @@ class HomeAssistantAdapter(AdapterProvider):
                             if state:
                                 measurement_value = state_to_float(state)
                                 await self.measurement.update_value(
-                                    self.ems_start_datetime, measurement_key, measurement_value
+                                    observed_at, measurement_key, measurement_value
                                 )
                         except Exception as e:
                             logger.error(f"{e}")

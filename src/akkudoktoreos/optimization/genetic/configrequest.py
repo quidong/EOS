@@ -523,6 +523,14 @@ class ConfigOptimizationRequest(
                 covered_h = (observation_time.timestamp() - first.timestamp()) / 3600.0
                 if covered_h >= interval_days * 24.0 * 0.9:
                     hours_since = interval_days * 24.0
+        missing = [name for name, value in (("room", room), ("dhw", dhw)) if value is None]
+        if missing:
+            logger.warning(
+                "Heat pump {}: no measurement younger than {} s for {}; using model defaults.",
+                device.device_id,
+                max_age,
+                ", ".join(missing),
+            )
         logger.debug(
             "Heat pump {} state: room {} slab {} dhw {} setpoint {} legionella {} h ago",
             device.device_id,
