@@ -247,11 +247,18 @@ Exit 0 = plausibel, 1 = Warnung, 2 = unplausibel → Hauptschalter aus. Geprüft
 Raumtemperaturen gegen das Komfortband, Dauer aktiver Modi, Anhebung ohne PV-Überschuss zu Spitzenpreisen,
 lange Absenkung und Anzahl der Warmwasserladungen.
 
+### Kühlen (Fork, ab 22.10.2026)
+
+`devices.heat_pumps.<id>.cooling` (`enabled`, `setpoint_c` 24, `max_c` 26, `max_cool_w`, `eer`, `min_flow_c` 18,
+`dewpoint_margin_k` 2, `pv_only`, `min_pv_surplus_w` 500). Meldet HA `<id>-cooling-season` = 1, wählt EOS je Stunde
+zwischen NORMAL (nicht aktiv kühlen) und COOL (Heizmodus 5). Mit `pv_only` darf Kühlen höchstens den
+prognostizierten PV-Überschuss der Stunde nutzen (darunter `min_pv_surplus_w`: gar nicht). Die Vorlauftemperatur
+bleibt ≥ max(`min_flow_c`, Taupunkt `<id>-dewpoint` + Marge). Über `max_c` greift die Überhitzungsstrafe.
+HA setzt COOL in die Freigabe von Heizkreis 1 (Kühlkreis) um.
+
 ### Später
 
 - **Heizstab** (in ca. 2 Wochen): `dhw.rod_power_w`, `dhw_modes` [0, 1, 2], HA-Umsetzung ROD über my-PV (Modbus).
-- **Kühlen**: EOS plant Kühlen mit; Bedingung: Kühlen nur aus PV-Überschuss (kein Netz). Braucht Kühlmodus im
-  Wärmemodell, Taupunktgrenze (DE1/KNX 3/5/x) und eine Strombilanz-Nebenbedingung je Stunde.
 
 ## 5. Stack: HA direkt statt Bridge (Vorschlag)
 

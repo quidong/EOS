@@ -115,6 +115,19 @@ class GeneticHeatPumpParameters(GeneticParametersBaseModel):
             )
         },
     )
+    cooling_season: bool = Field(
+        default=False,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: the system is in cooling operation; the optimizer chooses "
+                "between NORMAL (no active cooling) and COOL instead of heating modes."
+            )
+        },
+    )
+    dewpoint_c: Optional[float] = Field(
+        default=None,
+        json_schema_extra={"description": "Measured room dew point [degC]."},
+    )
 
 
 def _nearest(allowed: Sequence[int], wanted: int) -> int:
@@ -487,9 +500,9 @@ class HeatPumpRunPlan:
         def pv_modes(p: int) -> tuple[Optional[int], Optional[int]]:
             heat: Optional[int] = None
             if surplus[p] > 2500:
-                heat = strongest(HeatingMode.PREHEAT, HeatingMode.RAISED)
+                heat = strongest(HeatingMode.COOL, HeatingMode.PREHEAT, HeatingMode.RAISED)
             elif surplus[p] > 1000:
-                heat = strongest(HeatingMode.RAISED)
+                heat = strongest(HeatingMode.COOL, HeatingMode.RAISED)
             water: Optional[int] = None
             if lowest_rod is not None and surplus[p] > rod_wh + 500:
                 water = lowest_rod
@@ -698,6 +711,7 @@ def build_run_plan(
     outdoor_c: Sequence[Optional[float]],
     ghi_w_per_m2: Optional[Sequence[Optional[float]]],
     price_per_wh: Sequence[float],
+    pv_surplus_w: Optional[Sequence[float]] = None,
 ) -> HeatPumpRunPlan:
     """Prepare one heat pump for a run over ``slot_starts`` (the control slots).
 
@@ -709,6 +723,8 @@ def build_run_plan(
             forward, a completely missing forecast falls back to 10 degC.
         ghi_w_per_m2: Global horizontal irradiance per slot, optional.
         price_per_wh: Import price per slot, for the value of stored heat.
+        pv_surplus_w: Forecast PV surplus (PV minus load) per slot [W]; in the
+            cooling season with ``cooling.pv_only`` it is the cooling budget.
     """
     settings = parameters.settings
     system = settings.to_system(slot_hours, dhw_setpoint_c=parameters.dhw_setpoint_c)
@@ -729,6 +745,25 @@ def build_run_plan(
     )
     if not inputs:
         raise ValueError("Heat pump run plan needs at least one slot.")
+
+    # Cooling season: cooling target and band, dew point, PV-only budget.
+    cooling = settings.cooling
+    cooling_season = bool(parameters.cooling_season and cooling.enabled)
+    if cooling_season:
+        for i, slot_input in enumerate(inputs):
+            slot_input.cooling_season = True
+            slot_input.setpoint_c = cooling.setpoint_c
+            slot_input.comfort_max_c = cooling.max_c
+            slot_input.dewpoint_c = parameters.dewpoint_c
+            if cooling.pv_only:
+                surplus = (
+                    float(pv_surplus_w[i])
+                    if pv_surplus_w is not None and i < len(pv_surplus_w)
+                    else 0.0
+                )
+                slot_input.cooling_budget_w = (
+                    surplus if surplus >= cooling.min_pv_surplus_w else 0.0
+                )
 
     # Active §14a dimming: limit the first slots.
     if parameters.power_limited_w is not None:
@@ -772,7 +807,11 @@ def build_run_plan(
 
     # Allowed modes; one rod option per configured target, only with a rod.
     opt = settings.optimization
-    heating_modes = tuple(opt.heating_modes)
+    heating_modes = (
+        (int(HeatingMode.NORMAL), int(HeatingMode.COOL))
+        if cooling_season
+        else tuple(opt.heating_modes)
+    )
     options: list[DhwOption] = []
     for mode in opt.dhw_modes:
         if mode == DhwMode.ROD:

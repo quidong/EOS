@@ -289,6 +289,17 @@
                        "mode_change_penalty_amt": 0.002,
                        "load_forecast_includes_heat_pump": false
                    },
+                   "cooling": {
+                       "enabled": false,
+                       "setpoint_c": 24.0,
+                       "max_c": 26.0,
+                       "max_cool_w": 6000.0,
+                       "eer": 4.5,
+                       "min_flow_c": 18.0,
+                       "dewpoint_margin_k": 2.0,
+                       "pv_only": true,
+                       "min_pv_surplus_w": 500.0
+                   },
                    "power_limit_w": null
                }
            },

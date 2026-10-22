@@ -69,6 +69,8 @@ class HeatingMode(IntEnum):
     RAISED = 2
     PREHEAT = 3
     FORCED = 4
+    COOL = 5
+    """Cooling season only: active cooling towards the cooling setpoint (RL29 fork)."""
 
 
 class DhwMode(IntEnum):
@@ -115,6 +117,26 @@ class HeatPumpParameters:
 
     forced_overshoot_k: float = 1.0
     """FORCED mode heats until comfort maximum + this offset [K]."""
+
+
+@dataclass(frozen=True)
+class CoolingParameters:
+    """Space cooling through the floor (RL29 fork)."""
+
+    max_cool_w: float = 6000.0
+    """Maximum cooling capacity [W]."""
+
+    eer: float = 4.5
+    """Energy efficiency ratio (cooling heat / electric energy)."""
+
+    min_flow_c: float = 18.0
+    """Lowest flow temperature for floor cooling [degC]."""
+
+    dewpoint_margin_k: float = 2.0
+    """Flow temperature at least this far above the dew point [K]."""
+
+    flow_spread_k: float = 3.0
+    """Temperature difference return - flow in cooling operation [K]."""
 
 
 @dataclass(frozen=True)
@@ -181,6 +203,12 @@ class SlotInputs:
     """Hot water tapped in this slot [Wh]."""
     max_electric_w: Optional[float] = None
     """Electric limit for heat pump plus rod in this slot (§14a dimming), None = no limit."""
+    cooling_season: bool = False
+    """Cooling season (RL29 fork): no space heating; HeatingMode.COOL cools."""
+    cooling_budget_w: Optional[float] = None
+    """Electric power available for cooling in this slot, e.g. PV surplus; None = no limit."""
+    dewpoint_c: Optional[float] = None
+    """Room dew point [degC]; limits the cooling flow temperature."""
 
 
 @dataclass
@@ -223,6 +251,7 @@ class HeatPumpSystem:
         comfort: ComfortParameters = ComfortParameters(),
         dhw: DhwControlParameters = DhwControlParameters(),
         slot_hours: float = 0.25,
+        cooling: CoolingParameters = CoolingParameters(),
     ) -> None:
         self.building = BuildingModel(building, slot_hours)
         self.tank = DhwTank(tank, slot_hours)
@@ -230,6 +259,7 @@ class HeatPumpSystem:
         self.hp = heat_pump
         self.comfort = comfort
         self.dhw = dhw
+        self.cooling = cooling
         self.dt = float(slot_hours)
 
     # ------------------------------------------------------------------
@@ -305,6 +335,37 @@ class HeatPumpSystem:
             / self.hp.slab_time_constant_h
         )
         return max(0.0, steady + correction)
+
+    def _space_cool_demand_w(
+        self, state: ThermalState, outdoor_c: float, gains_w: float, room_target_c: float
+    ) -> float:
+        """Heat [W] to extract to bring the room down to ``room_target_c`` (RL29 fork).
+
+        Mirror image of ``_space_heat_demand_w``: steady extraction plus a screed
+        correction towards the screed temperature that holds the target.
+        """
+        if state.room_c <= room_target_c:
+            return 0.0
+        steady = self.building.steady_heat_w(room_target_c, outdoor_c, gains_w)
+        slab_star = self.building.steady_slab_c(room_target_c, outdoor_c, gains_w)
+        slab_star += self.hp.room_gain_k_per_k * (room_target_c - state.room_c)
+        correction = (
+            (slab_star - state.slab_c)
+            * self.building.params.slab_capacity_wh_per_k
+            / self.hp.slab_time_constant_h
+        )
+        return max(0.0, -(steady + correction))
+
+    def _space_cool_capacity_w(
+        self, slab_c: float, dewpoint_c: Optional[float]
+    ) -> tuple[float, float]:
+        """Cooling capacity [W] and mean flow temperature limited by the dew point."""
+        lowest_flow = self.cooling.min_flow_c
+        if dewpoint_c is not None:
+            lowest_flow = max(lowest_flow, dewpoint_c + self.cooling.dewpoint_margin_k)
+        mean_flow = lowest_flow + self.cooling.flow_spread_k / 2.0
+        capacity = max(0.0, (slab_c - mean_flow) * self.building.params.emitter_w_per_k)
+        return min(capacity, self.cooling.max_cool_w), lowest_flow
 
     # ------------------------------------------------------------------
     # Step
@@ -396,6 +457,20 @@ class HeatPumpSystem:
 
         capacity, _, _ = self._space_heat_capacity_w(inputs.outdoor_c, state.slab_c)
         capacity *= max(0.0, 1.0 - dhw_fraction)
+        cool_w = 0.0
+        if inputs.cooling_season:
+            # RL29 fork: no space heating; COOL extracts heat within the dew point
+            # limit and the electric budget (e.g. PV surplus only).
+            wanted = minimum = capacity = 0.0
+            if heating_mode == HeatingMode.COOL:
+                target = inputs.setpoint_c if inputs.setpoint_c is not None else room_max
+                cool_cap, _ = self._space_cool_capacity_w(state.slab_c, inputs.dewpoint_c)
+                cool_cap *= max(0.0, 1.0 - dhw_fraction)
+                cool_w = min(
+                    self._space_cool_demand_w(state, inputs.outdoor_c, gains, target), cool_cap
+                )
+                if inputs.cooling_budget_w is not None:
+                    cool_w = min(cool_w, max(0.0, inputs.cooling_budget_w) * self.cooling.eer)
 
         space_w = min(wanted, capacity)
         forced_space_w = 0.0
@@ -410,7 +485,7 @@ class HeatPumpSystem:
             hp_el = (space / cop_space if space > 0 else 0.0) + (
                 dhw_hp / cop_dhw if dhw_hp > 0 else 0.0
             )
-            return hp_el + rod
+            return hp_el + rod + cool_w / self.cooling.eer
 
         limit = inputs.max_electric_w
         if limit is not None:
@@ -418,11 +493,15 @@ class HeatPumpSystem:
             total = electric(space_w, hp_dhw_w, rod_w)
             if total > available:
                 notes.append("power limit")
-                # Reduce the rod first, then space heating, then hot water.
+                # Reduce the rod first, then cooling, space heating, hot water.
                 excess = total - available
                 cut = min(rod_w, excess)
                 rod_w -= cut
                 excess -= cut
+                if excess > 0 and cool_w > 0:
+                    cut_cool = min(cool_w, excess * self.cooling.eer)
+                    cool_w -= cut_cool
+                    excess -= cut_cool / self.cooling.eer
                 if excess > 0 and space_w > 0:
                     cut_heat = min(space_w, excess * cop_space)
                     space_w -= cut_heat
@@ -434,11 +513,14 @@ class HeatPumpSystem:
         hp_el_w = (space_w / cop_space if space_w > 0 else 0.0) + (
             hp_dhw_w / cop_dhw if hp_dhw_w > 0 else 0.0
         )
+        hp_el_w += cool_w / self.cooling.eer
         hp_el_w += self.hp.standby_w
+        if cool_w > 0:
+            _, flow = self._space_cool_capacity_w(state.slab_c, inputs.dewpoint_c)
 
         # --- Advance states -------------------------------------------------
         slab, room = self.building.step(
-            state.slab_c, state.room_c, space_w, inputs.outdoor_c, gains
+            state.slab_c, state.room_c, space_w - cool_w, inputs.outdoor_c, gains
         )
         dhw = self.tank.step(state.dhw_c, hp_dhw_w + rod_w, inputs.draw_wh)
         still_charging = hp_dhw_active and dhw < hp_setpoint - 0.1
@@ -451,7 +533,7 @@ class HeatPumpSystem:
             state=ThermalState(slab, room, dhw, still_charging),
             hp_electric_wh=hp_el_w * dt,
             rod_electric_wh=rod_w * dt,
-            heat_space_wh=space_w * dt,
+            heat_space_wh=(space_w - cool_w) * dt,
             heat_dhw_hp_wh=hp_dhw_w * dt,
             heat_dhw_rod_wh=rod_w * dt,
             cop_space=cop_space,

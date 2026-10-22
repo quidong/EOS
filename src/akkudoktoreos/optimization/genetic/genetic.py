@@ -1189,8 +1189,16 @@ class GeneticOptimization(OptimizationBase):
         ghi = series(parameters.ghi_forecast)
         price_array = self.simulation.elect_price_hourly
         prices = list(price_array[:n_slots]) if price_array is not None else [0.0] * n_slots
+        pv_array = self.simulation.pv_prediction_wh
+        load_array = self.simulation.load_energy_array
+        surplus_w: Optional[list[float]] = None
+        if pv_array is not None and load_array is not None:
+            surplus_w = [
+                (float(pv_array[i]) - float(load_array[i])) / self.slot_duration_h
+                for i in range(min(n_slots, len(pv_array), len(load_array)))
+            ]
         plans = [
-            build_run_plan(device, starts, self.slot_duration_h, outdoor, ghi, prices)
+            build_run_plan(device, starts, self.slot_duration_h, outdoor, ghi, prices, surplus_w)
             for device in heat_pumps
         ]
         self.heat_pump_layout = HeatPumpGeneLayout(plans)
