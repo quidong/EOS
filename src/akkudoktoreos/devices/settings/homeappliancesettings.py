@@ -363,6 +363,35 @@ class HomeApplianceCommonSettings(DevicesBaseSettings):
             "examples": [20.0],
         },
     )
+    profile_duration_quantile: float = Field(
+        default=0.8,
+        ge=0.5,
+        le=1.0,
+        json_schema_extra={
+            "x-scope": [str(ConfigScope.GENETIC)],
+            "description": (
+                "RL29 fork: the planning length of a learned profile is this quantile of "
+                "the recent run durations (1.0 = the longest run), so that a run planned "
+                "against a deadline is finished in time even when the machine takes longer "
+                "than on average."
+            ),
+            "examples": [0.8, 1.0],
+        },
+    )
+    profile_outlier_tolerance: float = Field(
+        default=0.4,
+        ge=0,
+        json_schema_extra={
+            "x-scope": [str(ConfigScope.GENETIC)],
+            "description": (
+                "RL29 fork: once a program has three learned runs, a run whose energy or "
+                "duration deviates more than this fraction from the recent median is not "
+                "learned (interrupted measurement, wrong program code). Three rejected runs "
+                "in a row are accepted again. 0 disables the check."
+            ),
+            "examples": [0.4, 0],
+        },
+    )
 
     @computed_field  # type: ignore[prop-decorator]
     @property

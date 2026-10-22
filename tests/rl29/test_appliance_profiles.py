@@ -26,6 +26,7 @@ from akkudoktoreos.devices.applianceprofiles import (
     ApplianceProfileStore,
     blend_profiles,
     detect_runs,
+    planning_length,
 )
 from akkudoktoreos.devices.settings.homeappliancesettings import HomeApplianceCommonSettings
 from akkudoktoreos.optimization.genetic.configrequest import ConfigOptimizationRequest
@@ -88,12 +89,33 @@ def test_two_runs_and_unknown_program():
 # ----------------------------------------------------------------------
 
 
-def test_blend_profiles_averages_values_and_length():
+def test_blend_profiles_continues_the_shorter_profile_with_its_tail():
+    # the short profile is continued with its tail mean (100 W), not with zeros
     assert blend_profiles([100.0, 100.0], [300.0, 300.0, 300.0, 300.0], 0.5) == [
         200.0,
         200.0,
-        150.0,
+        200.0,
     ]
+    assert blend_profiles([100.0, 100.0], [300.0, 300.0, 300.0, 300.0], 0.5, length=5) == [
+        200.0
+    ] * 5
+
+
+def test_blending_keeps_the_energy_of_the_tail():
+    short = [4000.0] * 4 + [200.0] * 8  # 1 h, 2 h at 200 W
+    long = [4000.0] * 4 + [200.0] * 12  # same machine, 20 min longer
+    blended = blend_profiles(short, long, 0.5)
+    assert len(blended) == 14
+    assert blended[-1] == pytest.approx(200.0)  # old behaviour: 100 W (zero padded)
+    assert sum(blended) == pytest.approx(4 * 4000 + 10 * 200)
+
+
+def test_planning_length_is_an_upper_quantile_of_the_durations():
+    durations = [7200.0, 7500.0, 8400.0, 7800.0, 7300.0]
+    assert planning_length(durations, 1.0) == 28  # longest run, 140 min
+    assert planning_length(durations, 0.5) == 25  # median 7500 s
+    assert planning_length(durations, 0.8) == 27  # quantile between 7800 and 8400 (7920 s)
+    assert planning_length([7200.0], 0.8) == 24
 
 
 def test_store_averages_first_runs_then_moving_average(tmp_path: Path):
@@ -106,7 +128,7 @@ def test_store_averages_first_runs_then_moving_average(tmp_path: Path):
         )[0]
         for d, w in ((0, 4000.0), (1, 4400.0), (2, 4200.0), (3, 5200.0))
     ]
-    assert store.learn("waschmaschine", runs[:2]) == 2
+    assert store.learn("waschmaschine", runs[:2]).learned == 2
     profile = store.profile("waschmaschine", "3")
     assert profile is not None
     assert profile["runs"] == 2
@@ -125,12 +147,76 @@ def test_runs_are_learned_once_and_persisted(tmp_path: Path):
     path = tmp_path / "profiles.json"
     store = ApplianceProfileStore(path)
     runs = detect_runs(wash(T0), [(T0, 2.0)], now=T0 + timedelta(hours=4))
-    assert store.learn("waschmaschine", runs) == 1
-    assert store.learn("waschmaschine", runs) == 0
+    assert store.learn("waschmaschine", runs).learned == 1
+    assert not store.learn("waschmaschine", runs)
     store.save()
     reloaded = ApplianceProfileStore(path)
     assert reloaded.profile("waschmaschine", "2")["runs"] == 1
-    assert reloaded.learn("waschmaschine", runs) == 0
+    assert not reloaded.learn("waschmaschine", runs)
+
+
+def _runs(spec):
+    """Finished runs, one per (day, heating power, rest minutes)."""
+    return [
+        detect_runs(
+            wash(T0 + timedelta(days=d), heat_w=w, rest_min=rest),
+            [(T0 + timedelta(days=d), 3.0)],
+            now=T0 + timedelta(days=d, hours=6),
+        )[0]
+        for d, w, rest in spec
+    ]
+
+
+def test_planning_profile_uses_the_duration_quantile(tmp_path: Path):
+    store = ApplianceProfileStore(tmp_path / "profiles.json")
+    # 140, 160, 130 and 150 minutes
+    store.learn("waschmaschine", _runs([(0, 4200.0, 120), (1, 4200.0, 140), (2, 4200.0, 110)]))
+    store.learn("waschmaschine", _runs([(3, 4200.0, 130)]), duration_quantile=1.0)
+    profile = store.profile("waschmaschine", "3")
+    assert profile["duration_s"] == 160 * 60  # longest run
+    assert len(profile["power_w"]) == 32
+    assert profile["power_w"][-1] == pytest.approx(180.0 * 0.8, rel=0.15)  # washing, not zeros
+    assert profile["durations_s"] == [140 * 60, 160 * 60, 130 * 60, 150 * 60]
+    store.learn("waschmaschine", _runs([(4, 4200.0, 120)]), duration_quantile=0.5)
+    assert store.profile("waschmaschine", "3")["duration_s"] == 140 * 60  # median
+
+
+def test_interrupted_run_is_rejected_as_outlier_and_a_real_change_is_accepted(tmp_path: Path):
+    store = ApplianceProfileStore(tmp_path / "profiles.json")
+    store.learn("waschmaschine", _runs([(0, 4200.0, 120), (1, 4200.0, 125), (2, 4200.0, 115)]))
+    energy = store.profile("waschmaschine", "3")["energy_wh"]
+    # EOS saw only the first 40 minutes of the fourth run
+    truncated = _runs([(3, 4200.0, 120)])[0]
+    truncated.power_w = truncated.power_w[:8]
+    truncated.end = truncated.start + timedelta(minutes=40)
+    outcome = store.learn("waschmaschine", [truncated])
+    assert outcome.learned == 0 and outcome.rejected == 1
+    assert bool(outcome)  # the store changed (rejection counted) and is saved
+    profile = store.profile("waschmaschine", "3")
+    assert profile["runs"] == 3 and profile["rejected"] == 1
+    assert profile["energy_wh"] == energy
+    # a new program setting (no heating at all) is rejected twice more, then the
+    # profile starts over with the changed program
+    cold = _runs([(4, 0.0, 120), (5, 0.0, 120), (6, 0.0, 120), (7, 0.0, 120)])
+    outcome = store.learn("waschmaschine", cold)
+    assert outcome.rejected == 2 and outcome.learned == 2
+    assert outcome.restarted == ["3"]
+    profile = store.profile("waschmaschine", "3")
+    assert profile["runs"] == 2 and profile["rejected"] == 3
+    assert profile["energy_wh"] == pytest.approx(cold[-1].energy_wh, rel=0.05)
+    assert max(profile["power_w"]) < 1000
+    # the check can be switched off
+    store2 = ApplianceProfileStore(tmp_path / "profiles2.json")
+    store2.learn("waschmaschine", _runs([(0, 4200.0, 120), (1, 4200.0, 125), (2, 4200.0, 115)]))
+    assert store2.learn("waschmaschine", [truncated], outlier_tolerance=0).learned == 1
+
+
+def test_run_at_the_start_of_the_window_is_left_out():
+    power = wash(T0)
+    runs = detect_runs(power, now=T0 + timedelta(hours=4), window_start=T0 - timedelta(minutes=5))
+    assert runs == []
+    runs = detect_runs(power, now=T0 + timedelta(hours=4), window_start=T0 - timedelta(hours=1))
+    assert len(runs) == 1
 
 
 def test_corrupt_store_starts_empty(tmp_path: Path):
