@@ -178,7 +178,9 @@ async def gather_samples(
                     await measurement.update_value(to_datetime(hour), keys[field], value)
                     filled += 1
                 except Exception as exc:  # the store is best effort here
-                    logger.debug("Heat pump {}: could not store {}: {}", device.device_id, keys[field], exc)
+                    logger.debug(
+                        "Heat pump {}: could not store {}: {}", device.device_id, keys[field], exc
+                    )
     return build_samples(columns), filled
 
 

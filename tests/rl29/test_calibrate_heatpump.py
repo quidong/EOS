@@ -149,8 +149,19 @@ def test_fetch_merges_open_meteo_without_overriding_the_plants_sensor(monkeypatc
     out = tmp_path / "hp.csv"
     assert (
         cal.main(
-            ["fetch", "--ha-url", "http://ha", "--token", "x", "--days", "2",
-             "--open-meteo", "49.49,8.47", "-o", str(out)]
+            [
+                "fetch",
+                "--ha-url",
+                "http://ha",
+                "--token",
+                "x",
+                "--days",
+                "2",
+                "--open-meteo",
+                "49.49,8.47",
+                "-o",
+                str(out),
+            ]
         )
         == 0
     )

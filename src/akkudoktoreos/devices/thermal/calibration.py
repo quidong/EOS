@@ -37,7 +37,7 @@ import math
 import statistics
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field, replace
-from datetime import datetime, timedelta, timezone, tzinfo
+from datetime import date, datetime, timedelta, timezone, tzinfo
 from typing import Any, Optional, Sequence
 
 import numpy as np
@@ -96,9 +96,7 @@ def hourly_means(
 
     Hours with less than ``min_coverage_seconds`` of known signal are left out.
     """
-    ordered = sorted(
-        (t, float(v)) for t, v in samples if v is not None and math.isfinite(float(v))
-    )
+    ordered = sorted((t, float(v)) for t, v in samples if v is not None and math.isfinite(float(v)))
     result: dict[datetime, float] = {}
     if not ordered:
         return result
@@ -335,7 +333,7 @@ class _Day:
     room_drift_k: float
 
 
-def _local_day(stamp: datetime, tz: Optional[tzinfo]):
+def _local_day(stamp: datetime, tz: Optional[tzinfo]) -> date:
     local = stamp.astimezone(tz) if tz is not None else stamp
     return local.date()
 
@@ -361,7 +359,11 @@ def _daily_aggregates(
             max(0.0, (s.get("heat_w") or 0.0) - (s.get("dhw_heat_w") or 0.0)) for s in usable
         )
         ghis = [s.get("ghi_w_per_m2") for s in usable]
-        ghi = statistics.fmean(g for g in ghis if g is not None) if all(g is not None for g in ghis) else None  # type: ignore[misc]
+        ghi = (
+            statistics.fmean(g for g in ghis if g is not None)
+            if all(g is not None for g in ghis)
+            else None
+        )
         drift = (usable[-1].get("room_c") or 0.0) - (usable[0].get("room_c") or 0.0)
         result.append(_Day(delta, heat, ghi, drift))
     return result
@@ -520,9 +522,8 @@ def fit_cop_scale(
     for sample in samples:
         heat, electric = sample.get("heat_w"), sample.get("electric_w")
         outdoor, flow = sample.get("outdoor_c"), sample.get("flow_c")
-        if None in (heat, electric, outdoor, flow):
+        if heat is None or electric is None or outdoor is None or flow is None:
             continue
-        assert heat is not None and electric is not None and outdoor is not None and flow is not None
         if heat < options.cop_min_heat_w:
             continue
         dhw_heat = sample.get("dhw_heat_w") or 0.0

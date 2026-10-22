@@ -279,7 +279,9 @@ class TestHeatPumpSystem:
         )
         assert not state.hp_dhw_charging and not state.hp_dhw_forced
         # started by the plan (HEAT_PUMP), continued under HOLD: not forced
-        first = sim.step(ThermalState(23.0, 21.0, 40.2), COLD, HeatingMode.NORMAL, DhwMode.HEAT_PUMP)
+        first = sim.step(
+            ThermalState(23.0, 21.0, 40.2), COLD, HeatingMode.NORMAL, DhwMode.HEAT_PUMP
+        )
         assert first.heat_dhw_hp_wh > 0 and first.forced_dhw_wh == 0
         assert not first.state.hp_dhw_forced
         second = sim.step(first.state, COLD, HeatingMode.NORMAL, DhwMode.HOLD)

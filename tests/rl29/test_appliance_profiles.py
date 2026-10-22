@@ -96,9 +96,9 @@ def test_blend_profiles_continues_the_shorter_profile_with_its_tail():
         200.0,
         200.0,
     ]
-    assert blend_profiles([100.0, 100.0], [300.0, 300.0, 300.0, 300.0], 0.5, length=5) == [
-        200.0
-    ] * 5
+    assert (
+        blend_profiles([100.0, 100.0], [300.0, 300.0, 300.0, 300.0], 0.5, length=5) == [200.0] * 5
+    )
 
 
 def test_blending_keeps_the_energy_of_the_tail():

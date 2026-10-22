@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Calibrate the heat pump model from measured Home Assistant data (RL29 fork).
+r"""Calibrate the heat pump model from measured Home Assistant data (RL29 fork).
 
 The same fits run automatically inside EOS with
 ``devices.heat_pumps.<id>.calibration.enabled``; this tool is for a first
@@ -142,9 +142,7 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 
 def rows_from_columns(columns: dict[str, dict[datetime, float]]) -> list[dict[str, Any]]:
     stamps = sorted({t for values in columns.values() for t in values})
-    return [
-        {"timestamp": t, **{c: columns.get(c, {}).get(t) for c in COLUMNS}} for t in stamps
-    ]
+    return [{"timestamp": t, **{c: columns.get(c, {}).get(t) for c in COLUMNS}} for t in stamps]
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +166,9 @@ def fetch_history(
         }
     )
     url = f"{api}/history/period/{urllib.parse.quote(start.isoformat())}?{query}"
-    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+    if not url.startswith(("http://", "https://")):
+        raise ValueError("HA URL must be http(s)")
+    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})  # noqa: S310
     with urllib.request.urlopen(request, timeout=120) as resp:  # noqa: S310 - admin tool
         data = json.loads(resp.read().decode("utf-8"))
     samples: list[tuple[datetime, float]] = []
@@ -278,9 +278,7 @@ def cmd_fit(args: argparse.Namespace) -> int:
     from akkudoktoreos.devices.thermal.cop import WBB12_RATING_POINTS, CopModel
 
     rows = read_csv(Path(args.csv))
-    samples = [
-        HourlySample(row["timestamp"], **{c: row.get(c) for c in COLUMNS}) for row in rows
-    ]
+    samples = [HourlySample(row["timestamp"], **{c: row.get(c) for c in COLUMNS}) for row in rows]
     priors = CalibrationPriors(
         loss_w_per_k=args.prior_loss,
         internal_gains_w=args.prior_gains,
