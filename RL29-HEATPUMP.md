@@ -192,6 +192,22 @@ zurückgestellt. Damit entsprechen die Raumregler dem, was EOS rechnet (Angehobe
 Vorheizen: Komfortmaximum, Forciert: Komfortmaximum + 1 K). Meldet ein KNX-Regler länger als
 2 min einen anderen Sollwert zurück, setzt der 5-min-Takt ihn erneut (nur die abweichenden Regler).
 
+### Heizkreis-Zwangsstellung (KNX)
+
+`automation.eos_heizkreise_zwangsstellung` öffnet bei EOS-Modus Vorheizen/Forciert alle Heizkreise
+über die KNX-Zwangsstellung (GA `3/4/X` je Raum, DPT Freigeben; im Wintermodus Ventil 100 %):
+
+- Auswahl `input_select.eos_wp_zwangsstellung_bei`: „Vorheizen + Forciert“ / „nur Forciert“ / „aus“.
+- Nur bei Winter (`binary_sensor.sommer_winter` aus, GA 8/0/5 = 0), Betriebsmodus Heizen,
+  Hauptschalter an und umgesetztem SG-Ready-Ist ≥ 3 (damit gelten Pause, Datenalter und Hauptschalter).
+- Ein Raum verlässt die Zwangsstellung bei „EOS WP Max Raumtemperatur“ (23,5 °C), Wiedereintritt 0,5 K darunter.
+- Im Sommer wird nichts gesetzt; nur selbst gesetzte Kanäle werden freigegeben
+  (`input_text.eos_wp_zwangsstellung_kanale`). KNX-Telegramme nur bei Änderung.
+- Kanäle: 30 Multifunktionsraum, 40 Arbeitszimmer Steffen, 80 Flur EG, 90 HWR, 100 Küche, 110 Wohnzimmer,
+  120 Gästezimmer, 130 Arbeitszimmer Lena, 140 Bad EG, 150 Flur OG, 170 Schlafzimmer, 180 Theo,
+  190 Felix, 200 Rebecca, 210 Bad OG.
+- Anzeige: Dashboard „Energie & Kosten“ → EOS Steuerung → Heizkreise.
+
 ### Sicherheitsregeln
 
 | Regel | Wo | Einstellung |
