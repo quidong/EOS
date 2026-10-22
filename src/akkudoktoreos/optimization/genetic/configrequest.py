@@ -379,11 +379,12 @@ class ConfigOptimizationRequest(
             update["duration_h"] = hours
         if profile is not None:
             logger.info(
-                "Appliance {}: learned profile of program {} ({} runs, {} Wh).",
+                "Appliance {}: learned profile of program {} ({} runs, {} Wh, {} min).",
                 device.device_id,
                 profile.get("program"),
                 profile.get("runs"),
                 profile.get("energy_wh"),
+                round((profile.get("duration_s") or 0) / 60),
             )
         logger.info(
             "Appliance {}: request pending, deadline {}, duration {} h.",
@@ -426,9 +427,29 @@ class ConfigOptimizationRequest(
                 await series(device.measurement_key_program),
                 now=observation_time,
                 threshold_w=device.profile_power_threshold_w,
+                window_start=since,
             )
-            if store.learn(device.device_id, runs, device.profile_learning_rate):
+            outcome = store.learn(
+                device.device_id,
+                runs,
+                device.profile_learning_rate,
+                duration_quantile=device.profile_duration_quantile,
+                outlier_tolerance=device.profile_outlier_tolerance,
+            )
+            if outcome:
                 store.save()
+            for rejected in outcome.rejected_runs:
+                logger.warning(
+                    "Appliance {}: run {} rejected as outlier, profile unchanged.",
+                    device.device_id,
+                    rejected,
+                )
+            for program_code in outcome.restarted:
+                logger.warning(
+                    "Appliance {}: program {} deviated repeatedly; its profile starts over.",
+                    device.device_id,
+                    program_code,
+                )
         except (OSError, ValueError) as exc:
             logger.warning("Appliance {}: profile learning failed: {}", device.device_id, exc)
         program = await self._latest_measurement(
