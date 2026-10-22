@@ -14,7 +14,8 @@ Rules (thresholds from the heat pump configuration, overridable):
   consecutive hours (default 6)
 - WARN  active heating in an hour without PV surplus and with a price above
   the 75th percentile of the horizon
-- WARN  REDUCED for more than 4 consecutive hours
+- WARN  REDUCED for more than ``--max-reduced-h`` consecutive hours (default 6,
+  matching the HA limit input_number.eos_wp_max_absenkdauer)
 - WARN  hot water HEAT_PUMP in more than 4 hours of the horizon
 
 Input: ``--url http://eos.local:8503`` (reads the solution and the
