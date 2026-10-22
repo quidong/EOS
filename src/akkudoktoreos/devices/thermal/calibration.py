@@ -87,11 +87,14 @@ class HourlySample:
 
 
 def hourly_means(
-    samples: Sequence[tuple[datetime, float]], start: datetime, end: datetime
+    samples: Sequence[tuple[datetime, float]],
+    start: datetime,
+    end: datetime,
+    min_coverage_seconds: float = 1800.0,
 ) -> dict[datetime, float]:
     """Time-weighted hourly means of a step signal (a value holds until the next sample).
 
-    Hours without any sample coverage are left out.
+    Hours with less than ``min_coverage_seconds`` of known signal are left out.
     """
     ordered = sorted(
         (t, float(v)) for t, v in samples if v is not None and math.isfinite(float(v))
@@ -119,7 +122,7 @@ def hourly_means(
                 weighted += ordered[j][1] * seconds
                 covered += seconds
             j += 1
-        if covered > 0:
+        if covered > 0 and covered >= min_coverage_seconds:
             result[hour] = weighted / covered
         hour = hour_end
     return result
