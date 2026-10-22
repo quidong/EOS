@@ -487,6 +487,32 @@ class ConfigOptimizationRequest(
             return None
         return float(max(samples, key=lambda sample: sample[0].timestamp())[1])
 
+    async def _calibrated_heat_pump(self, device: Any, observation_time: DateTime) -> Any:
+        """Device settings with the automatic calibration applied (RL29 fork).
+
+        With ``calibration.enabled`` the model parameters are fitted from the
+        measurement history (at most every ``refit_hours``) and a copy of the
+        settings with the fitted values is planned with; the configuration
+        stays untouched and remains the prior of the next fit.
+        """
+        if not getattr(device, "calibration", None) or not device.calibration.enabled:
+            return device
+        from akkudoktoreos.devices.heatpumpcalibration import calibrate_device
+
+        try:
+            result = await calibrate_device(
+                device,
+                self.measurement,
+                self.prediction,
+                observation_time,
+                Path(self.config.general.data_folder_path),
+                self.config.general.timezone,
+            )
+        except Exception as exc:  # never let the calibration cancel the optimization
+            logger.warning("Heat pump {}: calibration skipped: {}", device.device_id, exc)
+            return device
+        return device.calibrated(result)
+
     async def _heat_pump_state(
         self, device: Any, observation_time: DateTime
     ) -> GeneticHeatPumpParameters:
@@ -497,6 +523,7 @@ class ConfigOptimizationRequest(
         hot water temperature history.
         """
         max_age = self.config.optimization.genetic.measurement_max_age_seconds
+        device = await self._calibrated_heat_pump(device, observation_time)
         room = await self._latest_measurement(
             device.measurement_key_room_temperature, observation_time, max_age
         )

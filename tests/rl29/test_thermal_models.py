@@ -262,6 +262,28 @@ class TestHeatPumpSystem:
         assert result.forced_dhw_wh > 0
         # The charge continues until the setpoint (hysteresis memory).
         assert result.state.hp_dhw_charging
+        assert result.state.hp_dhw_forced
+
+    def test_forced_charge_counts_in_every_slot(self):
+        """The controller's own reheat is reported as forced until it ends,
+        not only in its first slot; a charge the plan started is never forced."""
+        sim = system()
+        state, results = run(
+            sim, ThermalState(23.0, 21.0, 39.0), COLD, (HeatingMode.NORMAL, DhwMode.HOLD), 12
+        )
+        charging = [r for r in results if r.heat_dhw_hp_wh > 0]
+        assert len(charging) >= 2
+        assert all(r.forced_dhw_wh == pytest.approx(r.heat_dhw_hp_wh) for r in charging)
+        assert sum(r.forced_dhw_wh for r in results) == pytest.approx(
+            sum(r.heat_dhw_hp_wh for r in results)
+        )
+        assert not state.hp_dhw_charging and not state.hp_dhw_forced
+        # started by the plan (HEAT_PUMP), continued under HOLD: not forced
+        first = sim.step(ThermalState(23.0, 21.0, 40.2), COLD, HeatingMode.NORMAL, DhwMode.HEAT_PUMP)
+        assert first.heat_dhw_hp_wh > 0 and first.forced_dhw_wh == 0
+        assert not first.state.hp_dhw_forced
+        second = sim.step(first.state, COLD, HeatingMode.NORMAL, DhwMode.HOLD)
+        assert second.forced_dhw_wh == 0
 
     def test_dhw_charging_reduces_space_heating_capacity(self):
         sim = system()

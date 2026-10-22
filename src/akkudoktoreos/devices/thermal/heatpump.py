@@ -182,9 +182,13 @@ class ThermalState:
     dhw_c: float
     hp_dhw_charging: bool = False
     """Heat pump is in an active hot water charge (hysteresis memory)."""
+    hp_dhw_forced: bool = False
+    """The active charge was started by the heat pump controller, not by the plan."""
 
     def copy(self) -> "ThermalState":
-        return ThermalState(self.slab_c, self.room_c, self.dhw_c, self.hp_dhw_charging)
+        return ThermalState(
+            self.slab_c, self.room_c, self.dhw_c, self.hp_dhw_charging, self.hp_dhw_forced
+        )
 
 
 @dataclass
@@ -407,8 +411,10 @@ class HeatPumpSystem:
         raised_dhw = hp_setpoint > self.dhw.setpoint_c
         if (dhw_mode == DhwMode.HEAT_PUMP or raised_dhw) and state.dhw_c < hp_setpoint - 0.2:
             hp_dhw_active = True
-        elif hp_dhw_active and dhw_mode != DhwMode.HEAT_PUMP and not state.hp_dhw_charging:
-            forced_dhw = True  # own controller reheats below switch-on temperature
+        elif hp_dhw_active and dhw_mode != DhwMode.HEAT_PUMP:
+            # Own controller reheats below the switch-on temperature; the whole
+            # charge counts as forced, not only its first slot.
+            forced_dhw = not state.hp_dhw_charging or state.hp_dhw_forced
 
         rod_target: Optional[float] = None
         if dhw_mode == DhwMode.ROD:
@@ -524,13 +530,14 @@ class HeatPumpSystem:
         )
         dhw = self.tank.step(state.dhw_c, hp_dhw_w + rod_w, inputs.draw_wh)
         still_charging = hp_dhw_active and dhw < hp_setpoint - 0.1
+        still_forced = still_charging and forced_dhw
 
         comfort_violation = max(0.0, inputs.comfort_min_c - room) * dt
         overheat = max(0.0, room - self.comfort_band(inputs)[2]) * dt
         dhw_violation = max(0.0, self.dhw.min_c - dhw) * dt
 
         return SlotResult(
-            state=ThermalState(slab, room, dhw, still_charging),
+            state=ThermalState(slab, room, dhw, still_charging, still_forced),
             hp_electric_wh=hp_el_w * dt,
             rod_electric_wh=rod_w * dt,
             heat_space_wh=(space_w - cool_w) * dt,

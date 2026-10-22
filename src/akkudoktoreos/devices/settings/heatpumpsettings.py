@@ -35,6 +35,11 @@ from akkudoktoreos.config.configabc import (
 )
 from akkudoktoreos.devices.settings.devicebasesettings import DevicesBaseSettings
 from akkudoktoreos.devices.thermal.building import BuildingParameters
+from akkudoktoreos.devices.thermal.calibration import (
+    CalibrationOptions,
+    CalibrationPriors,
+    CalibrationResult,
+)
 from akkudoktoreos.devices.thermal.cop import WBB12_RATING_POINTS, CopModel, CopPoint
 from akkudoktoreos.devices.thermal.dhw import DhwTankParameters
 from akkudoktoreos.devices.thermal.heatpump import (
@@ -507,6 +512,163 @@ class HeatPumpOptimizationSettings(SettingsBaseModel):
         return sorted(set(value))
 
 
+class HeatPumpCalibrationSettings(SettingsBaseModel):
+    """Automatic calibration of the model from measured operation (RL29 fork).
+
+    Same approach as the PV calibration: the configured parameters stay the
+    prior, the measurements of a rolling window correct them, and every result
+    is clipped to a band around the configuration. The fits need the
+    measurements ``<id>-outdoor-temperature``, ``<id>-room-temperature``,
+    ``<id>-heat-power`` (thermal output [W]), ``<id>-electric-power`` [W],
+    ``<id>-flow-temperature``, ``<id>-dhw-temperature`` and optionally
+    ``<id>-dhw-heat-power`` and ``<id>-ghi`` [W/m²]. Hours without an outdoor
+    temperature or irradiance measurement are filled from the weather forecast
+    provider (``weather_from_prediction``), so the solar term needs no extra
+    sensor. Power and temperature keys should be imported with their history
+    (``adapter.homeassistant.device_measurement_history_keys``) so the hourly
+    means are exact.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        json_schema_extra={
+            "description": (
+                "Fit building losses, solar aperture, internal gains, COP scale and tank "
+                "loss from the measurements and plan with the fitted values. The "
+                "configured values stay the prior; see the result in the log and in "
+                "'<data folder>/rl29/heatpump_calibration.json'."
+            ),
+            "examples": [False, True],
+        },
+    )
+    days: int = Field(
+        default=30,
+        ge=3,
+        le=365,
+        json_schema_extra={
+            "description": "Length of the measurement window used for the fits [days].",
+            "examples": [30, 14],
+        },
+    )
+    refit_hours: float = Field(
+        default=24.0,
+        gt=0,
+        json_schema_extra={
+            "description": "Refit at most every this many hours; in between the stored fit is used.",
+            "examples": [24.0, 6.0],
+        },
+    )
+    fit_building: bool = Field(
+        default=True,
+        json_schema_extra={"description": "Fit building.loss_w_per_k, solar_aperture_m2 and internal_gains_w."},
+    )
+    fit_cop: bool = Field(
+        default=True, json_schema_extra={"description": "Fit unit.cop_scale."}
+    )
+    fit_dhw: bool = Field(
+        default=True, json_schema_extra={"description": "Fit dhw.loss_w_per_k."}
+    )
+    weather_from_prediction: bool = Field(
+        default=True,
+        json_schema_extra={
+            "description": (
+                "Fill hours without a measured outdoor temperature or irradiance from the "
+                "weather provider (the values are stored as measurements, so the history "
+                "builds up while EOS runs)."
+            ),
+            "examples": [True],
+        },
+    )
+    min_days: int = Field(
+        default=5,
+        ge=2,
+        json_schema_extra={
+            "description": "Minimum number of complete days for the building fit.",
+            "examples": [5],
+        },
+    )
+    prior_weight_days: float = Field(
+        default=7.0,
+        ge=0,
+        json_schema_extra={
+            "description": (
+                "Shrinkage of the building fit: the configured values weigh like this many "
+                "measured days. 0 trusts the measurements alone."
+            ),
+            "examples": [7.0, 2.0, 0.0],
+        },
+    )
+    outage_threshold: float = Field(
+        default=0.4,
+        ge=0,
+        lt=1,
+        json_schema_extra={
+            "description": (
+                "A day delivering less than this share of the healthy heat per kelvin "
+                "although the model expects heating is excluded (heat pump off, manual "
+                "operation). 0 disables the filter."
+            ),
+            "examples": [0.4],
+        },
+    )
+    loss_min_factor: float = Field(
+        default=0.3,
+        gt=0,
+        le=1,
+        json_schema_extra={"description": "Lower clamp of the fitted loss, relative to the configured value."},
+    )
+    loss_max_factor: float = Field(
+        default=3.0,
+        ge=1,
+        json_schema_extra={"description": "Upper clamp of the fitted loss, relative to the configured value."},
+    )
+    cop_min_heat_w: float = Field(
+        default=3000.0,
+        ge=0,
+        json_schema_extra={
+            "description": (
+                "Hours count for the COP fit only above this mean heat output [W]: the "
+                "lowest compressor modulation, so the heat pump ran the whole hour."
+            ),
+            "examples": [3000.0],
+        },
+    )
+    cop_prior_hours: float = Field(
+        default=24.0,
+        ge=0,
+        json_schema_extra={
+            "description": "Shrinkage of the COP scale: the configured value weighs like this many hours.",
+            "examples": [24.0],
+        },
+    )
+    cop_min_scale: float = Field(
+        default=0.5, gt=0, json_schema_extra={"description": "Lower clamp of the fitted COP scale."}
+    )
+    cop_max_scale: float = Field(
+        default=1.5, gt=0, json_schema_extra={"description": "Upper clamp of the fitted COP scale."}
+    )
+
+    @model_validator(mode="after")
+    def validate_bands(self) -> "HeatPumpCalibrationSettings":
+        if self.cop_max_scale < self.cop_min_scale:
+            raise ValueError("calibration.cop_max_scale must not be below cop_min_scale.")
+        return self
+
+    def to_options(self) -> CalibrationOptions:
+        return CalibrationOptions(
+            min_days=self.min_days,
+            prior_weight_days=self.prior_weight_days,
+            outage_threshold=self.outage_threshold,
+            min_healthy_days=3 if self.outage_threshold > 0 else 10**9,
+            loss_min_factor=self.loss_min_factor,
+            loss_max_factor=self.loss_max_factor,
+            cop_min_heat_w=self.cop_min_heat_w,
+            cop_prior_hours=self.cop_prior_hours,
+            cop_min_scale=self.cop_min_scale,
+            cop_max_scale=self.cop_max_scale,
+        )
+
+
 class HeatPumpCommonSettings(DevicesBaseSettings):
     """Heat pump with building, hot water tank and heating rod (RL29 fork)."""
 
@@ -516,6 +678,9 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
     comfort: HeatPumpComfortSettings = Field(default_factory=HeatPumpComfortSettings)
     optimization: HeatPumpOptimizationSettings = Field(default_factory=HeatPumpOptimizationSettings)
     cooling: HeatPumpCoolingSettings = Field(default_factory=HeatPumpCoolingSettings)
+    calibration: HeatPumpCalibrationSettings = Field(
+        default_factory=HeatPumpCalibrationSettings
+    )
     power_limit_w: Optional[ValueTimeWindowSequence] = Field(
         default=None,
         json_schema_extra={
@@ -571,7 +736,25 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
         ]
         if self.cooling.enabled:
             keys += [self.measurement_key_cooling_season, self.measurement_key_dewpoint]
+        if self.calibration.enabled:
+            keys += [k for k in self.calibration_measurement_keys.values() if k not in keys]
         return keys
+
+    # Calibration measurements (RL29 fork): sample field -> measurement key.
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def calibration_measurement_keys(self) -> dict[str, str]:
+        """Measurement keys of the calibration by hourly sample field."""
+        return {
+            "outdoor_c": f"{self.device_id}-outdoor-temperature",
+            "room_c": self.measurement_key_room_temperature,
+            "heat_w": f"{self.device_id}-heat-power",
+            "electric_w": f"{self.device_id}-electric-power",
+            "flow_c": f"{self.device_id}-flow-temperature",
+            "dhw_c": self.measurement_key_dhw_temperature,
+            "dhw_heat_w": f"{self.device_id}-dhw-heat-power",
+            "ghi_w_per_m2": f"{self.device_id}-ghi",
+        }
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -592,6 +775,38 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
     def cop_model(self) -> CopModel:
         points = [CopPoint(p.outdoor_c, p.flow_c, p.cop) for p in self.unit.cop_points]
         return CopModel(points, scale=self.unit.cop_scale)
+
+    def calibration_priors(self) -> CalibrationPriors:
+        """The configured values as prior of the calibration (RL29 fork)."""
+        return CalibrationPriors(
+            loss_w_per_k=self.building.loss_w_per_k,
+            internal_gains_w=self.building.internal_gains_w,
+            solar_aperture_m2=self.building.solar_aperture_m2,
+            cop_scale=self.unit.cop_scale,
+            dhw_loss_w_per_k=self.dhw.loss_w_per_k,
+            standby_w=self.unit.standby_w,
+            dhw_volume_l=self.dhw.volume_l,
+            dhw_ambient_c=self.dhw.ambient_c,
+        )
+
+    def calibrated(self, result: Optional[CalibrationResult]) -> "HeatPumpCommonSettings":
+        """A copy of these settings with the fitted parameters applied (RL29 fork).
+
+        The configuration itself is never changed: it stays the prior of the
+        next fit. Missing fits keep the configured value.
+        """
+        if result is None or not (result.building or result.cop or result.dhw):
+            return self
+        data = self.model_dump(exclude=set(type(self).model_computed_fields))
+        if result.building:
+            data["building"]["loss_w_per_k"] = result.building.loss_w_per_k
+            data["building"]["solar_aperture_m2"] = result.building.solar_aperture_m2
+            data["building"]["internal_gains_w"] = result.building.internal_gains_w
+        if result.cop:
+            data["unit"]["cop_scale"] = result.cop.cop_scale
+        if result.dhw:
+            data["dhw"]["loss_w_per_k"] = result.dhw.loss_w_per_k
+        return type(self).model_validate(data)
 
     def to_system(
         self, slot_hours: float, dhw_setpoint_c: Optional[float] = None
