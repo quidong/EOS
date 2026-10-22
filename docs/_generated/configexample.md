@@ -16,6 +16,7 @@
                "grid_import_emr_entity_ids": null,
                "pv_production_emr_entity_ids": null,
                "device_measurement_entity_ids": null,
+               "device_measurement_history_keys": null,
                "device_instruction_entity_ids": null,
                "solution_entity_ids": null
            },
@@ -131,7 +132,10 @@
                    "deadline_datetime": null,
                    "deadline_policy": "BEST_EFFORT",
                    "request_driven": false,
-                   "request_max_age_seconds": 3600
+                   "request_max_age_seconds": 3600,
+                   "learn_profiles": false,
+                   "profile_learning_rate": 0.3,
+                   "profile_power_threshold_w": 20.0
                }
            },
            "max_home_appliances": 3,

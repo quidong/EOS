@@ -18,7 +18,7 @@ from akkudoktoreos.core.emplan import (
     FRBCInstruction,
 )
 from akkudoktoreos.core.ems import EnergyManagementStage
-from akkudoktoreos.utils.datetimeutil import to_datetime
+from akkudoktoreos.utils.datetimeutil import DateTime, to_datetime
 
 # Supervisor API endpoint and token (injected automatically in add-on container)
 CORE_API = "http://supervisor/core/api"
@@ -34,6 +34,11 @@ HOMEASSISTANT_ENTITY_ID_PREFIX = "sensor.eos_"
 # RL29 fork: binary entities (binary_sensor, switch, input_boolean) are device
 # measurements too, e.g. a grid operator dimming signal ("<id>-power-limited").
 _BINARY_STATES = {"on": 1.0, "off": 0.0, "true": 1.0, "false": 0.0, "open": 1.0, "closed": 0.0}
+
+
+# RL29 fork: end of the last history import per measurement key.
+_HISTORY_IMPORTED: dict[str, DateTime] = {}
+HISTORY_IMPORT_MAX_HOURS = 48
 
 
 def state_to_float(state: str) -> float:
@@ -208,6 +213,19 @@ class HomeAssistantAdapterCommonSettings(SettingsBaseModel):
                     "battery1-soc-factor": "sensor.battery1_soc_factor",
                 }
             ],
+        },
+    )
+
+    device_measurement_history_keys: Optional[list[str]] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: keys of 'device_measurement_entity_ids' whose full Home Assistant "
+                "history (every state change since the last import, at most 48 h) is imported "
+                "instead of only the current state, e.g. the power of an appliance whose load "
+                "profile is learned."
+            ),
+            "examples": [["washer-power"]],
         },
     )
 
@@ -460,6 +478,48 @@ class HomeAssistantAdapter(AdapterProvider):
             logger.error(error_msg)
             raise ValueError(error_msg)
 
+    def get_entity_history(
+        self, entity_id: str, start: DateTime, end: DateTime
+    ) -> list[tuple[DateTime, float]]:
+        """Numeric state changes of an entity between start and end (RL29 fork)."""
+        api, headers = self._api()
+        url = f"{api}/history/period/{start.isoformat()}"
+        params = {
+            "filter_entity_id": entity_id,
+            "end_time": end.isoformat(),
+            "minimal_response": "",
+            "no_attributes": "",
+            "significant_changes_only": "0",
+        }
+        resp = requests.get(url, headers=headers, params=params, timeout=30)
+        if not resp.ok:
+            raise ValueError(f"Failed to read history of {entity_id}: {resp.text}")
+        samples: list[tuple[DateTime, float]] = []
+        for series in resp.json():
+            for item in series:
+                try:
+                    value = state_to_float(item["state"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                stamp = item.get("last_changed") or item.get("last_updated")
+                if stamp:
+                    samples.append((to_datetime(stamp), value))
+        return samples
+
+    async def _import_entity_history(self, measurement_key: str, entity_id: str) -> int:
+        """Import all state changes since the last import into a measurement key (RL29 fork)."""
+        end = to_datetime()
+        earliest = end.subtract(hours=HISTORY_IMPORT_MAX_HOURS)
+        start = _HISTORY_IMPORTED.get(measurement_key, earliest)
+        if start < earliest:
+            start = earliest
+        samples = self.get_entity_history(entity_id, start, end)
+        for when, value in samples:
+            await self.measurement.update_value(when, measurement_key, value)
+        _HISTORY_IMPORTED[measurement_key] = end
+        logger.debug(f"Imported {len(samples)} samples of {entity_id} into {measurement_key}")
+        return len(samples)
+
     def _convert_entity_state(self, state: str) -> Union[bool, float, str, None]:
         """Convert a Home Assistant entity state to a Python value.
 
@@ -576,7 +636,15 @@ class HomeAssistantAdapter(AdapterProvider):
                         continue
                     if message:
                         logger.warning(message)
-                    if entity_id:
+                    history_keys = (
+                        self.config.adapter.homeassistant.device_measurement_history_keys or []
+                    )
+                    if entity_id and configured_key in history_keys:
+                        try:
+                            await self._import_entity_history(measurement_key, entity_id)
+                        except Exception as e:
+                            logger.error(f"{e}")
+                    elif entity_id:
                         try:
                             state = self.get_entity_state(entity_id)
                             logger.debug(f"Entity {entity_id}: {state}")

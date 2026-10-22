@@ -127,7 +127,10 @@ config path from ``self.device_id`` without needing an external index.
                    "deadline_datetime": null,
                    "deadline_policy": "BEST_EFFORT",
                    "request_driven": false,
-                   "request_max_age_seconds": 3600
+                   "request_max_age_seconds": 3600,
+                   "learn_profiles": false,
+                   "profile_learning_rate": 0.3,
+                   "profile_power_threshold_w": 20.0
                }
            },
            "max_home_appliances": 3,
@@ -416,6 +419,11 @@ config path from ``self.device_id`` without needing an external index.
                    "deadline_policy": "BEST_EFFORT",
                    "request_driven": false,
                    "request_max_age_seconds": 3600,
+                   "learn_profiles": false,
+                   "profile_learning_rate": 0.3,
+                   "profile_power_threshold_w": 20.0,
+                   "measurement_key_power": "dishwasher-power",
+                   "measurement_key_program": "dishwasher-program",
                    "measurement_key_requested": "dishwasher-requested",
                    "measurement_key_deadline": "dishwasher-deadline",
                    "measurement_key_duration": "dishwasher-duration",
