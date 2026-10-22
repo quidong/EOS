@@ -233,6 +233,19 @@ Vorheizen: Komfortmaximum, Forciert: Komfortmaximum + 1 K).
 
 Eingänge getestet am 22.10.2026: H1 (Leistungsbegrenzung), H2, DE2, §14a-Sperre. DE1 (Taupunkt) nicht getestet.
 
+### Inbetriebnahme: stündliche Plan-Prüfung
+
+Nach dem Einschalten des Hauptschalters wird der Plan stündlich geprüft:
+
+```bash
+python /data/rl29/check_heatpump_plan.py --url http://localhost:8503   # im EOS-Container
+python3 scripts/rl29/check_heatpump_plan.py --url http://192.168.30.85:8503
+```
+
+Exit 0 = plausibel, 1 = Warnung, 2 = unplausibel → Hauptschalter aus. Geprüft werden Planalter, geplante
+Raumtemperaturen gegen das Komfortband, Dauer aktiver Modi, Anhebung ohne PV-Überschuss zu Spitzenpreisen,
+lange Absenkung und Anzahl der Warmwasserladungen.
+
 ### Später
 
 - **Heizstab** (in ca. 2 Wochen): `dhw.rod_power_w`, `dhw_modes` [0, 1, 2], HA-Umsetzung ROD über my-PV (Modbus).
