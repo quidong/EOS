@@ -219,6 +219,25 @@ python3 scripts/rl29/calibrate_heatpump.py fit hp.csv --device-id wbb12 --prior-
 Die Ausgabe ist ein Konfigurations-Snippet für `devices.heat_pumps.wbb12`; die Werte werden dann zum neuen Prior
 der automatischen Kalibrierung.
 
+## 2b. Plan gegen Ist (Fork, ab 22.10.2026)
+
+Mit eingeschalteter Kalibrierung zeichnet EOS bei jedem Lauf die ersten 24 h des Wärmepumpenplans auf
+(Raum-, Estrich-, Speichertemperatur, Strom, Modus je Slot) und vergleicht stündlich die Pläne des letzten
+Tages mit den Messwerten, für zwei Vorlaufzeiten:
+
+- **lead 1h**: der Plan, der kurz vor dem Slot erstellt wurde (folgt die Regelung dem Modell?),
+- **lead 6h**: der Plan von mindestens 6 h vorher (sagt das Modell voraus, was passiert?).
+
+Kennzahlen: Raum- und Speichertemperatur als Bias und mittlerer absoluter Fehler (geplanter Wert am Slot-Ende
+gegen Messmittel ±30 min), Strom als geplante gegen gemessene kWh mit Verhältnis. Im Log als
+`Heat pump wbb12 plan vs actual (last 24 h): lead 1h: room bias +0.15 K, MAE 0.21 K (23 h); ... energy planned
+7.3 kWh, measured 6.1 kWh (x0.84) | lead 6h: ...`, dauerhaft in `<EOS-Datenordner>/rl29/heatpump_plan_actual.json`.
+
+Lesart: Ein wachsender Raum-Bias bei lead 6h zeigt auf `building.loss_w_per_k`/Gewinne (die Kalibrierung
+sollte ihn mit der Zeit abbauen); ein Energieverhältnis dauerhaft ungleich 1 auf `unit.cop_scale` oder die
+Lastannahmen; große Abweichung bei lead 1h, aber nicht bei 6h, auf die HA-Umsetzung (Sperrzeiten, Pause,
+Mindesthaltezeit).
+
 ## 3. §14a EnWG: Modul wählbar (keins, 1, 2, 1+3)
 
 Einstellung `elecfee.grid_control_14a` (generisch, für jede Anlage):

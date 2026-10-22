@@ -498,14 +498,22 @@ class ConfigOptimizationRequest(
         if not getattr(device, "calibration", None) or not device.calibration.enabled:
             return device
         from akkudoktoreos.devices.heatpumpcalibration import calibrate_device
+        from akkudoktoreos.devices.heatpumpplanactual import evaluate_device
 
+        data_folder = Path(self.config.general.data_folder_path)
+        try:
+            # Plan versus actual of the last day: the feedback that shows whether
+            # the calibrated model predicts what happens.
+            await evaluate_device(device, self.measurement, observation_time, data_folder)
+        except Exception as exc:
+            logger.warning("Heat pump {}: plan/actual skipped: {}", device.device_id, exc)
         try:
             result = await calibrate_device(
                 device,
                 self.measurement,
                 self.prediction,
                 observation_time,
-                Path(self.config.general.data_folder_path),
+                data_folder,
                 self.config.general.timezone,
             )
         except Exception as exc:  # never let the calibration cancel the optimization
