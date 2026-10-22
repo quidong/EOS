@@ -156,9 +156,12 @@ nie geschrieben.
 |---|---|---|
 | `building.loss_w_per_k`, `solar_aperture_m2`, `internal_gains_w` | Tagesmittel von Raum-, Außentemperatur, Heizwärme (ohne WW), Globalstrahlung | Regression `Q = H·ΔT − A·G − g`, mit Schrumpfung zur Konfiguration (`prior_weight_days`, Standard 7 Tage); Tage mit wenig Wärme trotz erwartetem Bedarf (WP aus, Handbetrieb) und Tage mit driftender Raumtemperatur (> 1 K) fliegen raus |
 | `unit.cop_scale` | Stunden mit Heizwärme ≥ `cop_min_heat_w` (3 kW = kleinste Modulation, WP lief durch) | Energiegewichtetes Verhältnis Messung/Kennfeld, Standby (`unit.standby_w`) vorher abgezogen; Schrumpfung mit `cop_prior_hours` (24 h) |
-| `dhw.loss_w_per_k` | Nächte 0–5 Uhr ohne Ladung und Zapfung | Exponentieller Abfall, Median über Nächte |
+| `dhw.loss_w_per_k` | Nächte 0–5 Uhr ohne Ladung und Zapfung (mindestens 3) | Exponentieller Abfall, Median über Nächte |
 
 Ohne Globalstrahlung in den Daten bleibt die Apertur auf dem konfigurierten Wert (sonst zählte die Sonne doppelt).
+
+Eingeschaltet am 22.10.2026 (Backup der Config davor: Pi `~/eos-backups/`). Erster Lauf: 49 Stundenwerte,
+23 Wetterstunden gefüllt, noch nichts gefittet außer dem Speicherverlust; die Historie wächst mit jedem Lauf.
 
 Konfiguration und Messwerte:
 
@@ -176,7 +179,7 @@ Konfiguration und Messwerte:
     },
     "device_measurement_history_keys": [
       "wbb12-heat-power", "wbb12-electric-power", "wbb12-flow-temperature",
-      "wbb12-outdoor-temperature", "wbb12-room-temperature", "wbb12-dhw-temperature"
+      "wbb12-outdoor-temperature"
     ]
   }}
 }
@@ -188,7 +191,10 @@ Konfiguration und Messwerte:
   48 h) und schreibt sie als Messwerte zurück. Die Strahlung braucht also keinen eigenen Sensor; die Historie
   wächst mit jedem Lauf. `weather_from_prediction: false` schaltet das ab.
 - Die `device_measurement_history_keys` sind wichtig: ohne sie sieht EOS nur den Wert beim Lauf, mit ihnen den
-  ganzen HA-Verlauf, und die Stundenmittel stimmen.
+  ganzen HA-Verlauf, und die Stundenmittel stimmen. Der aktuelle Zustand wird zusätzlich mit der Laufzeit
+  gestempelt, damit die Frischeprüfung (`measurement_max_age_seconds`) auch für History-Keys gilt. Für die
+  langsam laufenden Temperaturen (Raum, Warmwasser) reichen die 15-min-Werte der Läufe; sie stehen deshalb
+  im Betrieb nicht in den History-Keys.
 - Der WP-Strom aus der KNX-Messung (`sensor.strom_warmepumpe`) enthält den Standby; `unit.standby_w` (22 W) wird
   im COP-Fit abgezogen. Der Weishaupt-Zähler wäre hier falsch (kein Kühlstrom, andere Erfassung).
 

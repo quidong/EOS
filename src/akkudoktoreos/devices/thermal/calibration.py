@@ -218,6 +218,8 @@ class CalibrationOptions:
     dhw_night_hours: tuple[int, int] = (0, 5)
     """Local hours (inclusive) in which the tank decay is evaluated."""
     dhw_min_drop_k: float = 0.2
+    dhw_min_nights: int = 3
+    """Minimum number of undisturbed nights for the tank loss fit."""
     dhw_prior_nights: float = 3.0
     dhw_min_loss_w_per_k: float = 0.1
     dhw_max_loss_w_per_k: float = 20.0
@@ -601,8 +603,8 @@ def fit_dhw_loss(
             )
             / span_h
         )
-    if not rates:
-        return None, "dhw: no undisturbed night decay"
+    if len(rates) < options.dhw_min_nights:
+        return None, (f"dhw: only {len(rates)} undisturbed night(s), need {options.dhw_min_nights}")
     raw = statistics.median(rates) * capacity
     n = len(rates)
     loss = (n * raw + options.dhw_prior_nights * priors.dhw_loss_w_per_k) / (

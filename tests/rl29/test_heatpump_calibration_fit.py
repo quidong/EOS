@@ -271,6 +271,13 @@ def test_dhw_loss_is_recovered():
     assert fit.nights == 14
 
 
+def test_dhw_loss_needs_several_nights():
+    fit, note = fit_dhw_loss(synthetic(days=2), PRIORS, CalibrationOptions(), TZ)
+    assert fit is None and "need 3" in note
+    fit, note = fit_dhw_loss(synthetic(days=2), PRIORS, CalibrationOptions(dhw_min_nights=1), TZ)
+    assert fit is not None and fit.nights == 2
+
+
 def test_dhw_heat_is_estimated_from_tank_rises_when_not_measured():
     samples = synthetic()
     charged = [s for s in samples if (s.dhw_heat_w or 0.0) > 0]
