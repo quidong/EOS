@@ -206,6 +206,7 @@ Vorheizen: Komfortmaximum, Forciert: Komfortmaximum + 1 K).
 | Höchstens N Warmwasserladungen/Tag | Automation | `input_number.eos_wp_max_warmwasserladungen_pro_tag` (2) |
 | DE2 > 90 min zu → öffnen + Push | Überwachung | – |
 | WP nicht im Heizbetrieb, Modbus weg, EOS-Plan fehlt, Tageslimit → Push | Überwachung | – |
+| Notabschaltung (Hauptschalter aus): wärmster Raum ≥ 24 °C 15 min / kältester < 19 °C 30 min | `automation.eos_warmepumpe_notabschaltung` | – |
 
 ### Objekte
 
