@@ -189,7 +189,8 @@ und geht als `wbb12-power-limited` an EOS.
 
 Die Raumsollwerte werden nur gesetzt, wenn sich die Stufe ändert, und danach auf „Raumsoll Normal“
 zurückgestellt. Damit entsprechen die Raumregler dem, was EOS rechnet (Angehoben: Sollwert + 1 K,
-Vorheizen: Komfortmaximum, Forciert: Komfortmaximum + 1 K).
+Vorheizen: Komfortmaximum, Forciert: Komfortmaximum + 1 K). Meldet ein KNX-Regler länger als
+2 min einen anderen Sollwert zurück, setzt der 5-min-Takt ihn erneut (nur die abweichenden Regler).
 
 ### Sicherheitsregeln
 
