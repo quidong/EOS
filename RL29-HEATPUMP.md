@@ -206,6 +206,9 @@ Vorheizen: Komfortmaximum, Forciert: Komfortmaximum + 1 K). Meldet ein KNX-Regle
 - Kanäle: 30 Multifunktionsraum, 40 Arbeitszimmer Bewohner A, 80 Flur EG, 90 HWR, 100 Küche, 110 Wohnzimmer,
   120 Gästezimmer, 130 Arbeitszimmer Bewohner B, 140 Bad EG, 150 Flur OG, 170 Schlafzimmer, 180 Kinderzimmer 1,
   190 Kinderzimmer 2, 200 Kinderzimmer 3, 210 Bad OG.
+- Telegramme einzeln mit 300 ms Abstand; ist KNX nicht erreichbar (`binary_sensor.sommer_winter` unavailable),
+  ändert die Automation nichts (sonst würde ein Verbindungsabbruch die Zwangsstellung flattern lassen).
+  KNX-Integration mit Sendebegrenzung 20 Telegramme/s.
 - Anzeige: Dashboard „Energie & Kosten“ → EOS Steuerung → Heizkreise.
 
 ### Sicherheitsregeln
