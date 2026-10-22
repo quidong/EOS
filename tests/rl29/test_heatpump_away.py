@@ -33,7 +33,11 @@ from akkudoktoreos.optimization.genetic.heatpumpgenes import (
 T0 = pendulum.datetime(2026, 11, 3, 10, 0, tz="Europe/Berlin")
 
 
-def plan(hours=24, return_in_h=18, away=True, room_c=17.0, prices=None, **settings):
+def plan(
+    hours=24, return_in_h=18, away=True, room_c=17.0, prices=None, away_settings=None, **settings
+):
+    if away_settings is not None:
+        settings["away"] = away_settings
     device = HeatPumpCommonSettings(device_id="wbb12", **settings)
     params = GeneticHeatPumpParameters(
         device_id="wbb12",
@@ -60,6 +64,9 @@ def test_slots_before_the_return_use_the_away_settings():
     assert not after.dhw_off and after.comfort_min_c > 19.0 and after.setpoint_c == 21.0
     # unknown return: the whole horizon is away
     assert plan(return_in_h=None).away_slots == 24
+    # hot water stays on (heat pump keeps its hysteresis), but nobody taps while away
+    on = plan(away_settings={"dhw_off": False})
+    assert not on.inputs[0].dhw_off and on.inputs[0].draw_wh == 0.0
     # not away: nothing changes
     assert plan(away=False).away_slots == 0
 

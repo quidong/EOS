@@ -253,6 +253,51 @@ Kalibrierungsergebnis sowie je Gerät und Programm das gelernte Lastprofil (aus 
 curl -s http://eos.local:8503/v1/energy-management/optimization/solution/GENETIC/pdf -o eos-plan.pdf
 ```
 
+## 2d. Urlaubsmodus (Fork + HA, ab 23.10.2026)
+
+Ziel: Während der Abwesenheit spart das Haus Energie; zur Rückkehr ist es warm und Warmwasser ist da, aufgeheizt in
+den günstigen bzw. PV-Stunden davor.
+
+**EOS** (`devices.heat_pumps.<id>.away`): Messwerte `<id>-away` (1 = Urlaub), `<id>-return-ts` (Unix-Zeit der
+Rückkehr, 0 = unbekannt → ganzer Horizont Urlaub) und `<id>-away-room-temperature` (Raumtemperatur im Urlaub).
+Bis zur Rückkehr gilt: Komfortminimum und NORMAL-Sollwert = Urlaubstemperatur, RAISED heizt auf den normalen
+Sollwert (Hochheizen auch ohne PREHEAT), kein Zapfprofil; mit `away.dhw_off` zusätzlich kein Nachheizen durch den
+WP-Regler und kein Speicher-Minimum. Ab der Rückkehr gilt das normale Band; ein Speicher unter dem Minimum zur
+Rückkehr zählt wie zwei Stunden Unterschreitung. Der Optimierer legt Hochheizen und Ladung deshalb vor die Rückkehr,
+sobald sie im Horizont liegt (72 h). Kühlsaison: bis zur Rückkehr bis `away.cooling_max_c` (28 °C) zulässig.
+Lösungsschlüssel `<id>_away` (1 = Slot vor der Rückkehr). Einstellungen: `room_c` (20, Rückfall), `dhw_off`,
+`cooling_max_c`, `max_age_hours` (48).
+
+**HA** (angelegt 23.10.2026):
+
+| Objekt | Zweck |
+|---|---|
+| `input_boolean.urlaubsmodus` | Urlaubsmodus an/aus (→ `wbb12-away`) |
+| `input_datetime.urlaub_ruckkehr` | Rückkehr (Datum + Uhrzeit) |
+| `sensor.eos_urlaub_ruckkehr_zeitstempel` | Rückkehr als Unix-Zeit, 0 ohne Urlaub (→ `wbb12-return-ts`) |
+| `number.wh_heizkreis2_raumsolltemperatur_absenk2` | Absenktemperatur des Heizkreises = Urlaubstemperatur (→ `wbb12-away-room-temperature`) |
+| `sensor.eos_wp_sg_ready_soll` | im Urlaub: EOS Reduziert/Normal → SG 1 (Absenk); Absenksperre/-dauer gelten nicht; Untergrenze kältester Raum = Absenktemperatur − 1 K |
+| `automation.eos_warmepumpe_heizmodus_umsetzen` | im Urlaub: Räume auf die Absenktemperatur, EOS Angehoben → Raumsoll Normal; Wechsel des Urlaubsmodus setzt sofort um |
+| `automation.urlaubsmodus_start_ruckkehr_hochheizen` | Push Start/Ende, beendet den Urlaubsmodus zur Rückkehrzeit, meldet einmal den Beginn des Hochheizens |
+| `input_boolean.urlaub_hochheizen_gemeldet` | Merker „Hochheizen gemeldet“ |
+
+EOS-Konfiguration nach dem Image-Wechsel:
+
+```json
+"adapter": {"homeassistant": {
+  "device_measurement_entity_ids": {
+    "wbb12-away": "input_boolean.urlaubsmodus",
+    "wbb12-return-ts": "sensor.eos_urlaub_ruckkehr_zeitstempel",
+    "wbb12-away-room-temperature": "number.wh_heizkreis2_raumsolltemperatur_absenk2"
+  },
+  "solution_entity_ids": ["...", "sensor.eos_wbb12_away"]
+}}
+```
+
+Offen: Warmwasser ganz aus braucht einen Schaltweg an der WBB (die Integration bietet keine WW-Betriebsart; der
+WW-Normal-Sollwert geht nur bis 44,5 °C). Bis dahin `away.dhw_off: false`: die WP hält ihre Hysterese, EOS plant
+kein Zapfen. WLAN (PoE der Access-Point-Ports) und Rechner folgen.
+
 ## 3. §14a EnWG: Modul wählbar (keins, 1, 2, 1+3)
 
 Einstellung `elecfee.grid_control_14a` (generisch, für jede Anlage):

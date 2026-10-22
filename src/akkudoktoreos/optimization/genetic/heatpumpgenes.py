@@ -887,9 +887,9 @@ def build_run_plan(
                 slot_input.setpoint_c = room_away
                 slot_input.raised_c = normal_setpoint  # RAISED heats back to normal
                 # comfort_max_c stays: PREHEAT/FORCED heat up towards the return
+            slot_input.draw_wh = 0.0  # nobody taps hot water while away
             if away.dhw_off:
                 slot_input.dhw_off = True
-                slot_input.draw_wh = 0.0
         logger.info(
             "Heat pump {}: holiday mode, {} of {} slots away (return {}), room {} degC, hot water {}.",
             parameters.device_id,
