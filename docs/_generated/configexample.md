@@ -326,6 +326,12 @@
                        "cop_min_scale": 0.5,
                        "cop_max_scale": 1.5
                    },
+                   "away": {
+                       "room_c": 20.0,
+                       "dhw_off": true,
+                       "cooling_max_c": 28.0,
+                       "max_age_hours": 48.0
+                   },
                    "power_limit_w": null
                }
            },
