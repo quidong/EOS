@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610221170506671"
+    "version": "v0.3.0.dev2610221141614228"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -9462,6 +9462,24 @@
             ],
             "title": "Hours Since Legionella",
             "description": "Hours since the tank last reached the legionella temperature; None = unknown (treated as just done, no heat-up required in this run)."
+          },
+          "cooling_season": {
+            "type": "boolean",
+            "title": "Cooling Season",
+            "description": "RL29 fork: the system is in cooling operation; the optimizer chooses between NORMAL (no active cooling) and COOL instead of heating modes.",
+            "default": false
+          },
+          "dewpoint_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dewpoint C",
+            "description": "Measured room dew point [degC]."
           }
         },
         "additionalProperties": false,
@@ -10797,6 +10815,9 @@
           "optimization": {
             "$ref": "#/components/schemas/HeatPumpOptimizationSettings"
           },
+          "cooling": {
+            "$ref": "#/components/schemas/HeatPumpCoolingSettings"
+          },
           "power_limit_w": {
             "anyOf": [
               {
@@ -10853,6 +10874,9 @@
           "optimization": {
             "$ref": "#/components/schemas/HeatPumpOptimizationSettings"
           },
+          "cooling": {
+            "$ref": "#/components/schemas/HeatPumpCoolingSettings"
+          },
           "power_limit_w": {
             "anyOf": [
               {
@@ -10908,6 +10932,18 @@
             "type": "array",
             "title": "Measurement Keys",
             "readOnly": true
+          },
+          "measurement_key_cooling_season": {
+            "type": "string",
+            "title": "Measurement Key Cooling Season",
+            "description": "1 = cooling season (the controller has switched the system to cooling).",
+            "readOnly": true
+          },
+          "measurement_key_dewpoint": {
+            "type": "string",
+            "title": "Measurement Key Dewpoint",
+            "description": "Room dew point [degC].",
+            "readOnly": true
           }
         },
         "type": "object",
@@ -10917,10 +10953,77 @@
           "measurement_key_dhw_temperature",
           "measurement_key_dhw_setpoint",
           "measurement_key_power_limited",
-          "measurement_keys"
+          "measurement_keys",
+          "measurement_key_cooling_season",
+          "measurement_key_dewpoint"
         ],
         "title": "HeatPumpCommonSettings",
         "description": "Heat pump with building, hot water tank and heating rod (RL29 fork)."
+      },
+      "HeatPumpCoolingSettings": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "The heat pump can cool through the floor.",
+            "default": false
+          },
+          "setpoint_c": {
+            "type": "number",
+            "title": "Setpoint C",
+            "description": "Room target while cooling [degC].",
+            "default": 24.0
+          },
+          "max_c": {
+            "type": "number",
+            "title": "Max C",
+            "description": "Comfort maximum in the cooling season [degC]; above it the overheat penalty applies.",
+            "default": 26.0
+          },
+          "max_cool_w": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Max Cool W",
+            "description": "Maximum cooling capacity [W].",
+            "default": 6000.0
+          },
+          "eer": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Eer",
+            "description": "Energy efficiency ratio of cooling.",
+            "default": 4.5
+          },
+          "min_flow_c": {
+            "type": "number",
+            "title": "Min Flow C",
+            "description": "Lowest flow temperature for floor cooling [degC].",
+            "default": 18.0
+          },
+          "dewpoint_margin_k": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Dewpoint Margin K",
+            "description": "Flow temperature at least this far above the room dew point (measurement '<device_id>-dewpoint') [K].",
+            "default": 2.0
+          },
+          "pv_only": {
+            "type": "boolean",
+            "title": "Pv Only",
+            "description": "Cool only with the forecast PV surplus (PV minus load) of the hour.",
+            "default": true
+          },
+          "min_pv_surplus_w": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Min Pv Surplus W",
+            "description": "With pv_only: no cooling in hours with less PV surplus than this [W].",
+            "default": 500.0
+          }
+        },
+        "type": "object",
+        "title": "HeatPumpCoolingSettings",
+        "description": "Space cooling through the floor heating (RL29 fork).\n\nIn the cooling season (measurement '<device_id>-cooling-season' = 1) the\noptimizer chooses per hour between NORMAL (no active cooling) and COOL. With\n``pv_only`` cooling may only use the forecast PV surplus of the hour."
       },
       "HeatPumpCopPointSettings": {
         "properties": {

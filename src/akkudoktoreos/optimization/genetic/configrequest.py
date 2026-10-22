@@ -552,8 +552,24 @@ class ConfigOptimizationRequest(
                 observation_time
             )
             reduction_wh = grid_14a.module2_reduction_amt_kwh() * (100.0 + vat) / 100.0 / 1000.0
+        cooling_season = False
+        dewpoint: Optional[float] = None
+        if device.cooling.enabled:
+            season = await self._latest_measurement(
+                device.measurement_key_cooling_season, observation_time, 6 * 3600
+            )
+            cooling_season = season is not None and season >= 0.5
+            dewpoint = await self._latest_measurement(
+                device.measurement_key_dewpoint, observation_time, max_age
+            )
+            if cooling_season:
+                logger.info(
+                    "Heat pump {}: cooling season, dew point {} degC.", device.device_id, dewpoint
+                )
         return GeneticHeatPumpParameters(
             device_id=device.device_id,
+            cooling_season=cooling_season,
+            dewpoint_c=dewpoint,
             settings=device,
             initial_room_c=room,
             initial_slab_c=slab,

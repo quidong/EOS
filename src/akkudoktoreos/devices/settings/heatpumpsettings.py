@@ -39,6 +39,7 @@ from akkudoktoreos.devices.thermal.cop import WBB12_RATING_POINTS, CopModel, Cop
 from akkudoktoreos.devices.thermal.dhw import DhwTankParameters
 from akkudoktoreos.devices.thermal.heatpump import (
     ComfortParameters,
+    CoolingParameters,
     DhwControlParameters,
     HeatPumpParameters,
     HeatPumpSystem,
@@ -328,6 +329,76 @@ class HeatPumpComfortSettings(SettingsBaseModel):
         return 20.0
 
 
+class HeatPumpCoolingSettings(SettingsBaseModel):
+    """Space cooling through the floor heating (RL29 fork).
+
+    In the cooling season (measurement '<device_id>-cooling-season' = 1) the
+    optimizer chooses per hour between NORMAL (no active cooling) and COOL. With
+    ``pv_only`` cooling may only use the forecast PV surplus of the hour.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        json_schema_extra={"description": "The heat pump can cool through the floor."},
+    )
+    setpoint_c: float = Field(
+        default=24.0,
+        json_schema_extra={"description": "Room target while cooling [degC]."},
+    )
+    max_c: float = Field(
+        default=26.0,
+        json_schema_extra={
+            "description": (
+                "Comfort maximum in the cooling season [degC]; above it the overheat "
+                "penalty applies."
+            )
+        },
+    )
+    max_cool_w: float = Field(
+        default=6000.0,
+        gt=0,
+        json_schema_extra={"description": "Maximum cooling capacity [W]."},
+    )
+    eer: float = Field(
+        default=4.5,
+        gt=0,
+        json_schema_extra={"description": "Energy efficiency ratio of cooling."},
+    )
+    min_flow_c: float = Field(
+        default=18.0,
+        json_schema_extra={"description": "Lowest flow temperature for floor cooling [degC]."},
+    )
+    dewpoint_margin_k: float = Field(
+        default=2.0,
+        ge=0,
+        json_schema_extra={
+            "description": (
+                "Flow temperature at least this far above the room dew point "
+                "(measurement '<device_id>-dewpoint') [K]."
+            )
+        },
+    )
+    pv_only: bool = Field(
+        default=True,
+        json_schema_extra={
+            "description": "Cool only with the forecast PV surplus (PV minus load) of the hour."
+        },
+    )
+    min_pv_surplus_w: float = Field(
+        default=500.0,
+        ge=0,
+        json_schema_extra={
+            "description": "With pv_only: no cooling in hours with less PV surplus than this [W]."
+        },
+    )
+
+    @model_validator(mode="after")
+    def validate_band(self) -> "HeatPumpCoolingSettings":
+        if self.max_c < self.setpoint_c:
+            raise ValueError("cooling.max_c must not be below cooling.setpoint_c.")
+        return self
+
+
 class HeatPumpOptimizationSettings(SettingsBaseModel):
     """How the optimizer may operate the heat pump and what deviations cost."""
 
@@ -444,6 +515,7 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
     dhw: HeatPumpDhwSettings = Field(default_factory=HeatPumpDhwSettings)
     comfort: HeatPumpComfortSettings = Field(default_factory=HeatPumpComfortSettings)
     optimization: HeatPumpOptimizationSettings = Field(default_factory=HeatPumpOptimizationSettings)
+    cooling: HeatPumpCoolingSettings = Field(default_factory=HeatPumpCoolingSettings)
     power_limit_w: Optional[ValueTimeWindowSequence] = Field(
         default=None,
         json_schema_extra={
@@ -490,13 +562,28 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def measurement_keys(self) -> list[str]:
-        return [
+        keys = [
             self.measurement_key_room_temperature,
             self.measurement_key_slab_temperature,
             self.measurement_key_dhw_temperature,
             self.measurement_key_dhw_setpoint,
             self.measurement_key_power_limited,
         ]
+        if self.cooling.enabled:
+            keys += [self.measurement_key_cooling_season, self.measurement_key_dewpoint]
+        return keys
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def measurement_key_cooling_season(self) -> str:
+        """1 = cooling season (the controller has switched the system to cooling)."""
+        return f"{self.device_id}-cooling-season"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def measurement_key_dewpoint(self) -> str:
+        """Room dew point [degC]."""
+        return f"{self.device_id}-dewpoint"
 
     # ------------------------------------------------------------------
     # Conversion
@@ -537,6 +624,13 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
                 forced_setpoint_c=dhw.forced_setpoint_c,
             ),
             slot_hours=slot_hours,
+            cooling=CoolingParameters(
+                max_cool_w=self.cooling.max_cool_w,
+                eer=self.cooling.eer,
+                min_flow_c=self.cooling.min_flow_c,
+                dewpoint_margin_k=self.cooling.dewpoint_margin_k,
+                flow_spread_k=unit.flow_spread_k,
+            ),
         )
 
     def slot_inputs(
