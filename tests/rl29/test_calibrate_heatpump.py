@@ -1,4 +1,8 @@
-"""Calibration script: parameters are recovered from synthetic measurements."""
+"""Calibration script (RL29 fork): CSV handling, Open-Meteo merge and the fit CLI.
+
+The fits themselves are tested in test_heatpump_calibration_fit.py; here the
+script is driven end to end with synthetic hourly data.
+"""
 
 from __future__ import annotations
 
@@ -17,102 +21,144 @@ SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "rl29" / "calibrate_h
 spec = importlib.util.spec_from_file_location("calibrate_heatpump", SCRIPT)
 assert spec and spec.loader
 cal = importlib.util.module_from_spec(spec)
-sys.modules["calibrate_heatpump"] = cal  # dataclasses resolve their module
+sys.modules["calibrate_heatpump"] = cal
 spec.loader.exec_module(cal)
 
 H_TRUE = 180.0
 GAINS_TRUE = 300.0
+APERTURE_TRUE = 4.0
 SCALE_TRUE = 0.7
 UA_TRUE = 1.6
+STANDBY = 22.0
 VOLUME = 190.0
 AMBIENT = 18.0
 
 
-def synthetic_hours(days: int = 10) -> list:
+def synthetic_rows(days: int = 14, *, solar: bool = True) -> list[dict]:
     cop = CopModel(WBB12_RATING_POINTS, scale=SCALE_TRUE)
     capacity = VOLUME * cal.WATER_WH_PER_LITRE_K
-    start = datetime(2026, 10, 11, tzinfo=timezone.utc)
-    hours = []
+    start = datetime(2026, 11, 10, 23, tzinfo=timezone.utc)
+    rows = []
     dhw = 46.0
     for i in range(days * 24):
         t = start + timedelta(hours=i)
         day = i // 24
-        outdoor = 4.0 + day * 1.2 + 3.0 * math.sin((t.hour - 9) / 24 * 2 * math.pi)
-        room = 21.0
-        heat = H_TRUE * (room - outdoor) - GAINS_TRUE
+        hour = (t.hour + 1) % 24
+        outdoor = -2.0 + day * 0.6 + 3.0 * math.sin((hour - 9) / 24 * 2 * math.pi)
+        ghi = 0.0
+        if solar and 8 <= hour <= 16:
+            ghi = (25.0 + 12.5 * (day % 4)) * math.sin((hour - 8) / 8 * math.pi) * 4
+        heat = max(0.0, H_TRUE * (21.0 - outdoor) - APERTURE_TRUE * ghi - GAINS_TRUE)
         flow = 26.0 + heat / 1000.0
-        electric = heat / cop.cop(outdoor, flow)
+        electric = (heat / cop.cop(outdoor, flow) if heat > 0 else 0.0) + STANDBY
         dhw_heat = 0.0
-        if 0 <= t.hour <= 5:
+        if 0 <= hour <= 5:
             dhw = AMBIENT + (dhw - AMBIENT) * math.exp(-UA_TRUE / capacity)
-        elif t.hour == 6:
-            dhw_heat = (46.0 - dhw) * capacity  # one hour charge back to 46
+        elif hour == 6:
+            dhw_heat = (46.0 - dhw) * capacity
             dhw = 46.0
-        hours.append(
-            cal.Hour(
-                t,
-                {
-                    "outdoor_c": outdoor,
-                    "room_c": room,
-                    "heat_w": heat + dhw_heat,
-                    "electric_w": electric,
-                    "flow_c": flow,
-                    "dhw_c": dhw,
-                    "dhw_heat_w": dhw_heat,
-                },
-            )
+        rows.append(
+            {
+                "timestamp": t,
+                "outdoor_c": outdoor,
+                "room_c": 21.0,
+                "heat_w": heat + dhw_heat,
+                "electric_w": electric + (dhw_heat / 2.5 if dhw_heat else 0.0),
+                "flow_c": flow,
+                "dhw_c": dhw,
+                "dhw_heat_w": dhw_heat,
+                "ghi_w_per_m2": ghi if solar else None,
+            }
         )
-    return hours
+    return rows
 
 
-def test_fit_building_loss_recovers_parameters():
-    result = cal.fit_building_loss(synthetic_hours())
-    assert result is not None
-    assert result["loss_w_per_k"] == pytest.approx(H_TRUE, rel=0.01)
-    assert result["internal_gains_w"] == pytest.approx(GAINS_TRUE, rel=0.05)
-    assert result["r2"] > 0.99
-
-
-def test_fit_cop_scale_recovers_scale():
-    result = cal.fit_cop_scale(synthetic_hours(), CopModel(WBB12_RATING_POINTS))
-    assert result is not None
-    assert result["cop_scale"] == pytest.approx(SCALE_TRUE, rel=0.01)
-
-
-def test_fit_dhw_loss_recovers_ua():
-    result = cal.fit_dhw_loss(synthetic_hours(), VOLUME, AMBIENT)
-    assert result is not None
-    assert result["loss_w_per_k"] == pytest.approx(UA_TRUE, rel=0.02)
-
-
-def test_too_little_data_returns_none():
-    hours = synthetic_hours(days=2)
-    assert cal.fit_building_loss(hours) is None
-    assert cal.fit_cop_scale(hours[:3], CopModel(WBB12_RATING_POINTS)) is None
+FREE = ["--prior-weight-days", "0.05", "--cop-prior-hours", "0", "--dhw-prior-nights", "0"]
 
 
 def test_csv_roundtrip_and_fit_cli(tmp_path, capsys):
     path = tmp_path / "hp.csv"
-    cal.write_csv(path, synthetic_hours())
+    cal.write_csv(path, synthetic_rows())
     again = cal.read_csv(path)
-    assert len(again) == 240
-    assert cal.main(["fit", str(path), "--device-id", "wbb12"]) == 0
-    snippet = json.loads(capsys.readouterr().out)
+    assert len(again) == 14 * 24
+    assert again[0]["ghi_w_per_m2"] == 0.0 and again[10]["ghi_w_per_m2"] > 0
+    assert cal.main(["fit", str(path), "--device-id", "wbb12", "--prior-loss", "150", *FREE]) == 0
+    out = capsys.readouterr()
+    snippet = json.loads(out.out)
     hp = snippet["devices"]["heat_pumps"]["wbb12"]
-    assert hp["building"]["loss_w_per_k"] == pytest.approx(H_TRUE, rel=0.01)
-    assert hp["unit"]["cop_scale"] == pytest.approx(SCALE_TRUE, rel=0.01)
-    assert hp["dhw"]["loss_w_per_k"] == pytest.approx(UA_TRUE, rel=0.02)
+    assert hp["building"]["loss_w_per_k"] == pytest.approx(H_TRUE, rel=0.03)
+    assert hp["building"]["solar_aperture_m2"] == pytest.approx(APERTURE_TRUE, rel=0.1)
+    assert hp["building"]["internal_gains_w"] == pytest.approx(GAINS_TRUE, rel=0.15)
+    assert hp["unit"]["cop_scale"] == pytest.approx(SCALE_TRUE, rel=0.03)
+    assert hp["dhw"]["loss_w_per_k"] == pytest.approx(UA_TRUE, rel=0.05)
+    assert "loss 150 ->" in out.err and "solar fitted" in out.err
+
+
+def test_fit_without_irradiance_column_keeps_the_prior_aperture(tmp_path, capsys):
+    path = tmp_path / "hp.csv"
+    cal.write_csv(path, synthetic_rows(solar=False))
+    assert cal.main(["fit", str(path), "--prior-aperture", "2.5", *FREE]) == 0
+    out = capsys.readouterr()
+    hp = json.loads(out.out)["devices"]["heat_pumps"]["wbb12"]
+    assert hp["building"]["solar_aperture_m2"] == 2.5
+    assert "solar not fitted" in out.err
+
+
+def test_default_priors_shrink_the_fit(tmp_path, capsys):
+    path = tmp_path / "hp.csv"
+    cal.write_csv(path, synthetic_rows(days=5))
+    assert cal.main(["fit", str(path), "--prior-loss", "150", "--prior-weight-days", "1e6"]) == 0
+    hp = json.loads(capsys.readouterr().out)["devices"]["heat_pumps"]["wbb12"]
+    assert hp["building"]["loss_w_per_k"] == pytest.approx(150.0, abs=1.0)
 
 
 def test_snippet_is_valid_eos_config(config_eos, tmp_path, capsys):
     path = tmp_path / "hp.csv"
-    cal.write_csv(path, synthetic_hours())
-    cal.main(["fit", str(path), "--device-id", "wbb12"])
+    cal.write_csv(path, synthetic_rows())
+    cal.main(["fit", str(path), "--device-id", "wbb12", *FREE])
     snippet = json.loads(capsys.readouterr().out)
     config_eos.merge_settings_from_dict(snippet)
-    assert config_eos.devices.heat_pumps["wbb12"].unit.cop_scale == pytest.approx(
-        SCALE_TRUE, rel=0.01
+    device = config_eos.devices.heat_pumps["wbb12"]
+    assert device.unit.cop_scale == pytest.approx(SCALE_TRUE, rel=0.03)
+    assert device.building.solar_aperture_m2 == pytest.approx(APERTURE_TRUE, rel=0.1)
+
+
+def test_fetch_merges_open_meteo_without_overriding_the_plants_sensor(monkeypatch, tmp_path):
+    t0 = datetime(2026, 11, 20, 0, tzinfo=timezone.utc)
+
+    def fake_history(base_url, token, entity_id, start, end):
+        value = {"sensor.wh_system_aussentemperatur": 3.0}.get(entity_id, 100.0)
+        return [(start, value)]
+
+    def fake_open_meteo(latitude, longitude, start, end):
+        hours = [start + timedelta(hours=i) for i in range(48)]
+        return {
+            "ghi_w_per_m2": {h: 150.0 for h in hours},
+            "outdoor_c": {h: 9.0 for h in hours},
+        }
+
+    monkeypatch.setattr(cal, "fetch_history", fake_history)
+    monkeypatch.setattr(cal, "fetch_open_meteo", fake_open_meteo)
+
+    class FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return t0.astimezone(tz) if tz else t0
+
+    monkeypatch.setattr(cal, "datetime", FixedDatetime)
+    out = tmp_path / "hp.csv"
+    assert (
+        cal.main(
+            ["fetch", "--ha-url", "http://ha", "--token", "x", "--days", "2",
+             "--open-meteo", "52.52,13.40", "-o", str(out)]
+        )
+        == 0
     )
+    rows = cal.read_csv(out)
+    assert len(rows) == 48
+    assert all(r["ghi_w_per_m2"] == 150.0 for r in rows)
+    assert all(r["outdoor_c"] == 3.0 for r in rows)  # the plant's sensor wins
+    assert all(r["heat_w"] == 100.0 for r in rows)
 
 
 class TestHourlyMeans:

@@ -256,7 +256,7 @@ async def test_gather_samples_builds_hourly_means_and_fills_weather(
 
     weather.key_to_raw_series = raw_series
     samples, filled = await gather_samples(device, isolated_measurement, weather, NOW)
-    assert filled == 2 * 49  # 48 h back from 09:07 touches 49 hourly buckets
+    assert filled == 2 * 49  # 48 h back from 09:07: 49 hourly buckets, the last one held
     assert len(samples) >= 3 * 24
     recent = [s for s in samples if s.timestamp >= NOW.subtract(hours=47)]
     assert all(s.outdoor_c == pytest.approx(5.0) for s in recent)
@@ -290,7 +290,7 @@ async def test_gather_samples_without_weather_provider(
     await _feed(isolated_measurement, plant_history(days=2))
     samples, filled = await gather_samples(device, isolated_measurement, None, NOW)
     assert filled == 0
-    assert len(samples) == 49  # the window edges are partial hours
+    assert len(samples) == 49  # the last sample holds through the started hour
     assert samples[0].outdoor_c is not None and samples[0].ghi_w_per_m2 is None
 
 
