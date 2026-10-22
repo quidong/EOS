@@ -118,9 +118,17 @@ def test_raise_without_surplus_at_peak_price_warns():
 
 
 def test_long_reduction_and_many_hot_water_charges_warn():
-    report = run(solution([0] * 5 + [1] * 19, dhw=[1] * 5 + [0] * 19))
+    report = run(solution([0] * 7 + [1] * 17, dhw=[1] * 5 + [0] * 19))
     assert report.exit_code == 1
     assert len(report.warnings) == 2
+
+
+def test_reduction_up_to_the_limit_is_plausible():
+    # HA allows up to 6 h of reduction (input_number.eos_wp_max_absenkdauer)
+    assert run(solution([0] * 6 + [1] * 18)).exit_code == 0
+    report = run(solution([0] * 6 + [1] * 18), max_reduced_h=4)
+    assert report.exit_code == 1
+    assert "6 h am Stück Reduziert" in report.warnings[0]
 
 
 def test_missing_device_fails():
