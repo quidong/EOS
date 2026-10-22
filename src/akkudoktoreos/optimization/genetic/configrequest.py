@@ -20,7 +20,7 @@ from akkudoktoreos.optimization.genetic.geneticparams import (
     GeneticOptimizationParameters,
 )
 from akkudoktoreos.optimization.genetic.heatpumpgenes import GeneticHeatPumpParameters
-from akkudoktoreos.utils.datetimeutil import DateTime, to_duration
+from akkudoktoreos.utils.datetimeutil import DateTime, to_datetime, to_duration
 
 
 class RuntimeForecasts(GeneticParametersBaseModel):
@@ -154,6 +154,12 @@ class ConfigOptimizationRequest(
             inverter = device.to_genetic_param()
         if inverter is None:
             raise ValueError("Configure an inverter to model PV and grid energy flows.")
+        requested_devices = []
+        for device in groups["home_appliances"]:
+            resolved = await self._appliance_request(device, observation_time)
+            if resolved is not None:
+                requested_devices.append(resolved)
+        groups["home_appliances"] = requested_devices
         appliances = [device.to_genetic_param() for device in groups["home_appliances"]]
         for device, appliance in zip(groups["home_appliances"], appliances):
             key = device.cycles_completed_measurement_key or f"{device.device_id}.cycles_completed"
@@ -166,17 +172,20 @@ class ConfigOptimizationRequest(
                 )
             except KeyError:
                 continue
+            # RL29 fork: records written for other keys (e.g. the request
+            # measurements) carry no count; only reported counts are considered.
             samples = [
                 (date, count)
                 for date, count in zip(dates, counts)
                 if date.timestamp() <= observation_time.timestamp()
+                and count is not None
+                and not (isinstance(count, float) and math.isnan(count))
             ]
             if not samples:
                 continue
             count = max(samples, key=lambda item: item[0].timestamp())[1]
             if (
-                count is None
-                or not math.isfinite(count)
+                not math.isfinite(count)
                 or int(count) != count
                 or not 0 <= count <= appliance.num_cycles
             ):
@@ -319,6 +328,57 @@ class ConfigOptimizationRequest(
         if all(value is None for value in temperatures):
             return None
         return temperatures
+
+    async def _appliance_request(self, device: Any, observation_time: DateTime) -> Optional[Any]:
+        """Apply a pending request to a request-driven appliance (RL29 fork).
+
+        Returns the settings to plan with, or ``None`` when the appliance has no
+        fresh request and must not be planned. Appliances that are not
+        request-driven are returned unchanged.
+        """
+        if not getattr(device, "request_driven", False):
+            return device
+        max_age = float(device.request_max_age_seconds)
+        requested = await self._latest_measurement(
+            device.measurement_key_requested, observation_time, max_age
+        )
+        if requested is None or requested < 0.5:
+            logger.debug("Appliance {}: no pending request, not planned.", device.device_id)
+            return None
+        update: dict[str, Any] = {}
+        deadline = await self._latest_measurement(
+            device.measurement_key_deadline, observation_time, max_age
+        )
+        if deadline is not None and deadline > 0:
+            update["deadline_datetime"] = to_datetime(
+                deadline, in_timezone=self.config.general.timezone
+            )
+            if device.earliest_start_datetime is not None and not (
+                update["deadline_datetime"] > device.earliest_start_datetime
+            ):
+                update["earliest_start_datetime"] = None
+        duration = await self._latest_measurement(
+            device.measurement_key_duration, observation_time, max_age
+        )
+        if duration is not None and duration > 0 and device.load_profile_power_w is None:
+            hours = min(24, max(1, math.ceil(duration - 1e-6)))
+            if device.duration_h and device.consumption_wh:
+                # Keep the average power of the configured run.
+                update["consumption_wh"] = max(
+                    1, round(device.consumption_wh * hours / device.duration_h)
+                )
+            update["duration_h"] = hours
+        logger.info(
+            "Appliance {}: request pending, deadline {}, duration {} h.",
+            device.device_id,
+            update.get("deadline_datetime", device.deadline_datetime),
+            update.get("duration_h", device.duration_h),
+        )
+        if not update:
+            return device
+        data = device.model_dump(exclude=set(type(device).model_computed_fields))
+        data.update(update)
+        return type(device).model_validate(data)
 
     async def _latest_measurement(
         self, key: str, observation_time: DateTime, max_age_seconds: float

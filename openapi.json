@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610220892705839"
+    "version": "v0.3.0.dev2610221180326127"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -11537,6 +11537,32 @@
             "x-scope": [
               "GENETIC"
             ]
+          },
+          "request_driven": {
+            "type": "boolean",
+            "title": "Request Driven",
+            "description": "RL29 fork: plan the appliance only on request. The controller reports the measurements '<device_id>-requested' (1 = a run is waiting, e.g. remote start enabled), '<device_id>-deadline' (Unix time the run has to be finished, 0 = none) and optionally '<device_id>-duration' (program duration [h], 0 = configured duration). Without a fresh request (see 'request_max_age_seconds') the appliance is not planned.",
+            "default": false,
+            "examples": [
+              false,
+              true
+            ],
+            "x-scope": [
+              "GENETIC"
+            ]
+          },
+          "request_max_age_seconds": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Request Max Age Seconds",
+            "description": "RL29 fork: request measurements older than this are ignored [s]; a stale request is treated as no request.",
+            "default": 3600,
+            "examples": [
+              3600
+            ],
+            "x-scope": [
+              "GENETIC"
+            ]
           }
         },
         "type": "object",
@@ -11811,6 +11837,50 @@
               "GENETIC"
             ]
           },
+          "request_driven": {
+            "type": "boolean",
+            "title": "Request Driven",
+            "description": "RL29 fork: plan the appliance only on request. The controller reports the measurements '<device_id>-requested' (1 = a run is waiting, e.g. remote start enabled), '<device_id>-deadline' (Unix time the run has to be finished, 0 = none) and optionally '<device_id>-duration' (program duration [h], 0 = configured duration). Without a fresh request (see 'request_max_age_seconds') the appliance is not planned.",
+            "default": false,
+            "examples": [
+              false,
+              true
+            ],
+            "x-scope": [
+              "GENETIC"
+            ]
+          },
+          "request_max_age_seconds": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Request Max Age Seconds",
+            "description": "RL29 fork: request measurements older than this are ignored [s]; a stale request is treated as no request.",
+            "default": 3600,
+            "examples": [
+              3600
+            ],
+            "x-scope": [
+              "GENETIC"
+            ]
+          },
+          "measurement_key_requested": {
+            "type": "string",
+            "title": "Measurement Key Requested",
+            "description": "Measurement key: a run is requested (1) or not (0).",
+            "readOnly": true
+          },
+          "measurement_key_deadline": {
+            "type": "string",
+            "title": "Measurement Key Deadline",
+            "description": "Measurement key: Unix time the requested run has to be finished.",
+            "readOnly": true
+          },
+          "measurement_key_duration": {
+            "type": "string",
+            "title": "Measurement Key Duration",
+            "description": "Measurement key: duration of the requested program [h].",
+            "readOnly": true
+          },
           "effective_num_cycles": {
             "type": "integer",
             "title": "Effective Num Cycles",
@@ -11836,6 +11906,9 @@
         },
         "type": "object",
         "required": [
+          "measurement_key_requested",
+          "measurement_key_deadline",
+          "measurement_key_duration",
           "effective_num_cycles",
           "measurement_keys"
         ],

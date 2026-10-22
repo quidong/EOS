@@ -129,7 +129,9 @@
                    "time_windows": null,
                    "earliest_start_datetime": null,
                    "deadline_datetime": null,
-                   "deadline_policy": "BEST_EFFORT"
+                   "deadline_policy": "BEST_EFFORT",
+                   "request_driven": false,
+                   "request_max_age_seconds": 3600
                }
            },
            "max_home_appliances": 3,
