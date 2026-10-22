@@ -276,6 +276,8 @@
                            2
                        ],
                        "comfort_penalty_amt_per_kh": 1.0,
+                       "overheat_penalty_amt_per_kh": 0.5,
+                       "active_mode_penalty_amt_per_h": 0.01,
                        "dhw_penalty_amt_per_kh": 0.5,
                        "legionella_penalty_amt": 2.0,
                        "mode_change_penalty_amt": 0.002,

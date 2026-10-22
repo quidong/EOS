@@ -365,6 +365,28 @@ class HeatPumpOptimizationSettings(SettingsBaseModel):
             "description": "Cost of a room below its comfort minimum [currency per K*h]."
         },
     )
+    overheat_penalty_amt_per_kh: float = Field(
+        default=0.5,
+        ge=0,
+        json_schema_extra={
+            "description": (
+                "Cost of a room above its comfort maximum [currency per K*h]. Keeps "
+                "PREHEAT/FORCED from overheating the rooms; heat above the comfort maximum "
+                "also earns no stored-heat credit."
+            )
+        },
+    )
+    active_mode_penalty_amt_per_h: float = Field(
+        default=0.01,
+        ge=0,
+        json_schema_extra={
+            "description": (
+                "Cost per hour of an active mode (heating RAISED/PREHEAT/FORCED, hot water "
+                "HEAT_PUMP/ROD) [currency/h]. Where a mode changes nothing, the plan then "
+                "shows NORMAL/HOLD instead of an arbitrary active mode."
+            )
+        },
+    )
     dhw_penalty_amt_per_kh: float = Field(
         default=0.5,
         ge=0,

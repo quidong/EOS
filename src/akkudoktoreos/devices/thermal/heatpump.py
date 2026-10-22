@@ -201,6 +201,8 @@ class SlotResult:
     forced_dhw_wh: float = 0.0
     comfort_violation_kh: float = 0.0
     """Room temperature below the comfort minimum, integrated [K*h]."""
+    overheat_kh: float = 0.0
+    """Room temperature above the comfort maximum, integrated [K*h]."""
     dhw_violation_kh: float = 0.0
     notes: list[str] = field(default_factory=list)
 
@@ -442,6 +444,7 @@ class HeatPumpSystem:
         still_charging = hp_dhw_active and dhw < hp_setpoint - 0.1
 
         comfort_violation = max(0.0, inputs.comfort_min_c - room) * dt
+        overheat = max(0.0, room - self.comfort_band(inputs)[2]) * dt
         dhw_violation = max(0.0, self.dhw.min_c - dhw) * dt
 
         return SlotResult(
@@ -457,6 +460,7 @@ class HeatPumpSystem:
             forced_space_wh=forced_space_w * dt,
             forced_dhw_wh=(hp_dhw_w * dt) if forced_dhw else 0.0,
             comfort_violation_kh=comfort_violation,
+            overheat_kh=overheat,
             dhw_violation_kh=dhw_violation,
             notes=notes,
         )

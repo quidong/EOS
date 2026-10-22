@@ -39,6 +39,8 @@ Nichts ist auf eine Anlage festgelegt; alles steht je Gerät unter `devices.heat
 | Legionellen | `dhw.legionella_c`, `dhw.legionella_interval_days` (None = aus) | 60 °C, 7 Tage |
 | Komfortband | `comfort.setpoint_c`, `comfort.max_c`, `comfort.min_c` (Zeitfenster) | 21 / 22 / 19,5–20,5 |
 | Strafen | `optimization.*_penalty_*` | s. Konfigurationsdoku |
+| Überheizen über Komfortmax. | `optimization.overheat_penalty_amt_per_kh`; Raumwärme über `comfort.max_c` zählt nicht als Speicher | 0,5 €/Kh |
+| Aktiver Modus ohne Wirkung | `optimization.active_mode_penalty_amt_per_h` (RAISED/PREHEAT/FORCED, WW ≠ HOLD) | 0,01 €/h |
 
 Bedeutung der Modi:
 
@@ -165,52 +167,77 @@ python3 scripts/rl29/gridfee_14a.py --module module1_3 --device wbb12 \
 
 `consumption_amt_kwh` bleibt dabei unverändert (13,796 ct mit regulärem Netzpreis).
 
-## 4. HA-Steuerungsschicht (angelegt am 21.10.2026)
+## 4. HA-Steuerungsschicht (angelegt 21.10., vervollständigt 22.10.2026)
 
-HA übernimmt das Mapping (Modus → Signal) und den Übertragungsweg. Angelegt ist Folgendes:
+HA übernimmt Mapping (Modus → Signal), Übertragungsweg und Sicherheitslogik. EOS liefert nur die Modi.
+
+### Was je EOS-Modus geschaltet wird (Weg „Kontakte“, aktiv seit 22.10.)
+
+| EOS-Modus | SG (Helfer, Standard) | WP | Räume (Label „EOS Raumregelung“) |
+|---|---|---|---|
+| 0 Reduziert | 1 | H2 aus + Heizkreis-Betriebsart **Absenk** (Modbus) | Raumsoll Normal (21 °C) |
+| 1 Normal | 2 | H2 aus + **Automatik** | Raumsoll Normal |
+| 2 Angehoben | 3 | **H2 ein** (SG-Anhebung +1 K) + Automatik | Raumsoll Angehoben (22 °C) |
+| 3 Vorheizen | 3 | H2 ein + Automatik | Raumsoll Vorheizen (22 °C) |
+| 4 Forciert | 4 | H2 ein + Betriebsart **Komfort** | Raumsoll Forciert (23 °C) |
+| WW HEAT_PUMP | – | DE2 (Warmwasser PUSH) 60 min | – |
+| WW ROD | – | noch nicht umgesetzt (Heizstab folgt) | – |
+
+Weg „Modbus“: SG 1 → Absenk, 2 → Automatik, 3/4 → Komfort, H2 bleibt aus. H1 schaltet nur die
+§14a-Sperre (MVV-Relais → KNX 9/1/0: H1 zu, H2 auf → Leistungsbegrenzung 4,2 kW); sie hat immer Vorrang
+und geht als `wbb12-power-limited` an EOS.
+
+Die Raumsollwerte werden nur gesetzt, wenn sich die Stufe ändert, und danach auf „Raumsoll Normal“
+zurückgestellt. Damit entsprechen die Raumregler dem, was EOS rechnet (Angehoben: Sollwert + 1 K,
+Vorheizen: Komfortmaximum, Forciert: Komfortmaximum + 1 K).
+
+### Sicherheitsregeln
+
+| Regel | Wo | Einstellung |
+|---|---|---|
+| Nur im Betriebsmodus Haus „Heizen“ | Soll-Sensor | – |
+| EOS-Plan fehlt oder älter als 45 min → SG 2 | Soll-Sensor | – |
+| Keine Absenkung bei kältestem Raum < 19,5 °C oder Feuchtewarnung | Soll-Sensor | – |
+| Keine Anhebung ab wärmstem Raum ≥ Max | Soll-Sensor | `input_number.eos_wp_max_raumtemperatur` (23,5 °C) |
+| Absenkung höchstens X min, danach gleich lange gesperrt | Automation + Soll-Sensor | `input_number.eos_wp_max_absenkdauer` (180 min) |
+| Höchstens N Umschaltungen/Tag, danach nur Normal | Automation | `input_number.eos_wp_max_umschaltungen_pro_tag` (12) |
+| Mindesthaltezeit (Rückkehr zu Normal immer sofort) | Automation | `input_number.eos_wp_mindesthaltezeit` (55 min) |
+| Manueller Eingriff an Betriebsart/H2 → Pause + Push | Automation | `input_number.eos_wp_pause_nach_eingriff` (240 min) |
+| Höchstens N Warmwasserladungen/Tag | Automation | `input_number.eos_wp_max_warmwasserladungen_pro_tag` (2) |
+| DE2 > 90 min zu → öffnen + Push | Überwachung | – |
+| WP nicht im Heizbetrieb, Modbus weg, EOS-Plan fehlt, Tageslimit → Push | Überwachung | – |
+
+### Objekte
 
 | Objekt | Zweck |
 |---|---|
-| `input_boolean.eos_wp_steuerung_aktiv` | Hauptschalter (Standard **aus**); beim Ausschalten setzt HA den Normalbetrieb zurück |
-| `input_select.eos_wp_ubertragungsweg` | `Modbus` (jetzt) oder `Kontakte` (nach der Verdrahtung) |
-| `input_select.eos_wp_sg_ready_bei_reduziert` / `_normal` / `_angehoben` / `_vorheizen` / `_forciert` | Mapping Heizmodus → SG-Ready-Zustand (Standard 1 / 2 / 3 / 3 / 4) |
-| `sensor.eos_wp_sg_ready_soll` (Template-Helfer) | SG-Ready-Soll aus EOS-Modus und Mapping, mit Sicherheitsregeln: nur bei Betriebsmodus „Heizen“; keine Absenkung, wenn der kälteste Raum unter 19,5 °C liegt oder die Feuchtewarnung aktiv ist; ohne EOS-Wert gilt 2 |
-| `script.eos_wp_sg_ready_modbus` | Modbus-Weg: SG 1 → Heizkreis-Betriebsart Absenk, 2 → Automatik, 3/4 → Komfort (`select.wh_heizkreis2_betriebsart2`); schreibt nur bei einer Änderung |
-| `script.eos_wp_warmwasser_laden_modbus` | Modbus-Weg: Warmwasser PUSH (`select.wh_warmwasser_warmwasser_push`, 60 min) |
-| `automation.eos_warmepumpe_heizmodus_umsetzen` | setzt `sensor.eos_wp_sg_ready_soll` (2 min entprellt) über den gewählten Weg um |
-| `automation.eos_warmepumpe_warmwasser_laden` | löst die WW-Ladung aus, wenn EOS HEAT_PUMP plant |
-| `binary_sensor.wp_drosselung_ss14a` (KNX 9/1/0) | §14a-Sperre vom MVV-Binäreingang; geht als `wbb12-power-limited` an EOS |
-| `binary_sensor.wp_sg1_h1_status` (KNX 9/1/11) | Status H1 (nur die Sperre schaltet H1) |
-| `switch.wp_sg2_h2_anhebung` (KNX 9/1/20, Status 9/1/21) | H2 = SG Ready „Erhöhter Betrieb“ |
-| `switch.wp_warmwasser_push_de2` (KNX 9/1/30, Status 9/1/31) | DE2 = Warmwasser PUSH |
-| `script.eos_wp_sg_ready_kontakte` | Kontakt-Weg: SG 3/4 → H2 ein, sonst aus; Absenkung (SG 1) weiter über Modbus |
-| `script.eos_wp_warmwasser_laden_kontakte` | Kontakt-Weg: DE2 für 60 min schließen |
+| `input_boolean.eos_wp_steuerung_aktiv` | Hauptschalter; beim Ausschalten: H2 aus, Automatik, Räume Normal |
+| `input_select.eos_wp_ubertragungsweg` | `Kontakte` (seit 22.10.) oder `Modbus` |
+| `input_select.eos_wp_sg_ready_bei_*` | Mapping Heizmodus → SG (1 / 2 / 3 / 3 / 4) |
+| `input_number.eos_wp_raumsoll_*` | Raumsoll Normal / Angehoben / Vorheizen / Forciert (21 / 22 / 22 / 23 °C) |
+| `sensor.eos_wp_sg_ready_soll` | SG-Soll mit den Regeln des Soll-Sensors |
+| `sensor.raumtemperatur_warmster_raum` / `_kaltester_raum` | Grenzen für Anhebung / Absenkung |
+| `input_number.eos_wp_sg_ready_ist`, `input_number.eos_wp_raumsoll_ist` | zuletzt umgesetzter Zustand |
+| `counter.eos_wp_umschaltungen_heute`, `counter.eos_wp_warmwasserladungen_heute` | Tageszähler (Reset 0:00) |
+| `input_datetime.eos_wp_letzte_umschaltung`, `_absenkung_seit`, `_absenkung_gesperrt_bis`, `_pause_bis` | Zeitstempel der Regeln |
+| `automation.eos_warmepumpe_heizmodus_umsetzen` | setzt Soll um (2 min entprellt, Takt 5 min) |
+| `automation.eos_warmepumpe_warmwasser_laden` | WW-Ladung, wenn EOS HEAT_PUMP plant |
+| `automation.eos_warmepumpe_manueller_eingriff_erkennen` | Pause bei Fremdänderung |
+| `automation.eos_warmepumpe_uberwachung` | Zähler-Reset, DE2-Watchdog, Meldungen |
+| `script.eos_wp_sg_ready_kontakte` / `_modbus` | Übertragungswege |
+| `script.eos_wp_raumsoll_setzen` | Raumregler mit Label „EOS Raumregelung“ setzen |
+| `script.eos_wp_warmwasser_laden_kontakte` / `_modbus` | WW-Ladung je Weg |
+| `binary_sensor.wp_sg1_h1_status` (KNX 9/1/11) | Status H1 |
+| `switch.wp_sg2_h2_anhebung` (KNX 9/1/20/21) | H2 = SG Ready „Erhöhter Betrieb“ |
+| `switch.wp_warmwasser_push_de2` (KNX 9/1/30/31) | DE2 = Warmwasser PUSH |
 
-Hinweise:
+Eingänge getestet am 22.10.2026: H1 (Leistungsbegrenzung), H2, DE2, §14a-Sperre. DE1 (Taupunkt) nicht getestet.
 
-- **SG Ready per Modbus.** Die WBB 12 nimmt SG Ready nur über die Klemmen H1/H2 an; die Modbus-Werte
-  `sensor.wh_eingange_ausgange_sg_ready_1/2` sind nur lesbar. Der Modbus-Weg bildet SG Ready deshalb über die
-  Betriebsart des Heizkreises nach. Damit „Angehoben“ wirkt, muss die **Raumsolltemperatur Komfort** in der
-  WP einmalig über **Normal** liegen. Heute stehen beide auf 23 °C (Absenk 22,5 °C).
-- **Kontakte (geplant, SG Ready 1.1).** Die SG-Eingänge werden als „Leistungsbegr. SGR 1.1“
-  konfiguriert (Eingänge → Eingang SGR1, wird auf SGR2 übertragen). Damit gilt laut Anleitung
-  (Kap. 6.7.7.3):
+### Später
 
-  | Zustand | SGR1 (H1) | SGR2 (H2) |
-  |---|---|---|
-  | 1 Leistungsbegrenzung (Eingänge → Leistungsbegrenzung, 4,2 kW) | geschlossen | beliebig |
-  | 2 Normalbetrieb | offen | offen |
-  | 3 Erhöhter Betrieb | offen | geschlossen |
-
-  Es gibt keinen Zustand „Sperre“ und keinen „Zwangsbetrieb“ (also auch keine Elektroheizung über SG 4).
-  Das MVV-Steuerrelais (§14a) schaltet SGR1. HA schaltet nur SGR2 für „Angehoben“. Sind beide
-  geschlossen, gewinnt die Leistungsbegrenzung – eine Verriegelung ist nicht nötig.
-  „Reduziert“ läuft auch dann über Modbus (Betriebsart Absenk). **DE2** bleibt „Warmwasser PUSH“
-  (K3 über Koppelrelais), **DE1** „Taupunktwächter“. Danach wird nur
-  `input_select.eos_wp_ubertragungsweg` umgestellt; für SG 1 muss das Mapping dann auf 2 zeigen.
-- **Heizstab.** Die Umsetzung folgt nach dem Einbau (Modbus über den Proxy).
-- **Wirkung.** Die Automationen tun erst etwas, wenn EOS die Sensoren `sensor.eos_wbb12_heating_mode` und
-  `sensor.eos_wbb12_dhw_mode` liefert (neues Image + Wärmepumpen-Konfiguration) **und** der Hauptschalter an ist.
+- **Heizstab** (in ca. 2 Wochen): `dhw.rod_power_w`, `dhw_modes` [0, 1, 2], HA-Umsetzung ROD über my-PV (Modbus).
+- **Kühlen**: EOS plant Kühlen mit; Bedingung: Kühlen nur aus PV-Überschuss (kein Netz). Braucht Kühlmodus im
+  Wärmemodell, Taupunktgrenze (DE1/KNX 3/5/x) und eine Strombilanz-Nebenbedingung je Stunde.
 
 ## 5. Stack: HA direkt statt Bridge (Vorschlag)
 

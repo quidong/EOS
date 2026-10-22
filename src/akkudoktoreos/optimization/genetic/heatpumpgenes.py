@@ -154,6 +154,10 @@ class HeatPumpOutcome:
     extra_cost: float
     """Penalties minus the value of the heat stored at the end [currency]."""
     comfort_kh: float = 0.0
+    overheat_kh: float = 0.0
+    """Room above the comfort maximum, integrated [K*h]."""
+    active_hours: float = 0.0
+    """Hours with an active mode (heating above NORMAL, hot water not HOLD) [h]."""
     dhw_kh: float = 0.0
     legionella_ok: Optional[bool] = None
     mode_changes: int = 0
@@ -188,6 +192,10 @@ class HeatPumpRunPlan:
     load_includes_heat_pump: bool = False
     separate_meter_price_per_wh: Optional[list[float]] = None
     """§14a module 2: own meter, price per slot; its energy is not part of the house balance."""
+    overheat_penalty: float = 0.0
+    """Cost of a room above its comfort maximum [currency per K*h]."""
+    active_mode_penalty: float = 0.0
+    """Cost per hour of an active mode; prefers NORMAL/HOLD where a mode changes nothing."""
     _cache: dict[tuple[int, ...], HeatPumpOutcome] = field(default_factory=dict, repr=False)
 
     CACHE_SIZE = 20000
@@ -306,6 +314,9 @@ class HeatPumpRunPlan:
         state = self.initial.copy()
         electric: list[float] = []
         comfort_kh = 0.0
+        overheat_kh = 0.0
+        active_hours = 0.0
+        dt = system.dt
         dhw_kh = 0.0
         max_dhw = state.dhw_c
         deadline = self.legionella_deadline_slot
@@ -337,6 +348,11 @@ class HeatPumpRunPlan:
             energy = result.hp_electric_wh + result.rod_electric_wh
             electric.append(energy)
             comfort_kh += result.comfort_violation_kh
+            overheat_kh += result.overheat_kh
+            if heating[period] > HeatingMode.NORMAL:
+                active_hours += dt
+            if option.mode != DhwMode.HOLD:
+                active_hours += dt
             dhw_kh += result.dhw_violation_kh
             if state.dhw_c > max_dhw:
                 max_dhw = state.dhw_c
@@ -368,11 +384,15 @@ class HeatPumpRunPlan:
             1 for i in range(1, n) if dhw[i] != dhw[i - 1]
         )
 
-        # Value of the heat stored (or used up) compared to the start.
+        # Value of the heat stored (or used up) compared to the start. Room heat
+        # above the comfort maximum has no value: the room controllers do not use it.
+        room_cap = system.comfort_band(self.inputs[-1])[2] if self.inputs else state.room_c
         building_start = system.building.stored_heat_wh(
-            self.initial.slab_c, self.initial.room_c, 0.0
+            self.initial.slab_c, min(self.initial.room_c, room_cap), 0.0
         )
-        building_end = system.building.stored_heat_wh(state.slab_c, state.room_c, 0.0)
+        building_end = system.building.stored_heat_wh(
+            state.slab_c, min(state.room_c, room_cap), 0.0
+        )
         tank_start = system.tank.stored_heat_wh(self.initial.dhw_c, 0.0)
         tank_end = system.tank.stored_heat_wh(state.dhw_c, 0.0)
         credit = (building_end - building_start) * self.building_heat_value + (
@@ -394,6 +414,8 @@ class HeatPumpRunPlan:
         extra = (
             separate_cost
             + comfort_kh * self.comfort_penalty
+            + overheat_kh * self.overheat_penalty
+            + active_hours * self.active_mode_penalty
             + dhw_kh * self.dhw_penalty
             + legionella_cost
             + changes * self.mode_change_penalty
@@ -403,6 +425,8 @@ class HeatPumpRunPlan:
             electric_wh=electric,
             extra_cost=extra,
             comfort_kh=comfort_kh,
+            overheat_kh=overheat_kh,
+            active_hours=active_hours,
             dhw_kh=dhw_kh,
             legionella_ok=legionella_ok,
             mode_changes=changes,
@@ -821,6 +845,8 @@ def build_run_plan(
         legionella_deadline_slot=deadline_slot,
         load_includes_heat_pump=opt.load_forecast_includes_heat_pump and separate_prices is None,
         separate_meter_price_per_wh=separate_prices,
+        overheat_penalty=opt.overheat_penalty_amt_per_kh,
+        active_mode_penalty=opt.active_mode_penalty_amt_per_h,
     )
 
 
@@ -832,6 +858,8 @@ def plan_result(plan: HeatPumpRunPlan, genes: Sequence[int]) -> dict[str, Any]:
     result["summary"] = {
         "extra_cost_amt": float(outcome.extra_cost),
         "comfort_violation_kh": float(outcome.comfort_kh),
+        "overheat_kh": float(outcome.overheat_kh),
+        "active_hours": float(outcome.active_hours),
         "dhw_violation_kh": float(outcome.dhw_kh),
         "legionella_ok": outcome.legionella_ok,
         "legionella_deadline_slot": plan.legionella_deadline_slot,
