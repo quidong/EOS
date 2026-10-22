@@ -24,6 +24,7 @@ Konfiguration Waschmaschine (Profil aus der KNX-Messung, 1-h-Slots: Heizphase zu
       "waschmaschine": {
         "device_id": "waschmaschine",
         "request_driven": true,
+        "learn_profiles": true,
         "num_cycles": 1,
         "load_profile_power_w": [1400, 250, 150, 100],
         "load_profile_interval_seconds": 3600,
@@ -36,8 +37,11 @@ Konfiguration Waschmaschine (Profil aus der KNX-Messung, 1-h-Slots: Heizphase zu
       "device_measurement_entity_ids": {
         "waschmaschine-requested": "sensor.eos_waschmaschine_auftrag",
         "waschmaschine-deadline": "sensor.eos_waschmaschine_frist_zeitstempel",
-        "waschmaschine-duration": "sensor.eos_waschmaschine_programmdauer"
+        "waschmaschine-duration": "sensor.eos_waschmaschine_programmdauer",
+        "waschmaschine-power": "sensor.strom_waschmaschine",
+        "waschmaschine-program": "sensor.eos_waschmaschine_programm_code"
       },
+      "device_measurement_history_keys": ["waschmaschine-power"],
       "solution_entity_ids": ["sensor.eos_waschmaschine_next_start_ts", "sensor.eos_waschmaschine_energy_wh"],
       "device_instruction_entity_ids": ["sensor.eos_waschmaschine"]
     }
