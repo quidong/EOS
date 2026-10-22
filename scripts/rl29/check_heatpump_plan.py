@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -184,8 +185,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     if args.url:
-        solution = _get(args.url, "/v1/energy-management/optimization/solution")
-        config = _get(args.url, "/v1/config")
+        try:
+            solution = _get(args.url, "/v1/energy-management/optimization/solution")
+            config = _get(args.url, "/v1/config")
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            report = Report(failures=[f"Kein Plan abrufbar: {exc}"])
+            print("\n".join(report.lines()))
+            return report.exit_code
     elif args.solution and args.config:
         with open(args.solution, encoding="utf-8") as f:
             solution = json.load(f)

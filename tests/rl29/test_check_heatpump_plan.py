@@ -140,3 +140,9 @@ def test_cli_with_files(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
     )
     assert code == 0
     assert "Status: PLAUSIBEL" in capsys.readouterr().out
+
+
+def test_unreachable_eos_fails(capsys: pytest.CaptureFixture[str]):
+    code = script.main(["--url", "http://127.0.0.1:9"])
+    assert code == 2
+    assert "Kein Plan abrufbar" in capsys.readouterr().out
