@@ -354,6 +354,9 @@ class HeatPumpRunPlan:
                 "flow_c",
                 "cop_space",
                 "forced_space_wh",
+                "comfort_min_c",
+                "comfort_max_c",
+                "outdoor_c",
             ):
                 rows[name] = []
         for slot, inputs in enumerate(self.inputs):
@@ -393,6 +396,10 @@ class HeatPumpRunPlan:
                 rows["flow_c"].append(result.flow_c)
                 rows["cop_space"].append(result.cop_space)
                 rows["forced_space_wh"].append(result.forced_space_wh)
+                low, _, high = self.system.comfort_band(inputs)
+                rows["comfort_min_c"].append(low)
+                rows["comfort_max_c"].append(high)
+                rows["outdoor_c"].append(inputs.outdoor_c)
 
         # Mode changes between consecutive gene periods.
         n = self.n_periods

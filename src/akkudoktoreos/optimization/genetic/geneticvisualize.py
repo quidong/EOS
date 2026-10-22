@@ -2,7 +2,8 @@ import json
 import textwrap
 from collections.abc import Sequence
 from io import BytesIO
-from typing import Callable, Optional, Union
+from pathlib import Path
+from typing import Any, Callable, Optional, Union
 
 import matplotlib
 import matplotlib.dates as mdates
@@ -697,6 +698,7 @@ def genetic_prepare_visualize(
             report.finalize_group()
 
     _add_solution_diagnostics(report, solution, start_datetime)
+    _add_rl29_pages(report, solution, start_datetime)
 
     # Generate the PDF report
     pdf = report.generate_pdf()
@@ -946,3 +948,223 @@ def genetic_generate_example_report(filename: str = "example_report.pdf") -> Non
 
 if __name__ == "__main__":
     genetic_generate_example_report()
+
+
+# ---------------------------------------------------------------------------
+# RL29 fork: heat pumps, learned appliance profiles, plan vs actual, calibration
+# ---------------------------------------------------------------------------
+
+
+def _rl29_data_folder() -> Optional[Path]:
+    try:
+        from akkudoktoreos.core.coreabc import get_config
+
+        return Path(get_config().general.data_folder_path) / "rl29"
+    except Exception:  # the report never fails because of the data folder
+        return None
+
+
+def _add_rl29_pages(report: GeneticVisualizationReport, solution: Any, start: DateTime) -> None:
+    """Fork pages: one block per heat pump, learned profiles, plan vs actual, calibration."""
+    heat_pumps: dict[str, dict[str, Any]] = getattr(solution, "heat_pumps", None) or {}
+    for device_id, schedule in sorted(heat_pumps.items()):
+        _add_heat_pump_pages(report, device_id, schedule, start)
+    folder = _rl29_data_folder()
+    if folder is None:
+        return
+    for device_id in sorted(heat_pumps):
+        _add_plan_actual_page(report, folder, device_id)
+        _add_calibration_page(report, folder, device_id)
+    _add_appliance_profile_pages(report, folder)
+
+
+Series = Union[np.ndarray, list[Optional[float]], list[float]]
+
+
+def _series(schedule: dict[str, Any], key: str) -> list[float]:
+    return [float(v) for v in schedule.get(key, []) if isinstance(v, (int, float))]
+
+
+def _add_heat_pump_pages(
+    report: GeneticVisualizationReport, device_id: str, schedule: dict[str, Any], start: DateTime
+) -> None:
+    room = _series(schedule, "room_c")
+    if not room:
+        return
+    n = len(room)
+
+    def same_length(values: list[float]) -> list[float]:
+        return (values + [values[-1] if values else 0.0] * n)[:n]
+
+    temperatures: list[Series] = [room, same_length(_series(schedule, "slab_c"))]
+    labels = ["room", "screed"]
+    for key, label in (("comfort_min_c", "comfort min"), ("comfort_max_c", "comfort max")):
+        values = _series(schedule, key)
+        if values:
+            temperatures.append(same_length(values))
+            labels.append(label)
+    outdoor = _series(schedule, "outdoor_c")
+    if outdoor:
+        temperatures.append(same_length(outdoor))
+        labels.append("outdoor")
+    report.create_line_chart_date(
+        start,
+        temperatures,
+        title=f"Heat Pump {device_id}: Room and Screed",
+        ylabel="Temperature (degC)",
+        labels=labels,
+    )
+    report.finalize_group()
+
+    dhw = _series(schedule, "dhw_c")
+    if dhw:
+        series: list[Series] = [same_length(dhw)]
+        dhw_labels = ["tank"]
+        rod = _series(schedule, "rod_target_c")
+        if rod and any(v > 0 for v in rod):
+            series.append(same_length(rod))
+            dhw_labels.append("rod target")
+        report.create_line_chart_date(
+            start,
+            series,
+            title=f"Heat Pump {device_id}: Hot Water",
+            ylabel="Temperature (degC)",
+            labels=dhw_labels,
+        )
+        report.finalize_group()
+
+    energy = _series(schedule, "electric_wh")
+    if energy:
+        energy_series: list[Series] = [same_length(energy)]
+        energy_labels = ["heat pump + rod"]
+        rod_energy = _series(schedule, "rod_electric_wh")
+        if rod_energy and any(v > 0 for v in rod_energy):
+            energy_series.append(same_length(rod_energy))
+            energy_labels.append("rod")
+        report.create_line_chart_date(
+            start,
+            energy_series,
+            title=f"Heat Pump {device_id}: Electric Energy",
+            ylabel="Energy (Wh per interval)",
+            labels=energy_labels,
+        )
+        cop = _series(schedule, "cop_space")
+        if cop:
+            report.create_line_chart_date(
+                start,
+                [same_length(cop)],
+                title=f"Heat Pump {device_id}: COP / EER",
+                ylabel="COP (-)",
+            )
+        report.finalize_group()
+
+    heating = [str(v) for v in schedule.get("heating_mode", [])]
+    dhw_modes = [str(v) for v in schedule.get("dhw_mode", [])]
+    lines = []
+    if heating:
+        lines.append("Heating mode per interval: " + _run_lengths(heating))
+    if dhw_modes:
+        lines.append("Hot water mode per interval: " + _run_lengths(dhw_modes))
+    summary = schedule.get("summary") or {}
+    if summary:
+        lines.append(
+            "Summary: "
+            + ", ".join(
+                f"{key} {value:.3f}" if isinstance(value, float) else f"{key} {value}"
+                for key, value in summary.items()
+            )
+        )
+    if lines:
+        report.add_text_page(" ".join(lines), title=f"Heat Pump {device_id}: Schedule", fontsize=10)
+        report.finalize_group()
+
+
+def _run_lengths(values: list[str]) -> str:
+    """Compact 'NORMAL x5, RAISED x2' notation of a mode sequence."""
+    parts: list[tuple[str, int]] = []
+    for value in values:
+        if parts and parts[-1][0] == value:
+            parts[-1] = (value, parts[-1][1] + 1)
+        else:
+            parts.append((value, 1))
+    return ", ".join(f"{value} x{count}" for value, count in parts)
+
+
+def _load_json(path: Path) -> Optional[dict[str, Any]]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _add_plan_actual_page(report: GeneticVisualizationReport, folder: Path, device_id: str) -> None:
+    data = _load_json(folder / "heatpump_plan_actual.json")
+    if not data:
+        return
+    evaluation = ((data.get("devices") or {}).get(device_id) or {}).get("evaluation")
+    if not evaluation:
+        return
+    try:
+        from akkudoktoreos.devices.heatpumpplanactual import summary as plan_summary
+
+        text = plan_summary(evaluation)
+    except Exception:
+        text = json.dumps(evaluation)
+    report.add_text_page(
+        f"Evaluated at {evaluation.get('evaluated_at')}, last {evaluation.get('hours')} h. {text}. "
+        "Lead 1h: the plan issued shortly before the interval (does the controller follow the "
+        "model?). Lead 6h: the plan from at least six hours earlier (does the model predict?).",
+        title=f"Heat Pump {device_id}: Plan vs Actual",
+        fontsize=10,
+    )
+    report.finalize_group()
+
+
+def _add_calibration_page(report: GeneticVisualizationReport, folder: Path, device_id: str) -> None:
+    data = _load_json(folder / "heatpump_calibration.json")
+    if not data:
+        return
+    entry = (data.get("devices") or {}).get(device_id)
+    if not entry:
+        return
+    result = entry.get("result") or {}
+    text = (
+        f"Fitted at {result.get('fitted_at')}, window {result.get('window_days')} days, "
+        f"{result.get('samples')} hourly samples. {entry.get('summary', '')}"
+    )
+    report.add_text_page(text, title=f"Heat Pump {device_id}: Calibration", fontsize=10)
+    report.finalize_group()
+
+
+def _add_appliance_profile_pages(report: GeneticVisualizationReport, folder: Path) -> None:
+    data = _load_json(folder / "appliance_profiles.json")
+    if not data:
+        return
+    for device_id, device in sorted((data.get("devices") or {}).items()):
+        programs = device.get("programs") or {}
+        for program, entry in sorted(programs.items()):
+            power = [float(v) for v in entry.get("power_w") or []]
+            if not power:
+                continue
+            interval = int(entry.get("interval_seconds") or 300)
+
+            def chart(
+                power: list[float] = power,
+                interval: int = interval,
+                device_id: str = device_id,
+                program: str = program,
+                entry: dict[str, Any] = entry,
+            ) -> None:
+                minutes = [i * interval / 60.0 for i in range(len(power))]
+                plt.step(minutes, power, where="post")
+                plt.xlabel("Minutes from start")
+                plt.ylabel("Power (W)")
+                plt.title(
+                    f"Learned profile {device_id} program {program}: "
+                    f"{entry.get('runs', 0)} runs, {entry.get('energy_wh', 0)} Wh, "
+                    f"{round((entry.get('duration_s') or 0) / 60)} min"
+                )
+                plt.grid(True)
+
+            report.add_chart_to_group(chart, None)
+        report.finalize_group()

@@ -242,6 +242,17 @@ sollte ihn mit der Zeit abbauen); ein Energieverhältnis dauerhaft ungleich 1 au
 Lastannahmen; große Abweichung bei lead 1h, aber nicht bei 6h, auf die HA-Umsetzung (Sperrzeiten, Pause,
 Mindesthaltezeit).
 
+## 2c. PDF-Bericht
+
+`GET /v1/energy-management/optimization/solution/GENETIC/pdf` enthält zusätzlich zu den Upstream-Seiten je
+Wärmepumpe: Raum-/Estrichtemperatur mit Komfortband und Außentemperatur, Warmwasser mit Heizstab-Ziel, Strom
+(WP + Heizstab) und COP/EER, die Modusfolge als Text; dazu je Wärmepumpe die Plan-Ist-Auswertung und das letzte
+Kalibrierungsergebnis sowie je Gerät und Programm das gelernte Lastprofil (aus den JSON-Dateien in `/data/rl29`).
+
+```bash
+curl -s http://eos.local:8503/v1/energy-management/optimization/solution/GENETIC/pdf -o eos-plan.pdf
+```
+
 ## 3. §14a EnWG: Modul wählbar (keins, 1, 2, 1+3)
 
 Einstellung `elecfee.grid_control_14a` (generisch, für jede Anlage):
