@@ -198,7 +198,7 @@ class HeatPumpRunPlan:
     building_heat_value: float
     """Value of building heat [currency/Wh] for the stored heat at the end."""
     tank_heat_value: float
-    """Value of tank heat [currency/Wh]."""
+    """Value of tank heat [currency/Wh] up to the heat pump setpoint."""
     legionella_c: float = 60.0
     legionella_deadline_slot: Optional[int] = None
     """Slot by which the tank has to reach legionella_c; None = no requirement."""
@@ -209,6 +209,9 @@ class HeatPumpRunPlan:
     """Cost of a room above its comfort maximum [currency per K*h]."""
     active_mode_penalty: float = 0.0
     """Cost per hour of an active mode; prefers NORMAL/HOLD where a mode changes nothing."""
+    tank_heat_value_above_setpoint: Optional[float] = None
+    """Value of tank heat above the heat pump setpoint [currency/Wh]; None = tank_heat_value.
+    Water the rod heated beyond the setpoint loses more and is valued with a discount."""
     _cache: dict[tuple[int, ...], HeatPumpOutcome] = field(default_factory=dict, repr=False)
 
     CACHE_SIZE = 20000
@@ -406,11 +409,23 @@ class HeatPumpRunPlan:
         building_end = system.building.stored_heat_wh(
             state.slab_c, min(state.room_c, room_cap), 0.0
         )
-        tank_start = system.tank.stored_heat_wh(self.initial.dhw_c, 0.0)
-        tank_end = system.tank.stored_heat_wh(state.dhw_c, 0.0)
+        # Tank heat up to the heat pump setpoint displaces a heat pump charge;
+        # heat above it (heating rod) counts with its own, discounted value.
+        setpoint = system.dhw.setpoint_c
+        above_value = (
+            self.tank_heat_value_above_setpoint
+            if self.tank_heat_value_above_setpoint is not None
+            else self.tank_heat_value
+        )
+
+        def tank_value(dhw_c: float) -> float:
+            below = system.tank.stored_heat_wh(min(dhw_c, setpoint), 0.0)
+            above = system.tank.stored_heat_wh(max(dhw_c, setpoint), setpoint)
+            return below * self.tank_heat_value + above * above_value
+
         credit = (building_end - building_start) * self.building_heat_value + (
-            tank_end - tank_start
-        ) * self.tank_heat_value
+            tank_value(state.dhw_c) - tank_value(self.initial.dhw_c)
+        )
 
         legionella_ok: Optional[bool] = None
         legionella_cost = 0.0
@@ -704,6 +719,50 @@ class HeatPumpGeneLayout:
 # ----------------------------------------------------------------------
 
 
+TANK_DWELL_HOURS = 12.0
+"""Typical time stored hot water waits until it is tapped; sets the loss discount
+on tank heat above the heat pump setpoint at the end of the horizon."""
+
+
+def terminal_price_per_wh(
+    prices: Sequence[Optional[float]],
+    quantile: float,
+    pv_surplus_w: Optional[Sequence[float]] = None,
+    feed_in_per_wh: Optional[Sequence[Optional[float]]] = None,
+    surplus_needed_w: float = 0.0,
+) -> float:
+    """Marginal price the stored heat is valued at [currency/Wh].
+
+    Heat left in the building or the tank at the end of the horizon displaces
+    heat the optimizer would produce in the cheapest hours, so it is worth the
+    mean of the cheapest ``quantile`` share of the horizon's marginal prices.
+    Hours whose PV surplus covers the heat pump (``surplus_needed_w``) count with
+    the feed-in tariff: there the heat pump would run on surplus anyway.
+    """
+    marginal: list[float] = []
+    for i, price in enumerate(prices):
+        if price is None or not math.isfinite(price):
+            continue
+        value = float(price)
+        if (
+            pv_surplus_w is not None
+            and feed_in_per_wh is not None
+            and i < len(pv_surplus_w)
+            and i < len(feed_in_per_wh)
+            and feed_in_per_wh[i] is not None
+            and math.isfinite(float(feed_in_per_wh[i]))  # type: ignore[arg-type]
+            and float(pv_surplus_w[i]) >= surplus_needed_w
+        ):
+            value = min(value, float(feed_in_per_wh[i]))  # type: ignore[arg-type]
+        marginal.append(value)
+    if not marginal:
+        return 0.0
+    marginal.sort()
+    count = max(1, math.ceil(len(marginal) * min(1.0, max(0.0, quantile))))
+    cheapest = marginal[:count]
+    return sum(cheapest) / len(cheapest)
+
+
 def build_run_plan(
     parameters: GeneticHeatPumpParameters,
     slot_starts: list[Any],
@@ -712,6 +771,7 @@ def build_run_plan(
     ghi_w_per_m2: Optional[Sequence[Optional[float]]],
     price_per_wh: Sequence[float],
     pv_surplus_w: Optional[Sequence[float]] = None,
+    feed_in_per_wh: Optional[Sequence[Optional[float]]] = None,
 ) -> HeatPumpRunPlan:
     """Prepare one heat pump for a run over ``slot_starts`` (the control slots).
 
@@ -724,7 +784,9 @@ def build_run_plan(
         ghi_w_per_m2: Global horizontal irradiance per slot, optional.
         price_per_wh: Import price per slot, for the value of stored heat.
         pv_surplus_w: Forecast PV surplus (PV minus load) per slot [W]; in the
-            cooling season with ``cooling.pv_only`` it is the cooling budget.
+            cooling season with ``cooling.pv_only`` it is the cooling budget and
+            otherwise marks the hours whose heat would come from surplus.
+        feed_in_per_wh: Feed-in tariff per slot, the marginal price in surplus hours.
     """
     settings = parameters.settings
     system = settings.to_system(slot_hours, dhw_setpoint_c=parameters.dhw_setpoint_c)
@@ -823,11 +885,9 @@ def build_run_plan(
             options.append(DhwOption(DhwMode(mode)))
     dhw_options = tuple(options) or (DhwOption(DhwMode.HOLD),)
 
-    # Value of stored heat: average import price over the horizon divided by
-    # the COP the heat pump would need to deliver the heat later.
-    price_source = separate_prices if separate_prices is not None else price_per_wh[: len(inputs)]
-    prices = [p for p in price_source if p is not None and math.isfinite(p)]
-    mean_price = sum(prices) / len(prices) if prices else 0.0
+    # Value of stored heat: the marginal price of the cheapest hours (surplus
+    # hours at the feed-in tariff) divided by the COP the heat pump would need
+    # to deliver the heat later.
     mean_outdoor = sum(i.outdoor_c for i in inputs) / len(inputs)
     gains_mean = system.building.gains_w(0.0)
     steady = system.building.steady_heat_w(settings.comfort.setpoint_c, mean_outdoor, gains_mean)
@@ -835,6 +895,23 @@ def build_run_plan(
     flow_ref = system.building.flow_temperature_c(slab_ref, steady, system.hp.flow_spread_k)
     cop_space = system.cop.cop(mean_outdoor, flow_ref)
     cop_dhw = system.cop.cop(mean_outdoor, system.dhw.setpoint_c + system.hp.dhw_flow_overshoot_k)
+    price_source = separate_prices if separate_prices is not None else price_per_wh[: len(inputs)]
+    mean_price = terminal_price_per_wh(
+        list(price_source),
+        opt.stored_heat_price_quantile,
+        # Module 2 (own meter) cannot use PV surplus.
+        pv_surplus_w if separate_prices is None else None,
+        feed_in_per_wh,
+        surplus_needed_w=(steady / cop_space if cop_space > 0 else 0.0) + system.hp.standby_w,
+    )
+    # Hot water above the heat pump setpoint loses more until it is tapped.
+    tank_params = system.tank.params
+    tank_capacity = system.tank.capacity
+    retention = (
+        math.exp(-tank_params.loss_w_per_k * TANK_DWELL_HOURS / tank_capacity)
+        if tank_capacity > 0
+        else 1.0
+    )
 
     # Legionella requirement, only if some allowed option reaches the
     # temperature: a rod target or a raised/forced heat pump setpoint.
@@ -880,6 +957,7 @@ def build_run_plan(
         mode_change_penalty=opt.mode_change_penalty_amt,
         building_heat_value=mean_price / cop_space if cop_space > 0 else 0.0,
         tank_heat_value=mean_price / cop_dhw if cop_dhw > 0 else 0.0,
+        tank_heat_value_above_setpoint=(mean_price / cop_dhw * retention) if cop_dhw > 0 else 0.0,
         legionella_c=settings.dhw.legionella_c,
         legionella_deadline_slot=deadline_slot,
         load_includes_heat_pump=opt.load_forecast_includes_heat_pump and separate_prices is None,

@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610221803894781"
+    "version": "v0.3.0.dev2610221959880883"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -11156,8 +11156,29 @@
             "type": "number",
             "exclusiveMinimum": 0.0,
             "title": "Eer",
-            "description": "Energy efficiency ratio of cooling.",
-            "default": 4.5
+            "description": "Rated energy efficiency ratio of cooling at eer_rated_outdoor_c / eer_rated_flow_c (EN 14511, e.g. A35/W18). Per slot the EER is scaled with the Carnot efficiency for the forecast outdoor temperature and the actual cooling flow temperature: lower on hot afternoons, higher in mild evenings.",
+            "default": 4.5,
+            "examples": [
+              4.5
+            ]
+          },
+          "eer_rated_outdoor_c": {
+            "type": "number",
+            "title": "Eer Rated Outdoor C",
+            "description": "Outdoor temperature of the rated EER [degC].",
+            "default": 35.0
+          },
+          "eer_rated_flow_c": {
+            "type": "number",
+            "title": "Eer Rated Flow C",
+            "description": "Flow temperature of the rated EER [degC].",
+            "default": 18.0
+          },
+          "eer_constant": {
+            "type": "boolean",
+            "title": "Eer Constant",
+            "description": "Use the rated EER in every slot regardless of the temperatures.",
+            "default": false
           },
           "min_flow_c": {
             "type": "number",
@@ -11442,6 +11463,18 @@
             "title": "Mode Change Penalty Amt",
             "description": "Cost per change of the heating or hot water mode between two hours; keeps relay switching and compressor starts rare [currency].",
             "default": 0.002
+          },
+          "stored_heat_price_quantile": {
+            "type": "number",
+            "maximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Stored Heat Price Quantile",
+            "description": "Value of the heat stored in building and tank at the end of the horizon: it displaces heat the optimizer would otherwise produce in the cheapest hours, so it is valued at the mean of the cheapest share of the horizon's marginal prices (hours with enough PV surplus count with the feed-in tariff), divided by the COP. 1.0 values it at the mean price of the whole horizon, which tends to overheat the building at the end of sunny days.",
+            "default": 0.25,
+            "examples": [
+              0.25,
+              1.0
+            ]
           },
           "load_forecast_includes_heat_pump": {
             "type": "boolean",

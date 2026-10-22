@@ -284,6 +284,7 @@ config path from ``self.device_id`` without needing an external index.
                        "dhw_penalty_amt_per_kh": 0.5,
                        "legionella_penalty_amt": 2.0,
                        "mode_change_penalty_amt": 0.002,
+                       "stored_heat_price_quantile": 0.25,
                        "load_forecast_includes_heat_pump": false
                    },
                    "cooling": {
@@ -292,6 +293,9 @@ config path from ``self.device_id`` without needing an external index.
                        "max_c": 26.0,
                        "max_cool_w": 6000.0,
                        "eer": 4.5,
+                       "eer_rated_outdoor_c": 35.0,
+                       "eer_rated_flow_c": 18.0,
+                       "eer_constant": false,
                        "min_flow_c": 18.0,
                        "dewpoint_margin_k": 2.0,
                        "pv_only": true,
@@ -615,6 +619,7 @@ config path from ``self.device_id`` without needing an external index.
                        "dhw_penalty_amt_per_kh": 0.5,
                        "legionella_penalty_amt": 2.0,
                        "mode_change_penalty_amt": 0.002,
+                       "stored_heat_price_quantile": 0.25,
                        "load_forecast_includes_heat_pump": false
                    },
                    "cooling": {
@@ -623,6 +628,9 @@ config path from ``self.device_id`` without needing an external index.
                        "max_c": 26.0,
                        "max_cool_w": 6000.0,
                        "eer": 4.5,
+                       "eer_rated_outdoor_c": 35.0,
+                       "eer_rated_flow_c": 18.0,
+                       "eer_constant": false,
                        "min_flow_c": 18.0,
                        "dewpoint_margin_k": 2.0,
                        "pv_only": true,

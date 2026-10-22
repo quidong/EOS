@@ -20,7 +20,12 @@ In die Fitness gehen zusätzlich ein:
 - Warmwasser unter dem Minimum;
 - ein verpasster Legionellenlauf;
 - Moduswechsel (wenig Relaisschalten);
-- der Wert der am Horizontende gespeicherten Wärme.
+- der Wert der am Horizontende gespeicherten Wärme: Sie ersetzt Wärme, die der Optimierer sonst in den
+  günstigsten Stunden erzeugen würde, und wird deshalb mit dem Mittel des günstigsten Viertels der
+  Grenzpreise im Horizont bewertet (`optimization.stored_heat_price_quantile`, Standard 0,25; Stunden mit
+  genug PV-Überschuss zählen mit der Einspeisevergütung), geteilt durch den COP. Warmwasser über dem
+  WP-Sollwert (Heizstab) bekommt einen Verlustabschlag. Vorher galt der Mittelpreis des ganzen Horizonts,
+  der an sonnigen Tagen zum Überheizen am Horizontende verleitet hat.
 
 ### Generisch konfigurierbar
 
@@ -41,6 +46,7 @@ Nichts ist auf eine Anlage festgelegt; alles steht je Gerät unter `devices.heat
 | Strafen | `optimization.*_penalty_*` | s. Konfigurationsdoku |
 | Überheizen über Komfortmax. | `optimization.overheat_penalty_amt_per_kh`; Raumwärme über `comfort.max_c` zählt nicht als Speicher | 0,5 €/Kh |
 | Aktiver Modus ohne Wirkung | `optimization.active_mode_penalty_amt_per_h` (RAISED/PREHEAT/FORCED, WW ≠ HOLD) | 0,01 €/h |
+| Wert gespeicherter Wärme am Horizontende | `optimization.stored_heat_price_quantile` (günstigster Anteil der Grenzpreise; 1,0 = Mittelpreis) | 0,25 |
 
 Bedeutung der Modi:
 
@@ -339,7 +345,10 @@ lange Absenkung und Anzahl der Warmwasserladungen.
 ### Kühlen (Fork, ab 22.10.2026)
 
 `devices.heat_pumps.<id>.cooling` (`enabled`, `setpoint_c` 24, `max_c` 26, `max_cool_w`, `eer`, `min_flow_c` 18,
-`dewpoint_margin_k` 2, `pv_only`, `min_pv_surplus_w` 500). Meldet HA `<id>-cooling-season` = 1, wählt EOS je Stunde
+`dewpoint_margin_k` 2, `pv_only`, `min_pv_surplus_w` 500). `eer` ist der Nennwert bei `eer_rated_outdoor_c`
+(35 °C) / `eer_rated_flow_c` (18 °C); je Slot wird er mit dem Carnot-Wirkungsgrad auf Außentemperatur und
+tatsächlichen Kühlvorlauf umgerechnet (heißer Nachmittag schlechter, milder Abend besser; `eer_constant: true`
+schaltet das ab). Meldet HA `<id>-cooling-season` = 1, wählt EOS je Stunde
 zwischen NORMAL (nicht aktiv kühlen) und COOL (Heizmodus 5). Mit `pv_only` darf Kühlen höchstens den
 prognostizierten PV-Überschuss der Stunde nutzen (darunter `min_pv_surplus_w`: gar nicht). Die Vorlauftemperatur
 bleibt ≥ max(`min_flow_c`, Taupunkt `<id>-dewpoint` + Marge). Über `max_c` greift die Überhitzungsstrafe.

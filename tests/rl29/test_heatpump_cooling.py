@@ -69,9 +69,30 @@ def test_cool_extracts_heat_and_uses_eer():
     assert result.heat_space_wh < 0
     cooling_wh = -result.heat_space_wh
     standby = system.hp.standby_w
-    assert result.hp_electric_wh == pytest.approx(cooling_wh / 4.5 + standby, rel=1e-6)
+    eer = system.cooling_eer(32.0, result.flow_c)
+    assert eer > 4.5  # rated at 35 degC, the afternoon is milder
+    assert result.hp_electric_wh == pytest.approx(cooling_wh / eer + standby, rel=1e-6)
+    assert result.cop_space == pytest.approx(eer)
     passive = system.step(WARM.copy(), hot_inputs(), HeatingMode.NORMAL)
     assert result.state.room_c < passive.state.room_c
+
+
+def test_eer_follows_outdoor_and_flow_temperature():
+    system = summer_system()
+    assert system.cooling_eer(35.0, 18.0) == pytest.approx(4.5)  # rated point
+    hot = system.cooling_eer(38.0, 18.0)
+    mild = system.cooling_eer(24.0, 18.0)
+    assert hot < 4.5 < mild
+    # a dew point limited (warmer) flow cools more efficiently
+    assert system.cooling_eer(32.0, 23.0) > system.cooling_eer(32.0, 18.0)
+    # the cooling in a hot slot costs more electricity than in a mild one
+    hot_slot = system.step(WARM.copy(), hot_inputs(outdoor_c=38.0), HeatingMode.COOL)
+    mild_slot = system.step(WARM.copy(), hot_inputs(outdoor_c=24.0), HeatingMode.COOL)
+    assert hot_slot.heat_space_wh == pytest.approx(mild_slot.heat_space_wh)
+    assert hot_slot.hp_electric_wh > mild_slot.hp_electric_wh
+    # the old behaviour on request
+    constant = summer_system(eer_constant=True)
+    assert constant.cooling_eer(38.0, 18.0) == 4.5
 
 
 def test_no_space_heating_in_the_cooling_season():
@@ -90,7 +111,8 @@ def test_zero_budget_means_no_cooling():
 def test_budget_caps_the_electric_power():
     system = summer_system()
     result = system.step(WARM.copy(), hot_inputs(cooling_budget_w=300.0), HeatingMode.COOL)
-    assert -result.heat_space_wh == pytest.approx(300.0 * 4.5)
+    assert -result.heat_space_wh == pytest.approx(300.0 * system.cooling_eer(32.0, result.flow_c))
+    assert result.hp_electric_wh == pytest.approx(300.0 + system.hp.standby_w)
 
 
 def test_dew_point_limits_the_capacity():
