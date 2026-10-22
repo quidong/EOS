@@ -100,6 +100,7 @@ def check(
     now: Optional[datetime] = None,
     max_age_min: float = 45.0,
     max_active_h: int = 6,
+    max_reduced_h: int = 6,
 ) -> Report:
     report = Report()
     now = now or datetime.now(timezone.utc)
@@ -164,8 +165,10 @@ def check(
             )
 
     reduced_run = _runs([m == 0 for m in modes])
-    if reduced_run > 4:
-        report.warnings.append(f"{reduced_run} h am Stück Reduziert")
+    if reduced_run > max_reduced_h:
+        report.warnings.append(
+            f"{reduced_run} h am Stück Reduziert (> {max_reduced_h} h, HA begrenzt die Absenkung)"
+        )
     if sum(1 for d in dhw if d == 1) > 4:
         report.warnings.append(
             f"Warmwasser-Ladung in {sum(1 for d in dhw if d == 1)} Stunden geplant"
@@ -181,6 +184,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--device", default="wbb12")
     parser.add_argument("--max-age-min", type=float, default=45.0)
     parser.add_argument("--max-active-h", type=int, default=6)
+    parser.add_argument(
+        "--max-reduced-h", type=int, default=6, help="Warn above this many reduced hours in a row"
+    )
     parser.add_argument("--now", help="ISO time instead of the current time (tests)")
     args = parser.parse_args(argv)
 
@@ -201,7 +207,15 @@ def main(argv: Optional[list[str]] = None) -> int:
         parser.error("--url or --solution and --config required")
 
     now = datetime.fromisoformat(args.now) if args.now else None
-    report = check(solution, config, args.device, now, args.max_age_min, args.max_active_h)
+    report = check(
+        solution,
+        config,
+        args.device,
+        now,
+        args.max_age_min,
+        args.max_active_h,
+        args.max_reduced_h,
+    )
     print("\n".join(report.lines()))
     return report.exit_code
 
