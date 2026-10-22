@@ -10,8 +10,10 @@ Rules (thresholds from the heat pump configuration, overridable):
 - FAIL  plan older than ``--max-age-min`` (default 45 min)
 - FAIL  planned room temperature above comfort max + forced overshoot + 0.5 K
 - FAIL  planned room temperature below comfort minimum - 1 K
-- FAIL  active heating (RAISED/PREHEAT/FORCED) for more than ``--max-active-h``
+- FAIL  strong heating (PREHEAT/FORCED) for more than ``--max-active-h``
   consecutive hours (default 6)
+- WARN  active heating incl. RAISED for more than ``--max-raised-h`` consecutive
+  hours (default 8); RAISED alone (+1 K, no forced valves) is no emergency
 - WARN  active heating in an hour without PV surplus and with a price above
   the 75th percentile of the horizon
 - WARN  REDUCED for more than ``--max-reduced-h`` consecutive hours (default 6,
@@ -38,6 +40,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 ACTIVE = {2, 3, 4}
+STRONG = {3, 4}
 NAMES = {0: "Reduziert", 1: "Normal", 2: "Angehoben", 3: "Vorheizen", 4: "Forciert"}
 
 
@@ -101,6 +104,7 @@ def check(
     now: Optional[datetime] = None,
     max_age_min: float = 45.0,
     max_active_h: int = 6,
+    max_raised_h: int = 8,
     max_reduced_h: int = 6,
 ) -> Report:
     report = Report()
@@ -152,9 +156,14 @@ def check(
     if min(rooms) < low - 1.0:
         report.failures.append(f"Geplante Raumtemperatur {min(rooms):.1f} °C < {low - 1.0:.1f} °C")
 
+    strong_run = _runs([m in STRONG for m in modes])
+    if strong_run > max_active_h:
+        report.failures.append(f"{strong_run} h am Stück Vorheizen/Forciert (> {max_active_h} h)")
     active_run = _runs([m in ACTIVE for m in modes])
-    if active_run > max_active_h:
-        report.failures.append(f"{active_run} h am Stück aktiv geheizt (> {max_active_h} h)")
+    if active_run > max_raised_h:
+        report.warnings.append(
+            f"{active_run} h am Stück aktiv geheizt inkl. Angehoben (> {max_raised_h} h)"
+        )
 
     expensive = _percentile(prices, 0.75)
     for t, m, p, gen, ld, fi in zip(upcoming, modes, prices, pv, load, feedin):
@@ -184,7 +193,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--config", help="Configuration JSON file")
     parser.add_argument("--device", default="wbb12")
     parser.add_argument("--max-age-min", type=float, default=45.0)
-    parser.add_argument("--max-active-h", type=int, default=6)
+    parser.add_argument(
+        "--max-active-h", type=int, default=6, help="Fail above this many PREHEAT/FORCED hours"
+    )
+    parser.add_argument(
+        "--max-raised-h", type=int, default=8, help="Warn above this many active hours incl. RAISED"
+    )
     parser.add_argument(
         "--max-reduced-h", type=int, default=6, help="Warn above this many reduced hours in a row"
     )
@@ -213,9 +227,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         config,
         args.device,
         now,
-        args.max_age_min,
-        args.max_active_h,
-        args.max_reduced_h,
+        max_age_min=args.max_age_min,
+        max_active_h=args.max_active_h,
+        max_raised_h=args.max_raised_h,
+        max_reduced_h=args.max_reduced_h,
     )
     print("\n".join(report.lines()))
     return report.exit_code

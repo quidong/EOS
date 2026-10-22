@@ -93,7 +93,36 @@ def test_first_live_plan_of_22_october_is_implausible():
     assert report.exit_code == 2
     text = "\n".join(report.lines())
     assert "24.1 °C > 23.5 °C" in text
-    assert "11 h am Stück aktiv" in text
+    assert "11 h am Stück Vorheizen/Forciert" in text
+
+
+def test_long_raise_only_warns():
+    """Plan of 22 October 21:42: RAISED 14-20 h (7 h), rooms up to 21.9 degC."""
+    modes = [1] * 14 + [2] * 7 + [1] * 3
+    report = run(solution(modes))
+    assert report.exit_code == 0, report.lines()
+    report = run(solution([1] * 4 + [2] * 9 + [1] * 11))
+    assert report.exit_code == 1
+    assert "9 h am Stück aktiv geheizt inkl. Angehoben" in report.warnings[0]
+
+
+def test_long_preheat_or_forced_fails():
+    report = run(solution([1] * 4 + [3] * 4 + [4] * 3 + [1] * 13))
+    assert report.exit_code == 2
+    assert "7 h am Stück Vorheizen/Forciert" in report.failures[0]
+
+
+def test_cli_passes_all_limits(tmp_path, capsys):
+    import json
+
+    sol = tmp_path / "solution.json"
+    cfg = tmp_path / "config.json"
+    sol.write_text(json.dumps(solution([1] * 4 + [2] * 9 + [1] * 11)), encoding="utf-8")
+    cfg.write_text(json.dumps(CONFIG), encoding="utf-8")
+    args = ["--solution", str(sol), "--config", str(cfg), "--now", NOW.isoformat()]
+    assert script.main(args) == 1
+    assert script.main(args + ["--max-raised-h", "10"]) == 0
+    assert script.main(args + ["--max-active-h", "2", "--max-raised-h", "10"]) == 0
 
 
 def test_stale_plan_fails():

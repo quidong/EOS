@@ -346,7 +346,9 @@ python3 scripts/rl29/check_heatpump_plan.py --url http://eos.local:8503
 
 Exit 0 = plausibel, 1 = Warnung, 2 = unplausibel → Hauptschalter aus. Geprüft werden Planalter, geplante
 Raumtemperaturen gegen das Komfortband, Dauer aktiver Modi, Anhebung ohne PV-Überschuss zu Spitzenpreisen,
-lange Absenkung und Anzahl der Warmwasserladungen.
+lange Absenkung und Anzahl der Warmwasserladungen. Unplausibel sind > 6 h Vorheizen/Forciert am Stück
+(`--max-active-h`); Angehoben (+1 K, keine Zwangsstellung) gibt erst ab > 8 h aktiv am Stück eine Warnung
+(`--max-raised-h`), Absenkung ab > 6 h (`--max-reduced-h`, wie `input_number.eos_wp_max_absenkdauer`).
 
 ### Kühlen (Fork, ab 22.10.2026)
 
