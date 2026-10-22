@@ -367,7 +367,30 @@ class HeatPumpCoolingSettings(SettingsBaseModel):
     eer: float = Field(
         default=4.5,
         gt=0,
-        json_schema_extra={"description": "Energy efficiency ratio of cooling."},
+        json_schema_extra={
+            "description": (
+                "Rated energy efficiency ratio of cooling at eer_rated_outdoor_c / "
+                "eer_rated_flow_c (EN 14511, e.g. A35/W18). Per slot the EER is scaled "
+                "with the Carnot efficiency for the forecast outdoor temperature and the "
+                "actual cooling flow temperature: lower on hot afternoons, higher in mild "
+                "evenings."
+            ),
+            "examples": [4.5],
+        },
+    )
+    eer_rated_outdoor_c: float = Field(
+        default=35.0,
+        json_schema_extra={"description": "Outdoor temperature of the rated EER [degC]."},
+    )
+    eer_rated_flow_c: float = Field(
+        default=18.0,
+        json_schema_extra={"description": "Flow temperature of the rated EER [degC]."},
+    )
+    eer_constant: bool = Field(
+        default=False,
+        json_schema_extra={
+            "description": "Use the rated EER in every slot regardless of the temperatures."
+        },
     )
     min_flow_c: float = Field(
         default=18.0,
@@ -483,6 +506,22 @@ class HeatPumpOptimizationSettings(SettingsBaseModel):
                 "Cost per change of the heating or hot water mode between two hours; "
                 "keeps relay switching and compressor starts rare [currency]."
             )
+        },
+    )
+    stored_heat_price_quantile: float = Field(
+        default=0.25,
+        gt=0,
+        le=1.0,
+        json_schema_extra={
+            "description": (
+                "Value of the heat stored in building and tank at the end of the horizon: "
+                "it displaces heat the optimizer would otherwise produce in the cheapest "
+                "hours, so it is valued at the mean of the cheapest share of the horizon's "
+                "marginal prices (hours with enough PV surplus count with the feed-in "
+                "tariff), divided by the COP. 1.0 values it at the mean price of the whole "
+                "horizon, which tends to overheat the building at the end of sunny days."
+            ),
+            "examples": [0.25, 1.0],
         },
     )
     load_forecast_includes_heat_pump: bool = Field(
@@ -842,6 +881,9 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
             cooling=CoolingParameters(
                 max_cool_w=self.cooling.max_cool_w,
                 eer=self.cooling.eer,
+                eer_rated_outdoor_c=self.cooling.eer_rated_outdoor_c,
+                eer_rated_flow_c=self.cooling.eer_rated_flow_c,
+                eer_constant=self.cooling.eer_constant,
                 min_flow_c=self.cooling.min_flow_c,
                 dewpoint_margin_k=self.cooling.dewpoint_margin_k,
                 flow_spread_k=unit.flow_spread_k,

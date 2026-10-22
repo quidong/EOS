@@ -122,3 +122,44 @@ WBB12_RATING_POINTS: tuple[CopPoint, ...] = (
     CopPoint(7.0, 55.0, 3.10),
     CopPoint(-7.0, 55.0, 2.47),
 )
+
+
+class EerModel:
+    """Cooling efficiency (EER) by outdoor and flow temperature (RL29 fork).
+
+    A single rated point (EN 14511 cooling, e.g. A35/W18) is scaled with the
+    Carnot efficiency of a chiller, ``T_cold / (T_hot - T_cold)``: the exergy
+    efficiency at the rated point is kept constant. The EER then falls on hot
+    afternoons and rises in mild evenings, which is what makes "cool only with
+    PV surplus" plan the cooling into the hours where it is cheap in energy.
+    """
+
+    def __init__(
+        self,
+        rated_eer: float,
+        rated_outdoor_c: float = 35.0,
+        rated_flow_c: float = 18.0,
+        eer_min: float = 1.5,
+        eer_max: float = 9.0,
+        min_lift_k: float = 3.0,
+    ) -> None:
+        if rated_eer <= 0:
+            raise ValueError("Rated EER must be positive.")
+        if not 0 < eer_min <= eer_max:
+            raise ValueError("Require 0 < eer_min <= eer_max.")
+        self.rated_eer = float(rated_eer)
+        self.rated_outdoor_c = float(rated_outdoor_c)
+        self.rated_flow_c = float(rated_flow_c)
+        self.eer_min = float(eer_min)
+        self.eer_max = float(eer_max)
+        self.min_lift_k = float(min_lift_k)
+        self.eta = self.rated_eer / self._carnot(self.rated_outdoor_c, self.rated_flow_c)
+
+    def _carnot(self, outdoor_c: float, flow_c: float) -> float:
+        lift = max(outdoor_c - flow_c, self.min_lift_k)
+        return (flow_c + KELVIN) / lift
+
+    def eer(self, outdoor_c: float, flow_c: float) -> float:
+        """EER at the given outdoor and (cooling) flow temperature, clipped."""
+        value = self.eta * self._carnot(outdoor_c, flow_c)
+        return float(min(self.eer_max, max(self.eer_min, value)))

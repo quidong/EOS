@@ -1197,8 +1197,12 @@ class GeneticOptimization(OptimizationBase):
                 (float(pv_array[i]) - float(load_array[i])) / self.slot_duration_h
                 for i in range(min(n_slots, len(pv_array), len(load_array)))
             ]
+        feed_in_array = self.simulation.elect_revenue_per_hour_arr
+        feed_in = [float(v) for v in feed_in_array[:n_slots]] if feed_in_array is not None else None
         plans = [
-            build_run_plan(device, starts, self.slot_duration_h, outdoor, ghi, prices, surplus_w)
+            build_run_plan(
+                device, starts, self.slot_duration_h, outdoor, ghi, prices, surplus_w, feed_in
+            )
             for device in heat_pumps
         ]
         self.heat_pump_layout = HeatPumpGeneLayout(plans)
