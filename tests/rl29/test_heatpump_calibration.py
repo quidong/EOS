@@ -327,6 +327,14 @@ async def test_calibrate_device_fits_stores_and_reuses(
         device, isolated_measurement, None, NOW.add(hours=3), tmp_path, "Europe/Berlin"
     )
     assert again == result
+    # a changed configuration (new prior) refits at once
+    changed = device.model_copy(deep=True)
+    changed.building.loss_w_per_k = 220.0
+    refit = await calibrate_device(
+        changed, isolated_measurement, None, NOW.add(hours=3), tmp_path, "Europe/Berlin"
+    )
+    assert refit is not None and refit.fitted_at != result.fitted_at
+    assert HeatPumpCalibrationStore(store_path).result("wbb12") == refit
     # after refit_hours a new fit runs; without data it fits nothing
     later = await calibrate_device(
         device, isolated_measurement, None, NOW.add(hours=30), tmp_path, "Europe/Berlin"
