@@ -217,6 +217,19 @@ async def calibrate_device(
             now,
             fill_weather=settings.weather_from_prediction,
         )
+        keys = device.calibration_measurement_keys
+        series_end = now + timedelta(seconds=1)
+        series_start = now - timedelta(days=settings.days)
+        dhw_series = (
+            await _measurement_series(measurement, keys["dhw_c"], series_start, series_end)
+            if settings.fit_draw_profile
+            else []
+        )
+        dhw_heat_series = (
+            await _measurement_series(measurement, keys["dhw_heat_w"], series_start, series_end)
+            if dhw_series
+            else []
+        )
         result = calibrate(
             samples,
             priors,
@@ -229,6 +242,9 @@ async def calibrate_device(
             fit_cop_enabled=settings.fit_cop,
             fit_dhw_enabled=settings.fit_dhw,
             fit_emitter_enabled=settings.fit_emitter,
+            fit_draw_enabled=settings.fit_draw_profile,
+            dhw_series=dhw_series,
+            dhw_heat_series=dhw_heat_series,
         )
         summary = result.summary(priors)
         store.set_result(device.device_id, result, summary, priors_key)
@@ -236,7 +252,7 @@ async def calibrate_device(
     except (OSError, ValueError, ArithmeticError) as exc:
         logger.warning("Heat pump {}: calibration failed: {}", device.device_id, exc)
         return previous
-    if result.building or result.cop or result.dhw or result.emitter:
+    if result.building or result.cop or result.dhw or result.emitter or result.draw:
         logger.info(
             "Heat pump {} calibration over {} days ({} hourly samples, {} weather hours filled): {}",
             device.device_id,

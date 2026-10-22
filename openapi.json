@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610222337929198"
+    "version": "v0.3.0.dev2610222314537749"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -10853,6 +10853,40 @@
             "description": "Fit building.emitter_w_per_k from the measured flow temperature (flow = room + heat/slab_room + heat/emitter + spread/2 in steady operation); the flow temperature sets the COP.",
             "default": true
           },
+          "fit_draw_profile": {
+            "type": "boolean",
+            "title": "Fit Draw Profile",
+            "description": "Learn dhw.draw_profile_wh (and a weekend profile) from the tank temperature; takes over once draw_min_days usable days exist.",
+            "default": true
+          },
+          "draw_min_days": {
+            "type": "integer",
+            "minimum": 3.0,
+            "title": "Draw Min Days",
+            "description": "Usable days before the learned draw profile replaces the configured one.",
+            "default": 14,
+            "examples": [
+              14
+            ]
+          },
+          "draw_quantile": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMaximum": 1.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draw Quantile",
+            "description": "Statistic of the draw per hour over the days: None = mean (right for tapping at varying times), else this quantile.",
+            "examples": [
+              null,
+              0.5
+            ]
+          },
           "weather_from_prediction": {
             "type": "boolean",
             "title": "Weather From Prediction",
@@ -11463,7 +11497,22 @@
             },
             "type": "array",
             "title": "Draw Profile Wh",
-            "description": "Hot water tapped per hour of day, 24 values [Wh]."
+            "description": "Hot water tapped per hour of day, 24 values [Wh]; Monday to Friday when draw_profile_weekend_wh is set. Prior of the learned profile (calibration)."
+          },
+          "draw_profile_weekend_wh": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draw Profile Weekend Wh",
+            "description": "Hot water tapped per hour on Saturdays and Sundays, 24 values [Wh]; None = draw_profile_wh holds every day."
           }
         },
         "type": "object",
@@ -14431,6 +14480,10 @@
             "$ref": "#/components/schemas/LoadAkkudoktorCommonSettings",
             "description": "LoadAkkudoktor provider settings."
           },
+          "loadmeasured": {
+            "$ref": "#/components/schemas/LoadMeasuredCommonSettings",
+            "description": "LoadMeasured provider settings (RL29 fork: own measured history)."
+          },
           "loadimport": {
             "$ref": "#/components/schemas/LoadImportCommonSettings",
             "description": "LoadImport provider settings."
@@ -14464,6 +14517,10 @@
           "loadakkudoktor": {
             "$ref": "#/components/schemas/LoadAkkudoktorCommonSettings",
             "description": "LoadAkkudoktor provider settings."
+          },
+          "loadmeasured": {
+            "$ref": "#/components/schemas/LoadMeasuredCommonSettings",
+            "description": "LoadMeasured provider settings (RL29 fork: own measured history)."
           },
           "loadimport": {
             "$ref": "#/components/schemas/LoadImportCommonSettings",
@@ -14531,6 +14588,68 @@
         "type": "object",
         "title": "LoadImportCommonSettings",
         "description": "Common settings for load data import from file or JSON string."
+      },
+      "LoadMeasuredCommonSettings": {
+        "properties": {
+          "weeks": {
+            "type": "integer",
+            "maximum": 52.0,
+            "minimum": 1.0,
+            "title": "Weeks",
+            "description": "History window [weeks].",
+            "default": 6,
+            "examples": [
+              6,
+              4
+            ]
+          },
+          "min_days": {
+            "type": "integer",
+            "minimum": 3.0,
+            "title": "Min Days",
+            "description": "Healthy days needed before the own history replaces the adjusted standard profile.",
+            "default": 14,
+            "examples": [
+              14
+            ]
+          },
+          "min_days_per_type": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Min Days Per Type",
+            "description": "Each weekday needs this many healthy days for a per-weekday profile; otherwise working days / weekend are pooled.",
+            "default": 3,
+            "examples": [
+              3
+            ]
+          },
+          "quantile": {
+            "type": "number",
+            "exclusiveMaximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Quantile",
+            "description": "Statistic per hour: 0.5 = median; higher is more conservative.",
+            "default": 0.5,
+            "examples": [
+              0.5,
+              0.6
+            ]
+          },
+          "gap_threshold": {
+            "type": "number",
+            "exclusiveMaximum": 1.0,
+            "minimum": 0.0,
+            "title": "Gap Threshold",
+            "description": "A day with less than this share of the median daily energy is treated as a measurement gap and left out.",
+            "default": 0.3,
+            "examples": [
+              0.3
+            ]
+          }
+        },
+        "type": "object",
+        "title": "LoadMeasuredCommonSettings",
+        "description": "Settings of the measured-history load provider (RL29 fork)."
       },
       "LoadVrmCommonSettings": {
         "properties": {

@@ -158,6 +158,7 @@ nie geschrieben.
 | `unit.cop_scale` | Stunden mit Heizwärme ≥ `cop_min_heat_w` (3 kW = kleinste Modulation, WP lief durch) | Energiegewichtetes Verhältnis Messung/Kennfeld, Standby (`unit.standby_w`) vorher abgezogen; Schrumpfung mit `cop_prior_hours` (24 h) |
 | `building.emitter_w_per_k` | Stunden mit Heizwärme ≥ 3 kW ohne WW-Ladung | Vorlauf = Raum + Q/`slab_room` + Q/`emitter` + Spreizung/2: aus gemessenem Vorlauf und Wärme wird der Übergang Heizwasser→Estrich gefittet, der den Vorlauf und damit den COP bestimmt; Schrumpfung mit `emitter_prior_hours` (24 h) |
 | `dhw.loss_w_per_k` | Nächte 0–5 Uhr ohne Ladung und Zapfung (mindestens 3) | Exponentieller Abfall, Median über Nächte |
+| `dhw.draw_profile_wh` (+ `draw_profile_weekend_wh`) | Rohwerte der Speichertemperatur (nicht Stundenmittel), ab 14 brauchbaren Tagen | Zapfung je Messintervall = C·Temperaturabfall − Standby-Verlust (+ gemessene Ladewärme, falls `wbb12-dhw-heat-power` existiert), je Ortsstunde gemittelt; ab je 4 Wochenend- und Werktagen getrennte Profile; Schrumpfung mit 7 Tagen zur Konfiguration; Tage mit Lücken > 3 h und Tage unter 20 % des Median-Tages (Urlaub) fliegen raus; Tagesmenge außerhalb 0,3…3× der Konfiguration → Konfiguration bleibt |
 
 Ohne Globalstrahlung in den Daten bleibt die Apertur auf dem konfigurierten Wert (sonst zählte die Sonne doppelt).
 
@@ -207,7 +208,13 @@ Ergebnis: `<EOS-Datenordner>/rl29/heatpump_calibration.json` (Werte, Diagnose, Z
 `unit.cop_max` (Standard 7) deckelt den COP bei milder Witterung: Die Nennpunkte decken nur W35/W55 ab, die
 Carnot-Extrapolation bei 25 °C Vorlauf liefe sonst auf 8 und machte Heizen an milden Tagen im Modell fast gratis.
 
-Stellschrauben (alle unter `calibration`): `fit_building`/`fit_cop`/`fit_dhw`/`fit_emitter` (einzeln abschaltbar),
+Zapfprofil: Ohne gemessene Ladewärme ist eine Zapfung während einer laufenden Ladung unsichtbar; das gelernte
+Profil ist dann eher eine Untergrenze. Das Modell ist ein voll durchmischter Speicher, genau dazu passt „Abfall ×
+Wärmekapazität“ – auch wenn der Fühler die Schichtung nur teilweise sieht. Das Handskript (`calibrate_heatpump.py`)
+arbeitet mit Stundenmitteln und lernt das Zapfprofil nicht.
+
+Stellschrauben (alle unter `calibration`): `fit_building`/`fit_cop`/`fit_dhw`/`fit_emitter`/`fit_draw_profile` (einzeln abschaltbar),
+`draw_min_days` (14), `draw_quantile` (None = Mittelwert),
 `min_days` (5), `prior_weight_days` (7; 0 = nur Messwerte), `outage_threshold` (0,4; 0 = aus),
 `loss_min_factor`/`loss_max_factor` (0,3/3,0), `cop_min_heat_w` (3000), `cop_prior_hours` (24),
 `cop_min_scale`/`cop_max_scale` (0,5/1,5).
@@ -241,6 +248,28 @@ Lesart: Ein wachsender Raum-Bias bei lead 6h zeigt auf `building.loss_w_per_k`/G
 sollte ihn mit der Zeit abbauen); ein Energieverhältnis dauerhaft ungleich 1 auf `unit.cop_scale` oder die
 Lastannahmen; große Abweichung bei lead 1h, aber nicht bei 6h, auf die HA-Umsetzung (Sperrzeiten, Pause,
 Mindesthaltezeit).
+
+### Kennzahlen nach Home Assistant (B5)
+
+Für Wärmepumpen mit eingeschalteter Kalibrierung trägt die Lösung konstante Spalten `<id>_kpi_*`, die der
+HA-Adapter wie jeden Lösungswert als `sensor.eos_<id>_kpi_*` setzt. Solange Daten fehlen, steht dort `unknown`
+(Plan-Ist ab 12 verglichenen Slots, Kalibrierwerte ab dem jeweiligen Fit) – nichts muss später umgeschaltet werden.
+
+| Spalte | Inhalt |
+|---|---|
+| `kpi_room_bias_1h_k`, `kpi_room_mae_1h_k`, `kpi_room_bias_6h_k`, `kpi_room_mae_6h_k` | Raum Plan − Ist [K] |
+| `kpi_dhw_bias_6h_k` | Speicher Plan − Ist [K] |
+| `kpi_energy_ratio_6h` | gemessener / geplanter WP-Strom |
+| `kpi_loss_w_per_k`, `kpi_solar_aperture_m2`, `kpi_internal_gains_w`, `kpi_building_days` | Gebäude-Fit |
+| `kpi_cop_scale`, `kpi_measured_cop` | COP-Fit |
+| `kpi_emitter_w_per_k`, `kpi_dhw_loss_w_per_k` | Heizflächen- und Speicherverlust-Fit |
+| `kpi_draw_kwh_per_day`, `kpi_draw_days` | gelerntes Zapfprofil |
+| `kpi_calibrated` | 1 = mindestens ein Fit aktiv |
+
+In `adapter.homeassistant.solution_entity_ids` eintragen, z. B. `sensor.eos_wbb12_kpi_room_bias_6h_k`,
+`sensor.eos_wbb12_kpi_energy_ratio_6h`, `sensor.eos_wbb12_kpi_cop_scale`, `sensor.eos_wbb12_kpi_loss_w_per_k`,
+`sensor.eos_wbb12_kpi_draw_kwh_per_day`, `sensor.eos_wbb12_kpi_calibrated`. Fehlende Werte schickt der Adapter
+als `unknown` statt NaN.
 
 ## 2c. PDF-Bericht
 

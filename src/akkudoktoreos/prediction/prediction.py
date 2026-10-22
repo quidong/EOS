@@ -51,6 +51,7 @@ from akkudoktoreos.prediction.loadakkudoktor import (
     LoadAkkudoktorAdjusted,
 )
 from akkudoktoreos.prediction.loadimport import LoadImport
+from akkudoktoreos.prediction.loadmeasured import LoadMeasured
 from akkudoktoreos.prediction.loadvrm import LoadVrm
 from akkudoktoreos.prediction.predictionabc import PredictionContainer
 from akkudoktoreos.prediction.pvforecastakkudoktor import PVForecastAkkudoktor
@@ -105,6 +106,7 @@ loadforecast_akkudoktor = LoadAkkudoktor()
 loadforecast_akkudoktor_adjusted = LoadAkkudoktorAdjusted()
 loadforecast_vrm = LoadVrm()
 loadforecast_import = LoadImport()
+loadforecast_measured = LoadMeasured()
 pvforecast_akkudoktor = PVForecastAkkudoktor()
 pvforecast_vrm = PVForecastVrm()
 pvforecast_homeassistant = PVForecastHomeAssistant()
@@ -138,6 +140,7 @@ PredictionProviderType = Union[
     LoadAkkudoktor,
     LoadAkkudoktorAdjusted,
     LoadImport,
+    LoadMeasured,
     LoadVrm,
     PVForecastAkkudoktor,
     PVForecastForecastSolar,
@@ -179,6 +182,7 @@ def prediction_providers() -> list[PredictionProviderType]:
         loadforecast_akkudoktor_adjusted, \
         loadforecast_vrm, \
         loadforecast_import, \
+        loadforecast_measured, \
         pvforecast_akkudoktor, \
         pvforecast_vrm, \
         pvforecast_homeassistant, \
@@ -228,6 +232,7 @@ def prediction_providers() -> list[PredictionProviderType]:
         pvforecast_pvnode,
         pvforecast_solcast,
         pvforecast_vrm,
+        loadforecast_measured,  # RL29 fork, appended to keep the upstream sequence
     ]
 
 

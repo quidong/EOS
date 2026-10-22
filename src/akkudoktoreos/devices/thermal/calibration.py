@@ -23,6 +23,11 @@ fitted from hourly means of the measurements:
    flow temperature are too low in hours with cycling).
 3. **Tank loss** (``dhw.loss_w_per_k``): the exponential night decay of the tank
    temperature without charging and tapping.
+4. **Hot water draw profile** (``dhw.draw_profile_wh`` and, with enough weekend
+   days, ``dhw.draw_profile_weekend_wh``): hourly tapping from the drops of the
+   raw tank temperature series beyond the standby loss, the mean per local
+   hour (separately for weekends once there are enough), shrunk towards the configured profile. Without a measured heat
+   into the tank, tapping during a charge is hidden (lower bound).
 
 Every fit reports what it used and how much it changed, and every result is
 clipped to a plausible band around the configured value. The module has no
@@ -33,6 +38,7 @@ EOS dependencies; the EOS integration lives in
 
 from __future__ import annotations
 
+import bisect
 import math
 import statistics
 from collections import defaultdict
@@ -183,6 +189,10 @@ class CalibrationPriors:
     standby_w: float = 22.0
     dhw_volume_l: float = 190.0
     dhw_ambient_c: float = 18.0
+    draw_profile_wh: tuple[float, ...] = ()
+    """Configured hourly draw profile [Wh], 24 values; empty = no draw prior."""
+    draw_profile_weekend_wh: tuple[float, ...] = ()
+    """Configured weekend profile; empty = the draw profile holds every day."""
 
 
 @dataclass(frozen=True)
@@ -231,6 +241,24 @@ class CalibrationOptions:
     dhw_prior_nights: float = 3.0
     dhw_min_loss_w_per_k: float = 0.1
     dhw_max_loss_w_per_k: float = 20.0
+    draw_min_days: int = 14
+    """Usable days before a learned draw profile replaces the configured one."""
+    draw_min_weekend_days: int = 4
+    """Saturdays/Sundays needed for a separate weekend profile."""
+    draw_max_gap_hours: float = 3.0
+    """Days with a longer pause between tank readings are left out of the draw profile."""
+    draw_quantile: Optional[float] = None
+    """Statistic per hour: None = mean (energy-true for tapping at varying times),
+    else this quantile of the days."""
+    draw_prior_days: float = 7.0
+    """Shrinkage of the draw profile: the configured profile weighs like this many days."""
+    draw_noise_k: float = 0.2
+    """Tank drops below this beyond the standby loss count as no tapping (sensor noise)."""
+    draw_gap_share: float = 0.2
+    """Days below this share of the median daily draw are left out (away, no data)."""
+    draw_min_share: float = 0.3
+    draw_max_share: float = 3.0
+    """Band of the learned daily draw relative to the configured one."""
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +314,20 @@ class DhwFit:
 
 
 @dataclass
+class DrawFit:
+    profile_wh: list[float]
+    """Learned hourly draw [Wh], 24 values (every day, or Monday to Friday)."""
+    weekend_wh: Optional[list[float]]
+    """Learned weekend profile, None when there were too few weekend days."""
+    days: int
+    weekend_days: int = 0
+    daily_wh: float = 0.0
+    """Mean daily draw of the learned profile(s) [Wh]."""
+    prior_daily_wh: float = 0.0
+    excluded_days: int = 0
+
+
+@dataclass
 class CalibrationResult:
     fitted_at: datetime
     window_days: int = 0
@@ -294,6 +336,7 @@ class CalibrationResult:
     cop: Optional[CopFit] = None
     dhw: Optional[DhwFit] = None
     emitter: Optional[EmitterFit] = None
+    draw: Optional[DrawFit] = None
     notes: list[str] = field(default_factory=list)
     """Why a fit was skipped, for the log."""
 
@@ -312,6 +355,7 @@ class CalibrationResult:
             cop=CopFit(**data["cop"]) if data.get("cop") else None,
             dhw=DhwFit(**data["dhw"]) if data.get("dhw") else None,
             emitter=EmitterFit(**data["emitter"]) if data.get("emitter") else None,
+            draw=DrawFit(**data["draw"]) if data.get("draw") else None,
             notes=list(data.get("notes") or []),
         )
 
@@ -343,6 +387,13 @@ class CalibrationResult:
             parts.append(
                 f"tank loss {priors.dhw_loss_w_per_k:.2f} -> {d.loss_w_per_k:.2f} W/K "
                 f"({d.nights} nights)"
+            )
+        if self.draw:
+            w = self.draw
+            weekend = f", weekend profile from {w.weekend_days} days" if w.weekend_wh else ""
+            parts.append(
+                f"hot water draw {w.prior_daily_wh / 1000:.1f} -> {w.daily_wh / 1000:.1f} kWh/day "
+                f"({w.days} days{weekend})"
             )
         parts.extend(self.notes)
         return "; ".join(parts) if parts else "nothing fitted"
@@ -702,6 +753,151 @@ def fit_dhw_loss(
     return DhwFit(loss_w_per_k=round(loss, 2), nights=n, raw_loss_w_per_k=round(raw, 2)), ""
 
 
+def daily_draws(
+    dhw_series: Sequence[tuple[datetime, float]],
+    priors: CalibrationPriors,
+    options: CalibrationOptions = CalibrationOptions(),
+    tz: Optional[tzinfo] = None,
+    loss_w_per_k: Optional[float] = None,
+    heat_series: Sequence[tuple[datetime, float]] = (),
+) -> dict[date, list[float]]:
+    """Tapped energy per local day and hour [Wh] from the raw tank temperature series.
+
+    Between two consecutive readings ``draw = heat_in + C * (T_before - T_after) -
+    loss * (T_mean - T_ambient) * dt``; ``heat_in`` integrates the measured heat
+    into the tank (step-held), without a measurement it is 0, so draws hidden by
+    a running charge are missed (a lower bound). The draw is booked on the local hour of the later reading. Only days
+    whose readings never pause longer than ``draw_max_gap_hours`` are returned.
+    """
+    capacity = priors.dhw_volume_l * WATER_WH_PER_LITRE_K
+    loss = priors.dhw_loss_w_per_k if loss_w_per_k is None else loss_w_per_k
+    noise_wh = capacity * options.draw_noise_k
+    ordered = sorted(
+        (t, float(v)) for t, v in dhw_series if v is not None and math.isfinite(float(v))
+    )
+    heat = sorted(
+        (t, float(v)) for t, v in heat_series if v is not None and math.isfinite(float(v))
+    )
+
+    heat_times = [t for t, _ in heat]
+
+    def heat_energy(start: datetime, end: datetime) -> float:
+        if not heat:
+            return 0.0
+        energy = 0.0
+        i = max(0, bisect.bisect_right(heat_times, start) - 1)
+        while i < len(heat) and heat[i][0] < end:
+            seg_end = heat[i + 1][0] if i + 1 < len(heat) else end
+            lo, hi = max(start, heat[i][0]), min(end, seg_end)
+            if hi > lo:
+                energy += max(0.0, heat[i][1]) * (hi - lo).total_seconds() / 3600.0
+            i += 1
+        return energy
+
+    def local(stamp: datetime) -> datetime:
+        return stamp.astimezone(tz) if tz is not None else stamp
+
+    days: dict[date, list[float]] = defaultdict(lambda: [0.0] * 24)
+    broken: set[date] = set()
+    max_gap = timedelta(hours=options.draw_max_gap_hours)
+    for (t0, v0), (t1, v1) in zip(ordered, ordered[1:]):
+        dt_h = (t1 - t0).total_seconds() / 3600.0
+        if dt_h <= 0:
+            continue
+        if t1 - t0 > max_gap:
+            day = local(t0).date()
+            while day <= local(t1).date():
+                broken.add(day)
+                day += timedelta(days=1)
+            continue
+        standby = loss * ((v0 + v1) / 2 - priors.dhw_ambient_c) * dt_h
+        draw = heat_energy(t0, t1) + capacity * (v0 - v1) - standby
+        stamp = local(t1)
+        days[stamp.date()]
+        if draw > noise_wh:
+            days[stamp.date()][stamp.hour] += draw
+    if not ordered:
+        return {}
+    # the first and the last day are cut by the window
+    broken.add(local(ordered[0][0]).date())
+    broken.add(local(ordered[-1][0]).date())
+    return {d: [round(v, 1) for v in hours] for d, hours in days.items() if d not in broken}
+
+
+def fit_draw_profile(
+    days: dict[date, list[float]],
+    priors: CalibrationPriors,
+    options: CalibrationOptions = CalibrationOptions(),
+) -> tuple[Optional[DrawFit], str]:
+    """Hourly hot water draw profile (weekday/weekend) from ``daily_draws``."""
+    if len(priors.draw_profile_wh) != 24:
+        return None, "draw: no configured profile as prior"
+    if not days:
+        return None, f"draw: 0 usable days, need {options.draw_min_days}"
+    median_total = statistics.median(sum(h) for h in days.values())
+    usable = {d: h for d, h in days.items() if sum(h) >= options.draw_gap_share * median_total}
+    excluded = len(days) - len(usable)
+    if len(usable) < options.draw_min_days:
+        return None, f"draw: {len(usable)} usable day(s), need {options.draw_min_days}"
+    weekday_prior = list(priors.draw_profile_wh)
+    weekend_prior = (
+        list(priors.draw_profile_weekend_wh)
+        if len(priors.draw_profile_weekend_wh) == 24
+        else weekday_prior
+    )
+    weekend_days = [h for d, h in usable.items() if d.weekday() >= 5]
+    split = len(weekend_days) >= options.draw_min_weekend_days and (
+        len(usable) - len(weekend_days) >= options.draw_min_weekend_days
+    )
+
+    def learn(groups: list[list[float]], prior: list[float]) -> list[float]:
+        profile = []
+        for hour in range(24):
+            values = [g[hour] for g in groups]
+            n = len(values)
+            raw = (
+                float(np.mean(values))
+                if options.draw_quantile is None
+                else float(np.quantile(values, options.draw_quantile))
+            )
+            shrunk = (n * raw + options.draw_prior_days * prior[hour]) / (
+                n + options.draw_prior_days
+            )
+            profile.append(round(shrunk, 1))
+        return profile
+
+    if split:
+        workdays = [h for d, h in usable.items() if d.weekday() < 5]
+        profile = learn(workdays, weekday_prior)
+        weekend: Optional[list[float]] = learn(weekend_days, weekend_prior)
+        daily = (5 * sum(profile) + 2 * sum(weekend or [])) / 7
+        prior_daily = (5 * sum(weekday_prior) + 2 * sum(weekend_prior)) / 7
+    else:
+        profile = learn(list(usable.values()), weekday_prior)
+        weekend = None
+        daily = sum(profile)
+        prior_daily = (5 * sum(weekday_prior) + 2 * sum(weekend_prior)) / 7
+    if prior_daily > 0 and not (
+        options.draw_min_share * prior_daily <= daily <= options.draw_max_share * prior_daily
+    ):
+        return None, (
+            f"draw: learned {daily / 1000:.1f} kWh/day outside the band around the configured "
+            f"{prior_daily / 1000:.1f} kWh/day, kept the configured profile"
+        )
+    return (
+        DrawFit(
+            profile_wh=profile,
+            weekend_wh=weekend,
+            days=len(usable),
+            weekend_days=len(weekend_days) if split else 0,
+            daily_wh=round(daily, 0),
+            prior_daily_wh=round(prior_daily, 0),
+            excluded_days=excluded,
+        ),
+        "",
+    )
+
+
 # ---------------------------------------------------------------------------
 # All together
 # ---------------------------------------------------------------------------
@@ -719,8 +915,15 @@ def calibrate(
     fit_cop_enabled: bool = True,
     fit_dhw_enabled: bool = True,
     fit_emitter_enabled: bool = True,
+    fit_draw_enabled: bool = True,
+    dhw_series: Sequence[tuple[datetime, float]] = (),
+    dhw_heat_series: Sequence[tuple[datetime, float]] = (),
 ) -> CalibrationResult:
-    """Run the enabled fits on hourly samples and collect the result."""
+    """Run the enabled fits on hourly samples and collect the result.
+
+    The draw profile needs the raw tank temperature series ``dhw_series`` (and
+    the raw heat into the tank, if measured); hourly means smear the drops.
+    """
     samples = estimate_dhw_heat(samples, priors.dhw_volume_l)
     result = CalibrationResult(
         fitted_at=now or datetime.now(timezone.utc),
@@ -741,6 +944,12 @@ def calibrate(
             result.notes.append(note)
     if fit_dhw_enabled:
         result.dhw, note = fit_dhw_loss(samples, priors, options, tz)
+        if note:
+            result.notes.append(note)
+    if fit_draw_enabled and dhw_series:  # the manual script has hourly means only
+        loss = result.dhw.loss_w_per_k if result.dhw else None
+        days = daily_draws(dhw_series, priors, options, tz, loss, dhw_heat_series)
+        result.draw, note = fit_draw_profile(days, priors, options)
         if note:
             result.notes.append(note)
     return result

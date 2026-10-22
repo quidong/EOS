@@ -985,6 +985,12 @@ class GeneticSolution(ConfigMixin, GeneticParametersBaseModel):
                 if len(values) < n_points:
                     values += [values[-1] if values else 0] * (n_points - len(values))
                 solution[f"{device_id}_{column}"] = [convert(v) for v in values]
+            # Plan-vs-actual and calibration figures, constant over the horizon;
+            # None (unknown) until enough data exists.
+            for column, value in (schedule.get("kpis") or {}).items():
+                solution[f"{device_id}_{column}"] = [
+                    float("nan") if value is None else float(value)
+                ] * n_points
 
         # Fill prediction into dataframe with correct column names
         # - pvforecast_ac_energy_wh_energy_wh: PV energy prediction (positive) in wh

@@ -9,6 +9,7 @@
 | ---- | -------------------- | ---- | --------- | ------- | ----------- |
 | loadakkudoktor | `EOS_LOAD__LOADAKKUDOKTOR` | `LoadAkkudoktorCommonSettings` | `rw` | `required` | LoadAkkudoktor provider settings. |
 | loadimport | `EOS_LOAD__LOADIMPORT` | `LoadImportCommonSettings` | `rw` | `required` | LoadImport provider settings. |
+| loadmeasured | `EOS_LOAD__LOADMEASURED` | `LoadMeasuredCommonSettings` | `rw` | `required` | LoadMeasured provider settings (RL29 fork: own measured history). |
 | provider | `EOS_LOAD__PROVIDER` | `Optional[str]` | `rw` | `None` | Load provider id of provider to be used. |
 | providers | | `list[str]` | `ro` | `N/A` | Available load provider ids. |
 | vrm | `EOS_LOAD__VRM` | `LoadVrmCommonSettings` | `rw` | `required` | Victron Remote Management (VRM) provider settings. |
@@ -26,6 +27,13 @@
            "provider": "LoadAkkudoktor",
            "loadakkudoktor": {
                "loadakkudoktor_year_energy_kwh": null
+           },
+           "loadmeasured": {
+               "weeks": 6,
+               "min_days": 14,
+               "min_days_per_type": 3,
+               "quantile": 0.5,
+               "gap_threshold": 0.3
            },
            "loadimport": {
                "import_file_path": null,
@@ -52,6 +60,13 @@
            "loadakkudoktor": {
                "loadakkudoktor_year_energy_kwh": null
            },
+           "loadmeasured": {
+               "weeks": 6,
+               "min_days": 14,
+               "min_days_per_type": 3,
+               "quantile": 0.5,
+               "gap_threshold": 0.3
+           },
            "loadimport": {
                "import_file_path": null,
                "import_json": null
@@ -64,6 +79,7 @@
                "LoadAkkudoktor",
                "LoadAkkudoktorAdjusted",
                "LoadImport",
+               "LoadMeasured",
                "LoadVrm"
            ]
        }
@@ -96,6 +112,43 @@
            "vrm": {
                "token": "your-token",
                "site_id": 12345
+           }
+       }
+   }
+```
+<!-- pyml enable line-length -->
+
+### Settings of the measured-history load provider (RL29 fork)
+
+<!-- pyml disable line-length -->
+:::{table} load::loadmeasured
+:widths: 10 10 5 5 30
+:align: left
+
+| Name | Type | Read-Only | Default | Description |
+| ---- | ---- | --------- | ------- | ----------- |
+| gap_threshold | `float` | `rw` | `0.3` | A day with less than this share of the median daily energy is treated as a measurement gap and left out. |
+| min_days | `int` | `rw` | `14` | Healthy days needed before the own history replaces the adjusted standard profile. |
+| min_days_per_type | `int` | `rw` | `3` | Each weekday needs this many healthy days for a per-weekday profile; otherwise working days / weekend are pooled. |
+| quantile | `float` | `rw` | `0.5` | Statistic per hour: 0.5 = median; higher is more conservative. |
+| weeks | `int` | `rw` | `6` | History window [weeks]. |
+:::
+<!-- pyml enable line-length -->
+
+<!-- pyml disable no-emphasis-as-heading -->
+**Example Input/Output**
+<!-- pyml enable no-emphasis-as-heading -->
+
+<!-- pyml disable line-length -->
+```json
+   {
+       "load": {
+           "loadmeasured": {
+               "weeks": 6,
+               "min_days": 14,
+               "min_days_per_type": 3,
+               "quantile": 0.5,
+               "gap_threshold": 0.3
            }
        }
    }

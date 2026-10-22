@@ -1,5 +1,6 @@
 """Home Assistant adapter."""
 
+import math
 import difflib
 import os
 import re
@@ -767,7 +768,10 @@ class HomeAssistantAdapter(AdapterProvider):
                 for entity_id in entity_ids:
                     solution_key = entity_id[len(HOMEASSISTANT_ENTITY_ID_PREFIX) :]
                     try:
-                        self.set_entity_state(entity_id, row[solution_key])
+                        value = row[solution_key]
+                        if value is None or (isinstance(value, float) and math.isnan(value)):
+                            value = "unknown"  # RL29 fork: no NaN into the HA REST API
+                        self.set_entity_state(entity_id, value)
                     except Exception as e:
                         logger.error(f"{e}")
             # Currently active instructions
