@@ -650,7 +650,10 @@ class HomeAssistantAdapter(AdapterProvider):
                             await self._import_entity_history(measurement_key, entity_id)
                         except Exception as e:
                             logger.error(f"{e}")
-                    elif entity_id:
+                    if entity_id:
+                        # The current state is stamped with the run time in any case:
+                        # an imported history ends at the last state change, which may
+                        # be older than the freshness limit of the device simulations.
                         try:
                             state = self.get_entity_state(entity_id)
                             logger.debug(f"Entity {entity_id}: {state}")

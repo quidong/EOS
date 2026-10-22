@@ -261,6 +261,7 @@ async def test_adapter_imports_the_history_of_marked_keys(config_eos, monkeypatc
     adapter = HomeAssistantAdapter()
     ems = MagicMock()
     ems.stage.return_value = EnergyManagementStage.DATA_ACQUISITION
+    ems.observation_datetime = to_datetime("2026-10-22T10:03:00+02:00")
     object.__setattr__(adapter, "ems", ems)
     monkeypatch.setattr(
         HomeAssistantAdapter, "ems_start_datetime", "2026-10-22T10:00:00+02:00", raising=False
@@ -286,7 +287,9 @@ async def test_adapter_imports_the_history_of_marked_keys(config_eos, monkeypatc
     await adapter._update_data()
     written = [c.args for c in measurement.update_value.await_args_list]
     power = [(when, value) for (when, key, value) in written if key == "waschmaschine-power"]
-    assert [value for _, value in power] == [0.0, 4200.0, 180.0]
+    # the history, then the current state stamped with the run time (freshness)
+    assert [value for _, value in power] == [0.0, 4200.0, 180.0, 5.0]
+    assert power[-1][0] == to_datetime("2026-10-22T10:03:00+02:00")
     assert any(key == "waschmaschine-program" and value == 5.0 for (_, key, value) in written)
     assert calls[0][0] == "sensor.strom_waschmaschine"
     # the next import continues where the last one ended
