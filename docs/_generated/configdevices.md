@@ -125,7 +125,9 @@ config path from ``self.device_id`` without needing an external index.
                    "time_windows": null,
                    "earliest_start_datetime": null,
                    "deadline_datetime": null,
-                   "deadline_policy": "BEST_EFFORT"
+                   "deadline_policy": "BEST_EFFORT",
+                   "request_driven": false,
+                   "request_max_age_seconds": 3600
                }
            },
            "max_home_appliances": 3,
@@ -412,6 +414,11 @@ config path from ``self.device_id`` without needing an external index.
                    "earliest_start_datetime": null,
                    "deadline_datetime": null,
                    "deadline_policy": "BEST_EFFORT",
+                   "request_driven": false,
+                   "request_max_age_seconds": 3600,
+                   "measurement_key_requested": "dishwasher-requested",
+                   "measurement_key_deadline": "dishwasher-deadline",
+                   "measurement_key_duration": "dishwasher-duration",
                    "effective_num_cycles": 1,
                    "measurement_keys": [
                        "dishwasher.cycles_completed"

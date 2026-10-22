@@ -300,6 +300,52 @@ class HomeApplianceCommonSettings(DevicesBaseSettings):
         },
     )
 
+    request_driven: bool = Field(
+        default=False,
+        json_schema_extra={
+            "x-scope": [str(ConfigScope.GENETIC)],
+            "description": (
+                "RL29 fork: plan the appliance only on request. The controller reports "
+                "the measurements '<device_id>-requested' (1 = a run is waiting, e.g. "
+                "remote start enabled), '<device_id>-deadline' (Unix time the run has "
+                "to be finished, 0 = none) and optionally '<device_id>-duration' "
+                "(program duration [h], 0 = configured duration). Without a fresh "
+                "request (see 'request_max_age_seconds') the appliance is not planned."
+            ),
+            "examples": [False, True],
+        },
+    )
+    request_max_age_seconds: int = Field(
+        default=3600,
+        gt=0,
+        json_schema_extra={
+            "x-scope": [str(ConfigScope.GENETIC)],
+            "description": (
+                "RL29 fork: request measurements older than this are ignored [s]; a "
+                "stale request is treated as no request."
+            ),
+            "examples": [3600],
+        },
+    )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def measurement_key_requested(self) -> str:
+        """Measurement key: a run is requested (1) or not (0)."""
+        return f"{self.device_id}-requested"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def measurement_key_deadline(self) -> str:
+        """Measurement key: Unix time the requested run has to be finished."""
+        return f"{self.device_id}-deadline"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def measurement_key_duration(self) -> str:
+        """Measurement key: duration of the requested program [h]."""
+        return f"{self.device_id}-duration"
+
     @field_validator("earliest_start_datetime", "deadline_datetime", mode="before")
     @classmethod
     def transform_to_datetime(cls, value: Any) -> Optional[DateTime]:
@@ -402,4 +448,11 @@ class HomeApplianceCommonSettings(DevicesBaseSettings):
     @property
     def measurement_keys(self) -> Optional[list[str]]:
         """Measurement keys for the home appliance stati that are measurements."""
-        return [self.cycles_completed_measurement_key or f"{self.device_id}.cycles_completed"]
+        keys = [self.cycles_completed_measurement_key or f"{self.device_id}.cycles_completed"]
+        if self.request_driven:
+            keys += [
+                self.measurement_key_requested,
+                self.measurement_key_deadline,
+                self.measurement_key_duration,
+            ]
+        return keys

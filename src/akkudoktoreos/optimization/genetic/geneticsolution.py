@@ -931,6 +931,13 @@ class GeneticSolution(ConfigMixin, GeneticParametersBaseModel):
         # energy arrays start at start_day_slot, like the other result arrays.
         for device_id, energy_wh in self.result.home_appliance_energy_wh.items():
             solution[f"{device_id}_energy_wh"] = energy_wh[:n_points]
+            # RL29 fork: Unix time of the next planned run start at or after each
+            # slot (0 = none), so a controller can program a delayed start.
+            run_starts = [start.timestamp() for start in self.appliance_starts.get(device_id, [])]
+            solution[f"{device_id}_next_start_ts"] = [
+                float(min((ts for ts in run_starts if ts >= slot.timestamp() - 1e-6), default=0.0))
+                for slot in time_index
+            ]
             operation = {
                 f"{device_id}_run_op_mode": [],
                 f"{device_id}_run_op_factor": [],
