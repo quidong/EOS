@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610221180326127"
+    "version": "v0.3.0.dev2610221170506671"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -11563,6 +11563,46 @@
             "x-scope": [
               "GENETIC"
             ]
+          },
+          "learn_profiles": {
+            "type": "boolean",
+            "title": "Learn Profiles",
+            "description": "RL29 fork: learn a load profile per program from the measurements '<device_id>-power' [W] and '<device_id>-program' (numeric program code). A request for a program with a learned profile is planned with that profile instead of the configured load.",
+            "default": false,
+            "examples": [
+              false,
+              true
+            ],
+            "x-scope": [
+              "GENETIC"
+            ]
+          },
+          "profile_learning_rate": {
+            "type": "number",
+            "maximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Profile Learning Rate",
+            "description": "RL29 fork: weight of a new run when updating a learned profile; the first runs are averaged equally.",
+            "default": 0.3,
+            "examples": [
+              0.3
+            ],
+            "x-scope": [
+              "GENETIC"
+            ]
+          },
+          "profile_power_threshold_w": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Profile Power Threshold W",
+            "description": "RL29 fork: power above which the appliance counts as running [W].",
+            "default": 20.0,
+            "examples": [
+              20.0
+            ],
+            "x-scope": [
+              "GENETIC"
+            ]
           }
         },
         "type": "object",
@@ -11863,6 +11903,58 @@
               "GENETIC"
             ]
           },
+          "learn_profiles": {
+            "type": "boolean",
+            "title": "Learn Profiles",
+            "description": "RL29 fork: learn a load profile per program from the measurements '<device_id>-power' [W] and '<device_id>-program' (numeric program code). A request for a program with a learned profile is planned with that profile instead of the configured load.",
+            "default": false,
+            "examples": [
+              false,
+              true
+            ],
+            "x-scope": [
+              "GENETIC"
+            ]
+          },
+          "profile_learning_rate": {
+            "type": "number",
+            "maximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Profile Learning Rate",
+            "description": "RL29 fork: weight of a new run when updating a learned profile; the first runs are averaged equally.",
+            "default": 0.3,
+            "examples": [
+              0.3
+            ],
+            "x-scope": [
+              "GENETIC"
+            ]
+          },
+          "profile_power_threshold_w": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Profile Power Threshold W",
+            "description": "RL29 fork: power above which the appliance counts as running [W].",
+            "default": 20.0,
+            "examples": [
+              20.0
+            ],
+            "x-scope": [
+              "GENETIC"
+            ]
+          },
+          "measurement_key_power": {
+            "type": "string",
+            "title": "Measurement Key Power",
+            "description": "Measurement key: measured power of the appliance [W].",
+            "readOnly": true
+          },
+          "measurement_key_program": {
+            "type": "string",
+            "title": "Measurement Key Program",
+            "description": "Measurement key: numeric code of the selected program.",
+            "readOnly": true
+          },
           "measurement_key_requested": {
             "type": "string",
             "title": "Measurement Key Requested",
@@ -11906,6 +11998,8 @@
         },
         "type": "object",
         "required": [
+          "measurement_key_power",
+          "measurement_key_program",
           "measurement_key_requested",
           "measurement_key_deadline",
           "measurement_key_duration",
@@ -12294,6 +12388,26 @@
               }
             ]
           },
+          "device_measurement_history_keys": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Measurement History Keys",
+            "description": "RL29 fork: keys of 'device_measurement_entity_ids' whose full Home Assistant history (every state change since the last import, at most 48 h) is imported instead of only the current state, e.g. the power of an appliance whose load profile is learned.",
+            "examples": [
+              [
+                "washer-power"
+              ]
+            ]
+          },
           "device_instruction_entity_ids": {
             "anyOf": [
               {
@@ -12499,6 +12613,26 @@
                 "battery1-soc-factor": "sensor.battery1_soc_factor",
                 "ev11-soc-factor": "sensor.ev11_soc_factor"
               }
+            ]
+          },
+          "device_measurement_history_keys": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Measurement History Keys",
+            "description": "RL29 fork: keys of 'device_measurement_entity_ids' whose full Home Assistant history (every state change since the last import, at most 48 h) is imported instead of only the current state, e.g. the power of an appliance whose load profile is learned.",
+            "examples": [
+              [
+                "washer-power"
+              ]
             ]
           },
           "device_instruction_entity_ids": {

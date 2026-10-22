@@ -34,6 +34,7 @@
                "grid_import_emr_entity_ids": null,
                "pv_production_emr_entity_ids": null,
                "device_measurement_entity_ids": null,
+               "device_measurement_history_keys": null,
                "device_instruction_entity_ids": null,
                "solution_entity_ids": null
            },
@@ -66,6 +67,7 @@
                "grid_import_emr_entity_ids": null,
                "pv_production_emr_entity_ids": null,
                "device_measurement_entity_ids": null,
+               "device_measurement_history_keys": null,
                "device_instruction_entity_ids": null,
                "solution_entity_ids": null,
                "homeassistant_entity_ids": [],
@@ -146,6 +148,7 @@ e.g. devices/batteries/0/capacity_wh |
 The device ids (resource ids) have to be prepended by 'sensor.eos_' to build the entity_id.
 E.g. The instruction for device id 'battery1' becomes the entity_id 'sensor.eos_battery1'. |
 | device_measurement_entity_ids | `Optional[dict[str, str]]` | `rw` | `None` | Mapping of EOS measurement keys used by device (resource) simulations to Home Assistant entity IDs. |
+| device_measurement_history_keys | `Optional[list[str]]` | `rw` | `None` | RL29 fork: keys of 'device_measurement_entity_ids' whose full Home Assistant history (every state change since the last import, at most 48 h) is imported instead of only the current state, e.g. the power of an appliance whose load profile is learned. |
 | eos_device_instruction_entity_ids | `list[str]` | `ro` | `N/A` | Entity IDs for energy management instructions available at EOS. |
 | eos_solution_entity_ids | `list[str]` | `ro` | `N/A` | Entity IDs for optimization solution available at EOS. |
 | grid_export_emr_entity_ids | `Optional[list[str]]` | `rw` | `None` | Entity ID(s) of export to grid energy meter readings [kWh] |
@@ -190,6 +193,9 @@ E.g. solution key 'battery1_idle_op_mode' becomes the entity_id 'sensor.eos_batt
                    "ev11-soc-factor": "sensor.ev11_soc_factor",
                    "battery1-soc-factor": "sensor.battery1_soc_factor"
                },
+               "device_measurement_history_keys": [
+                   "washer-power"
+               ],
                "device_instruction_entity_ids": [
                    "sensor.eos_battery1"
                ],
@@ -232,6 +238,9 @@ E.g. solution key 'battery1_idle_op_mode' becomes the entity_id 'sensor.eos_batt
                    "ev11-soc-factor": "sensor.ev11_soc_factor",
                    "battery1-soc-factor": "sensor.battery1_soc_factor"
                },
+               "device_measurement_history_keys": [
+                   "washer-power"
+               ],
                "device_instruction_entity_ids": [
                    "sensor.eos_battery1"
                ],

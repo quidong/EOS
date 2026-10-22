@@ -1,6 +1,7 @@
 """Configuration-owned GENETIC requests with fresh runtime observations."""
 
 import math
+from pathlib import Path
 from typing import Annotated, Any, Optional
 
 from loguru import logger
@@ -336,6 +337,9 @@ class ConfigOptimizationRequest(
         fresh request and must not be planned. Appliances that are not
         request-driven are returned unchanged.
         """
+        profile = None
+        if getattr(device, "learn_profiles", False):
+            profile = await self._learned_profile(device, observation_time)
         if not getattr(device, "request_driven", False):
             return device
         max_age = float(device.request_max_age_seconds)
@@ -360,7 +364,12 @@ class ConfigOptimizationRequest(
         duration = await self._latest_measurement(
             device.measurement_key_duration, observation_time, max_age
         )
-        if duration is not None and duration > 0 and device.load_profile_power_w is None:
+        if profile is not None:
+            update["load_profile_power_w"] = list(profile["power_w"])
+            update["load_profile_interval_seconds"] = int(profile["interval_seconds"])
+            update["consumption_wh"] = None
+            update["duration_h"] = None
+        elif duration is not None and duration > 0 and device.load_profile_power_w is None:
             hours = min(24, max(1, math.ceil(duration - 1e-6)))
             if device.duration_h and device.consumption_wh:
                 # Keep the average power of the configured run.
@@ -368,6 +377,14 @@ class ConfigOptimizationRequest(
                     1, round(device.consumption_wh * hours / device.duration_h)
                 )
             update["duration_h"] = hours
+        if profile is not None:
+            logger.info(
+                "Appliance {}: learned profile of program {} ({} runs, {} Wh).",
+                device.device_id,
+                profile.get("program"),
+                profile.get("runs"),
+                profile.get("energy_wh"),
+            )
         logger.info(
             "Appliance {}: request pending, deadline {}, duration {} h.",
             device.device_id,
@@ -379,6 +396,51 @@ class ConfigOptimizationRequest(
         data = device.model_dump(exclude=set(type(device).model_computed_fields))
         data.update(update)
         return type(device).model_validate(data)
+
+    async def _learned_profile(self, device: Any, observation_time: DateTime) -> Optional[dict]:
+        """Learn finished runs and return the profile of the selected program (RL29 fork)."""
+        from akkudoktoreos.devices.applianceprofiles import (
+            ApplianceProfileStore,
+            detect_runs,
+        )
+
+        path = Path(self.config.general.data_folder_path) / "rl29" / "appliance_profiles.json"
+        store = ApplianceProfileStore(path)
+        since = observation_time.subtract(days=2)
+
+        async def series(key: str) -> list[tuple[Any, Optional[float]]]:
+            try:
+                dates, values = await self.measurement.key_to_lists(
+                    key=key,
+                    start_datetime=since,
+                    end_datetime=observation_time.add(seconds=1),
+                    dropna=True,
+                )
+            except (KeyError, ValueError):
+                return []
+            return list(zip(dates, values))
+
+        try:
+            runs = detect_runs(
+                await series(device.measurement_key_power),
+                await series(device.measurement_key_program),
+                now=observation_time,
+                threshold_w=device.profile_power_threshold_w,
+            )
+            if store.learn(device.device_id, runs, device.profile_learning_rate):
+                store.save()
+        except (OSError, ValueError) as exc:
+            logger.warning("Appliance {}: profile learning failed: {}", device.device_id, exc)
+        program = await self._latest_measurement(
+            device.measurement_key_program, observation_time, 24 * 3600
+        )
+        if program is None:
+            return None
+        code = str(int(program)) if float(program).is_integer() else str(program)
+        entry = store.profile(device.device_id, code)
+        if entry is None:
+            return None
+        return {**entry, "program": code}
 
     async def _latest_measurement(
         self, key: str, observation_time: DateTime, max_age_seconds: float

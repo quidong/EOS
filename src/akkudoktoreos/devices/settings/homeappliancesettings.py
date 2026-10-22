@@ -328,6 +328,54 @@ class HomeApplianceCommonSettings(DevicesBaseSettings):
         },
     )
 
+    learn_profiles: bool = Field(
+        default=False,
+        json_schema_extra={
+            "x-scope": [str(ConfigScope.GENETIC)],
+            "description": (
+                "RL29 fork: learn a load profile per program from the measurements "
+                "'<device_id>-power' [W] and '<device_id>-program' (numeric program code). "
+                "A request for a program with a learned profile is planned with that "
+                "profile instead of the configured load."
+            ),
+            "examples": [False, True],
+        },
+    )
+    profile_learning_rate: float = Field(
+        default=0.3,
+        gt=0,
+        le=1,
+        json_schema_extra={
+            "x-scope": [str(ConfigScope.GENETIC)],
+            "description": (
+                "RL29 fork: weight of a new run when updating a learned profile; the "
+                "first runs are averaged equally."
+            ),
+            "examples": [0.3],
+        },
+    )
+    profile_power_threshold_w: float = Field(
+        default=20.0,
+        ge=0,
+        json_schema_extra={
+            "x-scope": [str(ConfigScope.GENETIC)],
+            "description": "RL29 fork: power above which the appliance counts as running [W].",
+            "examples": [20.0],
+        },
+    )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def measurement_key_power(self) -> str:
+        """Measurement key: measured power of the appliance [W]."""
+        return f"{self.device_id}-power"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def measurement_key_program(self) -> str:
+        """Measurement key: numeric code of the selected program."""
+        return f"{self.device_id}-program"
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def measurement_key_requested(self) -> str:
@@ -455,4 +503,6 @@ class HomeApplianceCommonSettings(DevicesBaseSettings):
                 self.measurement_key_deadline,
                 self.measurement_key_duration,
             ]
+        if self.learn_profiles:
+            keys += [self.measurement_key_power, self.measurement_key_program]
         return keys

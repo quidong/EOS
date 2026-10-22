@@ -67,3 +67,27 @@ Regeln beim Start:
    höchstens 2 Anpassungen.
 
 Geplantes Ende = am Gerät eingestellte Endzeit (Zustand `delayedstart`), sonst jetzt + Programmdauer.
+
+## Lastprofile je Programm lernen
+
+`learn_profiles: true` lernt für jedes Programm ein eigenes Lastprofil (5-Minuten-Raster) aus zwei Messwerten:
+
+| Messwert | Quelle (HA) |
+|---|---|
+| `<id>-power` | gemessene Leistung [W] – mit `adapter.homeassistant.device_measurement_history_keys` wird der volle HA-Verlauf importiert, nicht nur der Wert beim EOS-Lauf |
+| `<id>-program` | Programm-Code (feste Zahl je Programm) |
+
+Ablauf bei jedem EOS-Lauf:
+
+1. Fertige Läufe erkennen: Leistung > `profile_power_threshold_w` (20 W), Pausen < 15 min gehören zum Lauf,
+   ein Lauf gilt nach 15 min Ruhe als beendet. Das Programm ist der Code, der beim Start gesetzt war.
+2. Lernen (Online-Lernen): die ersten Läufe eines Programms werden gleich gewichtet gemittelt, danach
+   gleitender Mittelwert mit `profile_learning_rate` (0,3). Ausreißer wirken begrenzt, Änderungen werden
+   übernommen. Die Länge wird genauso gemittelt.
+3. Planen: Wartet ein Auftrag und gibt es ein gelerntes Profil für das gewählte Programm, plant EOS mit diesem
+   Profil, sonst mit der Konfiguration.
+
+Speicher: `<EOS-Datenordner>/rl29/appliance_profiles.json` (je Gerät und Programm: Profil, Anzahl Läufe, Energie).
+
+Ausbaustufe: Sobald genug Läufe da sind, kann statt des Mittelwerts je Programm ein Regressionsmodell
+(Programm + Temperatur + Schleuderdrehzahl + Beladung → Profil) gelernt werden.
