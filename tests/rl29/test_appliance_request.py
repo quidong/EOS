@@ -223,3 +223,16 @@ async def test_cycle_count_survives_records_of_other_keys(config_eos, clean_meas
     prepared = await request().resolve()
     (appliance,) = prepared.resolved_home_appliances()
     assert appliance.completed_cycles == 1
+
+
+@pytest.mark.asyncio
+async def test_solution_has_appliance_columns_without_request(config_eos, clean_measurements):
+    """No pending request: the columns exist with "nothing planned" (Home Assistant
+    reads them every run; missing columns were logged as errors)."""
+    configure(config_eos, washer(), hours=12)
+    params = await request().resolve()
+    assert params.resolved_home_appliances() == []
+    solution = GeneticOptimization(fixed_seed=3).optimize_ems(params, ngen=5, individuals=20)
+    table = (await solution.optimization_solution()).solution.to_dataframe()
+    assert (table["waschmaschine_next_start_ts"] == 0.0).all()
+    assert (table["waschmaschine_energy_wh"] == 0.0).all()

@@ -968,6 +968,15 @@ class GeneticSolution(ConfigMixin, GeneticParametersBaseModel):
                     raise ValueError(error_msg)
                 solution[key] = operation[key]
 
+        # RL29 fork: a request-driven appliance without a pending request is not
+        # part of the optimization. Keep its columns anyway (no energy, no start
+        # planned), so controllers reading them get a defined "nothing planned".
+        for appliance in (self.config.devices.home_appliances or {}).values():
+            device_id = appliance.device_id
+            if f"{device_id}_energy_wh" not in solution:
+                solution[f"{device_id}_energy_wh"] = [0.0] * n_points
+                solution[f"{device_id}_next_start_ts"] = [0.0] * n_points
+
         # Heat pumps (RL29 fork): one block of columns per device.
         for device_id, schedule in self.heat_pumps.items():
             for column, key, convert in HEAT_PUMP_SOLUTION_COLUMNS:
