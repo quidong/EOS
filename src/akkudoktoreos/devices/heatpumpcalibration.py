@@ -228,6 +228,7 @@ async def calibrate_device(
             fit_building_enabled=settings.fit_building,
             fit_cop_enabled=settings.fit_cop,
             fit_dhw_enabled=settings.fit_dhw,
+            fit_emitter_enabled=settings.fit_emitter,
         )
         summary = result.summary(priors)
         store.set_result(device.device_id, result, summary, priors_key)
@@ -235,7 +236,7 @@ async def calibrate_device(
     except (OSError, ValueError, ArithmeticError) as exc:
         logger.warning("Heat pump {}: calibration failed: {}", device.device_id, exc)
         return previous
-    if result.building or result.cop or result.dhw:
+    if result.building or result.cop or result.dhw or result.emitter:
         logger.info(
             "Heat pump {} calibration over {} days ({} hourly samples, {} weather hours filled): {}",
             device.device_id,

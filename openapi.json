@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610221959880883"
+    "version": "v0.3.0.dev2610222173699185"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -10780,6 +10780,12 @@
             "description": "Fit dhw.loss_w_per_k.",
             "default": true
           },
+          "fit_emitter": {
+            "type": "boolean",
+            "title": "Fit Emitter",
+            "description": "Fit building.emitter_w_per_k from the measured flow temperature (flow = room + heat/slab_room + heat/emitter + spread/2 in steady operation); the flow temperature sets the COP.",
+            "default": true
+          },
           "weather_from_prediction": {
             "type": "boolean",
             "title": "Weather From Prediction",
@@ -11504,6 +11510,17 @@
             "title": "Cop Scale",
             "description": "Calibration factor on the rated COP (pumps, defrost, controller). Determined by scripts/rl29/calibrate_heatpump.py.",
             "default": 1.0
+          },
+          "cop_max": {
+            "type": "number",
+            "exclusiveMinimum": 1.0,
+            "title": "Cop Max",
+            "description": "Ceiling of the modelled COP [-]. The rating points cover W35/W55; at mild weather with a low flow temperature the Carnot extrapolation overshoots, and a too generous ceiling makes heating in mild hours look nearly free. Air/water units rarely exceed 6-7 even at A12/W25.",
+            "default": 7.0,
+            "examples": [
+              7.0,
+              6.5
+            ]
           },
           "max_heat_w": {
             "type": "number",

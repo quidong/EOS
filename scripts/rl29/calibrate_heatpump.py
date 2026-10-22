@@ -262,6 +262,8 @@ def build_snippet(device_id: str, result: Any) -> dict[str, Any]:
         }
     if result.cop:
         snippet["unit"] = {"cop_scale": result.cop.cop_scale}
+    if result.emitter:
+        snippet.setdefault("building", {})["emitter_w_per_k"] = result.emitter.emitter_w_per_k
     if result.dhw:
         snippet["dhw"] = {"loss_w_per_k": result.dhw.loss_w_per_k}
     return {"devices": {"heat_pumps": {device_id: snippet}}}
@@ -284,6 +286,8 @@ def cmd_fit(args: argparse.Namespace) -> int:
         internal_gains_w=args.prior_gains,
         solar_aperture_m2=args.prior_aperture,
         cop_scale=args.prior_cop_scale,
+        emitter_w_per_k=args.prior_emitter,
+        slab_room_w_per_k=args.slab_room_w_per_k,
         dhw_loss_w_per_k=args.prior_dhw_loss,
         standby_w=args.standby_w,
         dhw_volume_l=args.dhw_volume_l,
@@ -352,6 +356,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_fit.add_argument("--prior-cop-scale", type=float, default=1.0, help="configured cop_scale")
     p_fit.add_argument(
         "--prior-dhw-loss", type=float, default=1.5, help="configured dhw.loss_w_per_k"
+    )
+    p_fit.add_argument(
+        "--prior-emitter", type=float, default=1000.0, help="configured building.emitter_w_per_k"
+    )
+    p_fit.add_argument(
+        "--slab-room-w-per-k", type=float, default=1500.0, help="configured building.slab_room_w_per_k"
     )
     p_fit.add_argument("--prior-weight-days", type=float, default=7.0)
     p_fit.add_argument("--cop-prior-hours", type=float, default=24.0)

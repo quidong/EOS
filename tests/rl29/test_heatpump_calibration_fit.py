@@ -27,6 +27,7 @@ from akkudoktoreos.devices.thermal.calibration import (
     fit_building,
     fit_cop_scale,
     fit_dhw_loss,
+    fit_emitter,
     hourly_means,
 )
 from akkudoktoreos.devices.thermal.cop import WBB12_RATING_POINTS, CopModel
@@ -260,6 +261,49 @@ def test_cop_fit_shrinks_and_clips():
 
 
 # ----------------------------------------------------------------------
+# Emitter (flow temperature)
+# ----------------------------------------------------------------------
+
+
+def model_flow_samples(emitter: float = 800.0, slab_room: float = 1500.0, spread: float = 3.0):
+    """Samples whose flow temperature follows the steady-state model."""
+    samples = synthetic(solar=False)
+    for sample in samples:
+        heat = (sample.heat_w or 0.0) - (sample.dhw_heat_w or 0.0)
+        sample.flow_c = 21.0 + heat / slab_room + heat / emitter + spread / 2.0
+    return samples
+
+
+def test_emitter_is_recovered_from_the_flow_temperature():
+    priors = CalibrationPriors(
+        **{**PRIORS.__dict__, "emitter_w_per_k": 1000.0, "slab_room_w_per_k": 1500.0}
+    )
+    fit, note = fit_emitter(
+        model_flow_samples(800.0), priors, CalibrationOptions(emitter_prior_hours=0)
+    )
+    assert fit is not None, note
+    assert fit.emitter_w_per_k == pytest.approx(800.0, rel=0.02)
+    assert fit.hours > 100
+    assert fit.measured_lift_k > 3.0
+    # shrinkage and band
+    shrunk, _ = fit_emitter(
+        model_flow_samples(800.0), priors, CalibrationOptions(emitter_prior_hours=1e6)
+    )
+    assert shrunk is not None and shrunk.emitter_w_per_k == pytest.approx(1000.0, abs=1)
+    clipped, _ = fit_emitter(
+        model_flow_samples(100.0), priors, CalibrationOptions(emitter_prior_hours=0)
+    )
+    assert clipped is not None and clipped.emitter_w_per_k == pytest.approx(300.0)
+    # a flow the slab-room coupling alone explains leaves the emitter at the upper band
+    perfect, _ = fit_emitter(
+        model_flow_samples(1e9), priors, CalibrationOptions(emitter_prior_hours=0)
+    )
+    assert perfect is not None and perfect.emitter_w_per_k == pytest.approx(3000.0)
+    thin, note = fit_emitter(model_flow_samples()[:4], priors)
+    assert thin is None and "emitter:" in note
+
+
+# ----------------------------------------------------------------------
 # Tank
 # ----------------------------------------------------------------------
 
@@ -305,7 +349,7 @@ def test_calibrate_runs_all_fits_and_roundtrips():
         TZ,
         window_days=14,
     )
-    assert result.building and result.cop and result.dhw
+    assert result.building and result.cop and result.dhw and result.emitter
     assert result.notes == []
     text = result.summary(PRIORS)
     assert "loss 150 -> 1" in text and "COP scale 1.000 -> 0." in text
@@ -313,6 +357,7 @@ def test_calibrate_runs_all_fits_and_roundtrips():
     assert again.building == result.building
     assert again.cop == result.cop
     assert again.dhw == result.dhw
+    assert again.emitter == result.emitter
     assert again.fitted_at == result.fitted_at
 
 
