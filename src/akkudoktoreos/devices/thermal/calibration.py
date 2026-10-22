@@ -36,7 +36,7 @@ from __future__ import annotations
 import math
 import statistics
 from collections import defaultdict
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timedelta, timezone, tzinfo
 from typing import Any, Optional, Sequence
 
@@ -149,7 +149,7 @@ def estimate_dhw_heat(
     water energy out of the space heating balance.
     """
     capacity = volume_l * WATER_WH_PER_LITRE_K
-    result = list(samples)
+    result = [replace(sample) for sample in samples]
     previous: Optional[HourlySample] = None
     for sample in result:
         if sample.get("dhw_heat_w") is None and previous is not None:
@@ -409,14 +409,29 @@ def fit_building(
             f"building: only {len(kept)} usable days (need {options.min_days}; "
             f"{outage_excluded} outage, {drift_excluded} drift excluded)"
         )
-    deltas = [d.delta_k for d in kept]
-    if max(deltas) - min(deltas) < options.min_delta_range_k:
+
+    def spread_ok(selection: list[_Day]) -> bool:
+        deltas = [d.delta_k for d in selection]
+        return max(deltas) - min(deltas) >= options.min_delta_range_k
+
+    if not spread_ok(kept):
+        deltas = [d.delta_k for d in kept]
         return None, (
             f"building: temperature difference spans only "
             f"{max(deltas) - min(deltas):.1f} K over {len(kept)} days"
         )
 
-    solar_fitted = all(d.ghi is not None for d in kept) and any((d.ghi or 0.0) > 5.0 for d in kept)
+    # The solar term is fitted on the days that have irradiance data, as soon as
+    # there are enough of them (the weather fill builds this history up over
+    # time); until then all days are used without the solar term.
+    with_ghi = [d for d in kept if d.ghi is not None]
+    solar_fitted = (
+        len(with_ghi) >= options.min_days
+        and any(d.ghi > 5.0 for d in with_ghi)  # type: ignore[operator]
+        and spread_ok(with_ghi)
+    )
+    if solar_fitted:
+        kept = with_ghi
     # Model: heat = H * delta - A * ghi - g. Columns: delta, -ghi, -1.
     x_rows = []
     y_rows = []

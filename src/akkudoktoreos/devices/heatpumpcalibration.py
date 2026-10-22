@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -61,17 +62,28 @@ class HeatPumpCalibrationStore:
         tmp.write_text(json.dumps(self.data, indent=1, sort_keys=True), encoding="utf-8")
         tmp.replace(self.path)
 
-    def result(self, device_id: str) -> Optional[CalibrationResult]:
+    def result(
+        self, device_id: str, priors_key: Optional[str] = None
+    ) -> Optional[CalibrationResult]:
+        """Stored result; ``None`` when it was fitted against other priors."""
         entry = self.data["devices"].get(device_id)
         if not entry or "result" not in entry:
+            return None
+        if priors_key is not None and entry.get("priors") != priors_key:
             return None
         try:
             return CalibrationResult.from_dict(entry["result"])
         except (KeyError, TypeError, ValueError):
             return None
 
-    def set_result(self, device_id: str, result: CalibrationResult, summary: str) -> None:
-        self.data["devices"][device_id] = {"result": result.to_dict(), "summary": summary}
+    def set_result(
+        self, device_id: str, result: CalibrationResult, summary: str, priors_key: str
+    ) -> None:
+        self.data["devices"][device_id] = {
+            "result": result.to_dict(),
+            "summary": summary,
+            "priors": priors_key,
+        }
 
 
 def _as_datetime(value: Any) -> datetime:
@@ -184,7 +196,12 @@ async def calibrate_device(
         return None
     now = _as_datetime(observation_time)
     store = HeatPumpCalibrationStore(Path(data_folder) / "rl29" / "heatpump_calibration.json")
-    previous = store.result(device.device_id)
+    priors = device.calibration_priors()
+    # A changed configuration (new prior, other window or options) refits at once.
+    priors_key = json.dumps(
+        {**asdict(priors), **settings.model_dump()}, sort_keys=True, default=str
+    )
+    previous = store.result(device.device_id, priors_key)
     if previous is not None:
         age_h = (now - _as_datetime(previous.fitted_at)).total_seconds() / 3600.0
         if 0 <= age_h < settings.refit_hours:
@@ -198,7 +215,6 @@ async def calibrate_device(
             now,
             fill_weather=settings.weather_from_prediction,
         )
-        priors = device.calibration_priors()
         result = calibrate(
             samples,
             priors,
@@ -212,7 +228,7 @@ async def calibrate_device(
             fit_dhw_enabled=settings.fit_dhw,
         )
         summary = result.summary(priors)
-        store.set_result(device.device_id, result, summary)
+        store.set_result(device.device_id, result, summary, priors_key)
         store.save()
     except (OSError, ValueError, ArithmeticError) as exc:
         logger.warning("Heat pump {}: calibration failed: {}", device.device_id, exc)

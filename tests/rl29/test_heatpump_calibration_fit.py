@@ -143,6 +143,25 @@ def test_building_fit_without_irradiance_keeps_the_prior_aperture():
     assert fit.loss_w_per_k == pytest.approx(H_TRUE, rel=0.03)
 
 
+def test_solar_term_is_fitted_on_the_days_that_have_irradiance():
+    """The weather fill builds the irradiance history up from the end of the
+    window; as soon as enough days have it, the solar term is fitted on them."""
+    samples = synthetic()
+    cutoff = samples[0].timestamp + timedelta(days=8)
+    for sample in samples:
+        if sample.timestamp < cutoff:
+            sample.ghi_w_per_m2 = None  # the first 8 days have no irradiance yet
+    fit, note = fit_building(samples, PRIORS, CalibrationOptions(prior_weight_days=0.05), TZ)
+    assert fit is not None, note
+    assert fit.solar_fitted and fit.days == 6
+    assert fit.solar_aperture_m2 == pytest.approx(APERTURE_TRUE, rel=0.15)
+    # with fewer irradiance days than min_days all days are used without the term
+    thin = CalibrationOptions(prior_weight_days=0.05, min_days=8)
+    fit, note = fit_building(samples, PRIORS, thin, TZ)
+    assert fit is not None, note
+    assert not fit.solar_fitted and fit.days == 14
+
+
 def test_building_fit_is_shrunk_towards_the_prior_with_few_days():
     few = synthetic(days=5)
     free, _ = fit_building(few, PRIORS, CalibrationOptions(prior_weight_days=0.01), TZ)
