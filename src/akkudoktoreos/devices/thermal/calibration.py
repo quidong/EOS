@@ -176,6 +176,9 @@ class CalibrationPriors:
     internal_gains_w: float = 0.0
     solar_aperture_m2: float = 0.0
     cop_scale: float = 1.0
+    emitter_w_per_k: float = 1000.0
+    slab_room_w_per_k: float = 1500.0
+    flow_spread_k: float = 3.0
     dhw_loss_w_per_k: float = 1.5
     standby_w: float = 22.0
     dhw_volume_l: float = 190.0
@@ -215,6 +218,11 @@ class CalibrationOptions:
     """Shrinkage of the COP scale: the prior weighs like this many hours."""
     cop_min_scale: float = 0.5
     cop_max_scale: float = 1.5
+    emitter_min_heat_w: float = 3000.0
+    """Emitter fit uses hours above this heat (the flow temperature is then the operating one)."""
+    emitter_prior_hours: float = 24.0
+    emitter_min_factor: float = 0.3
+    emitter_max_factor: float = 3.0
     dhw_night_hours: tuple[int, int] = (0, 5)
     """Local hours (inclusive) in which the tank decay is evaluated."""
     dhw_min_drop_k: float = 0.2
@@ -261,6 +269,16 @@ class CopFit:
 
 
 @dataclass
+class EmitterFit:
+    emitter_w_per_k: float
+    hours: int
+    raw_emitter_w_per_k: float
+    """Before shrinkage and clipping; inf when the slab-room coupling alone explains the flow."""
+    measured_lift_k: float
+    """Heat-weighted mean of flow minus room minus spread/2 [K]."""
+
+
+@dataclass
 class DhwFit:
     loss_w_per_k: float
     nights: int
@@ -275,6 +293,7 @@ class CalibrationResult:
     building: Optional[BuildingFit] = None
     cop: Optional[CopFit] = None
     dhw: Optional[DhwFit] = None
+    emitter: Optional[EmitterFit] = None
     notes: list[str] = field(default_factory=list)
     """Why a fit was skipped, for the log."""
 
@@ -292,6 +311,7 @@ class CalibrationResult:
             building=BuildingFit(**data["building"]) if data.get("building") else None,
             cop=CopFit(**data["cop"]) if data.get("cop") else None,
             dhw=DhwFit(**data["dhw"]) if data.get("dhw") else None,
+            emitter=EmitterFit(**data["emitter"]) if data.get("emitter") else None,
             notes=list(data.get("notes") or []),
         )
 
@@ -311,6 +331,12 @@ class CalibrationResult:
             parts.append(
                 f"COP scale {priors.cop_scale:.3f} -> {c.cop_scale:.3f} "
                 f"({c.hours} h, measured {c.measured_cop:.2f} vs rated {c.model_cop:.2f})"
+            )
+        if self.emitter:
+            e = self.emitter
+            parts.append(
+                f"emitter {priors.emitter_w_per_k:.0f} -> {e.emitter_w_per_k:.0f} W/K "
+                f"({e.hours} h, flow lift {e.measured_lift_k:.1f} K)"
             )
         if self.dhw:
             d = self.dhw
@@ -562,6 +588,68 @@ def fit_cop_scale(
 
 
 # ---------------------------------------------------------------------------
+# Emitter fit (flow temperature)
+# ---------------------------------------------------------------------------
+
+
+def fit_emitter(
+    samples: Sequence[HourlySample],
+    priors: CalibrationPriors,
+    options: CalibrationOptions = CalibrationOptions(),
+) -> tuple[Optional[EmitterFit], str]:
+    """Heat transfer water -> screed from the measured flow temperature.
+
+    In steady operation the model's flow temperature is
+    ``room + heat/slab_room + heat/emitter + spread/2``. The heat-weighted
+    ratio of space heat to the measured lift (flow - room - spread/2) gives
+    the combined coefficient; with ``slab_room_w_per_k`` kept, the emitter
+    follows. Hours with hot water charging are left out (the flow is then the
+    tank charging temperature).
+    """
+    lift_heat = 0.0  # sum of lift x heat
+    heat_sq = 0.0  # sum of heat x heat
+    heat_total = 0.0
+    hours = 0
+    for sample in samples:
+        heat, flow, room = sample.get("heat_w"), sample.get("flow_c"), sample.get("room_c")
+        if heat is None or flow is None or room is None:
+            continue
+        if heat < options.emitter_min_heat_w:
+            continue
+        if (sample.get("dhw_heat_w") or 0.0) > options.cop_max_dhw_share * heat:
+            continue
+        lift = flow - room - priors.flow_spread_k / 2.0
+        if lift <= 0.5:
+            continue
+        lift_heat += lift * heat
+        heat_sq += heat * heat
+        heat_total += heat
+        hours += 1
+    if hours < 5 or lift_heat <= 0:
+        return None, f"emitter: only {hours} heating hours above {options.emitter_min_heat_w:.0f} W"
+    # Least squares through the origin of heat = combined x lift, weighted by heat.
+    combined = heat_sq / lift_heat  # W/K
+    # 1/combined = 1/slab_room + 1/emitter
+    inverse_emitter = 1.0 / combined - 1.0 / priors.slab_room_w_per_k
+    raw = 1.0 / inverse_emitter if inverse_emitter > 1e-9 else math.inf
+    low = priors.emitter_w_per_k * options.emitter_min_factor
+    high = priors.emitter_w_per_k * options.emitter_max_factor
+    raw_clipped = min(max(raw, low), high)
+    weight = options.emitter_prior_hours
+    value = (hours * raw_clipped + weight * priors.emitter_w_per_k) / (hours + weight)
+    value = float(min(max(value, low), high))
+    return (
+        EmitterFit(
+            emitter_w_per_k=round(value, 0),
+            hours=hours,
+            raw_emitter_w_per_k=round(raw, 0) if math.isfinite(raw) else math.inf,
+            measured_lift_k=round(lift_heat / heat_total, 2),
+        ),
+        "",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Tank loss fit
 # ---------------------------------------------------------------------------
 
@@ -630,6 +718,7 @@ def calibrate(
     fit_building_enabled: bool = True,
     fit_cop_enabled: bool = True,
     fit_dhw_enabled: bool = True,
+    fit_emitter_enabled: bool = True,
 ) -> CalibrationResult:
     """Run the enabled fits on hourly samples and collect the result."""
     samples = estimate_dhw_heat(samples, priors.dhw_volume_l)
@@ -644,6 +733,10 @@ def calibrate(
             result.notes.append(note)
     if fit_cop_enabled:
         result.cop, note = fit_cop_scale(samples, cop_model, priors, options)
+        if note:
+            result.notes.append(note)
+    if fit_emitter_enabled:
+        result.emitter, note = fit_emitter(samples, priors, options)
         if note:
             result.notes.append(note)
     if fit_dhw_enabled:

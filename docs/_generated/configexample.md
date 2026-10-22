@@ -182,6 +182,7 @@
                            }
                        ],
                        "cop_scale": 1.0,
+                       "cop_max": 7.0,
                        "max_heat_w": 10000.0,
                        "max_electric_w": 5500.0,
                        "standby_w": 22.0,
@@ -313,6 +314,7 @@
                        "fit_building": true,
                        "fit_cop": true,
                        "fit_dhw": true,
+                       "fit_emitter": true,
                        "weather_from_prediction": true,
                        "min_days": 5,
                        "prior_weight_days": 7.0,

@@ -135,6 +135,19 @@ class HeatPumpUnitSettings(SettingsBaseModel):
             "Determined by scripts/rl29/calibrate_heatpump.py."
         },
     )
+    cop_max: float = Field(
+        default=7.0,
+        gt=1,
+        json_schema_extra={
+            "description": (
+                "Ceiling of the modelled COP [-]. The rating points cover W35/W55; at mild "
+                "weather with a low flow temperature the Carnot extrapolation overshoots, "
+                "and a too generous ceiling makes heating in mild hours look nearly free. "
+                "Air/water units rarely exceed 6-7 even at A12/W25."
+            ),
+            "examples": [7.0, 6.5],
+        },
+    )
     max_heat_w: float = Field(
         default=10000.0, gt=0, json_schema_extra={"description": "Maximum thermal output [W]."}
     )
@@ -605,6 +618,16 @@ class HeatPumpCalibrationSettings(SettingsBaseModel):
     )
     fit_cop: bool = Field(default=True, json_schema_extra={"description": "Fit unit.cop_scale."})
     fit_dhw: bool = Field(default=True, json_schema_extra={"description": "Fit dhw.loss_w_per_k."})
+    fit_emitter: bool = Field(
+        default=True,
+        json_schema_extra={
+            "description": (
+                "Fit building.emitter_w_per_k from the measured flow temperature (flow = "
+                "room + heat/slab_room + heat/emitter + spread/2 in steady operation); the "
+                "flow temperature sets the COP."
+            )
+        },
+    )
     weather_from_prediction: bool = Field(
         default=True,
         json_schema_extra={
@@ -813,7 +836,7 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
 
     def cop_model(self) -> CopModel:
         points = [CopPoint(p.outdoor_c, p.flow_c, p.cop) for p in self.unit.cop_points]
-        return CopModel(points, scale=self.unit.cop_scale)
+        return CopModel(points, scale=self.unit.cop_scale, cop_max=self.unit.cop_max)
 
     def calibration_priors(self) -> CalibrationPriors:
         """The configured values as prior of the calibration (RL29 fork)."""
@@ -822,6 +845,9 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
             internal_gains_w=self.building.internal_gains_w,
             solar_aperture_m2=self.building.solar_aperture_m2,
             cop_scale=self.unit.cop_scale,
+            emitter_w_per_k=self.building.emitter_w_per_k,
+            slab_room_w_per_k=self.building.slab_room_w_per_k,
+            flow_spread_k=self.unit.flow_spread_k,
             dhw_loss_w_per_k=self.dhw.loss_w_per_k,
             standby_w=self.unit.standby_w,
             dhw_volume_l=self.dhw.volume_l,
@@ -834,7 +860,7 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
         The configuration itself is never changed: it stays the prior of the
         next fit. Missing fits keep the configured value.
         """
-        if result is None or not (result.building or result.cop or result.dhw):
+        if result is None or not (result.building or result.cop or result.dhw or result.emitter):
             return self
         data = self.model_dump(exclude=set(type(self).model_computed_fields))
         if result.building:
@@ -843,6 +869,8 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
             data["building"]["internal_gains_w"] = result.building.internal_gains_w
         if result.cop:
             data["unit"]["cop_scale"] = result.cop.cop_scale
+        if result.emitter:
+            data["building"]["emitter_w_per_k"] = result.emitter.emitter_w_per_k
         if result.dhw:
             data["dhw"]["loss_w_per_k"] = result.dhw.loss_w_per_k
         return type(self).model_validate(data)

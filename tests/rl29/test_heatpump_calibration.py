@@ -36,6 +36,7 @@ from akkudoktoreos.devices.thermal.calibration import (
     CalibrationResult,
     CopFit,
     DhwFit,
+    EmitterFit,
 )
 from akkudoktoreos.devices.thermal.cop import WBB12_RATING_POINTS, CopModel
 from akkudoktoreos.measurement.measurement import Measurement
@@ -197,8 +198,12 @@ def test_calibrated_applies_fits_and_leaves_the_configuration_alone():
         ),
         cop=CopFit(cop_scale=0.82, hours=50, measured_cop=3.4, model_cop=4.1, raw_scale=0.83),
         dhw=DhwFit(loss_w_per_k=1.9, nights=8, raw_loss_w_per_k=2.0),
+        emitter=EmitterFit(
+            emitter_w_per_k=850.0, hours=40, raw_emitter_w_per_k=820.0, measured_lift_k=6.0
+        ),
     )
     fitted = device.calibrated(result)
+    assert fitted.building.emitter_w_per_k == 850.0
     assert fitted.building.loss_w_per_k == 190.0
     assert fitted.building.solar_aperture_m2 == 3.5
     assert fitted.building.internal_gains_w == 220.0
@@ -209,6 +214,12 @@ def test_calibrated_applies_fits_and_leaves_the_configuration_alone():
     # the configuration is the prior and stays as it was
     assert device.building.loss_w_per_k == 150.0 and device.unit.cop_scale == 1.0
     assert device.calibration_priors().loss_w_per_k == 150.0
+    assert device.calibration_priors().emitter_w_per_k == 1000.0
+    assert device.cop_model().cop_max == 7.0
+    assert (
+        HeatPumpCommonSettings(device_id="x", unit={"cop_max": 6.0}).cop_model().cop(12.0, 25.0)
+        <= 6.0
+    )
     # partial results keep the configured values; nothing fitted returns the device
     partial = CalibrationResult(fitted_at=result.fitted_at, cop=result.cop)
     assert device.calibrated(partial).building.loss_w_per_k == 150.0
