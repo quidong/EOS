@@ -390,7 +390,7 @@ Stunden, Standard 0,1 um 7 und 21 Uhr); offene Fenster jetzt zählen im ersten S
 | `sensor.eos_fenster_offen_anteil` | Anteil offener Fenster der beheizten Räume (→ `wbb12-window-open`) |
 | `script.eos_wp_raumsoll_setzen` | Feld `temperatur_og`: Sollwert für die Regler im Obergeschoss |
 | `automation.eos_warmepumpe_heizmodus_umsetzen` | bei `sensor.eos_wbb12_zone_setback` = 1: OG auf min(Ziel, Absenktemperatur); nicht bei Feuchtewarnung |
-| `sensor.eos_wp_sg_ready_soll` | Untergrenze je Raum: OG während der Absenkung Absenktemperatur − 1 K, sonst 19,5 °C |
+| `sensor.eos_wp_sg_ready_soll` | Untergrenze je Raum: OG während der Absenkung Absenktemperatur − 1 K, sonst `input_number.eos_wp_absenk_untergrenze` (Start + Hysterese); Räume beim Lüften zählen nicht |
 | `automation.eos_luftungsempfehlung` | Push „Jetzt lüften“ an Steffen und Lena, wenn `sensor.eos_wbb12_ventilate` 1 wird (Heizbetrieb, kein Urlaub, Fenster zu, Schalter an) |
 | `input_boolean.eos_luftungsempfehlung` | Empfehlung an/aus |
 | `input_boolean.eos_og_absenkung_aktiv` | OG-Absenkung an/aus (aus = OG folgt dem Haus) |
@@ -491,7 +491,7 @@ Vorheizen: Komfortmaximum, Forciert: Komfortmaximum + 1 K). Meldet ein KNX-Regle
 |---|---|---|
 | Nur im Betriebsmodus Haus „Heizen“ | Soll-Sensor | – |
 | EOS-Plan fehlt oder älter als 45 min → SG 2 (neueste Meldung von `heating_mode`, `room_temperature_c` oder `dhw_mode`, `last_reported`) | Soll-Sensor | – |
-| Keine Absenkung bei kältestem Raum < 19,5 °C oder Feuchtewarnung | Soll-Sensor | – |
+| Keine Absenkung, wenn ein Raum unter der Untergrenze liegt, oder bei Feuchtewarnung. Start erst ab Untergrenze + Hysterese (gegen Pendeln), eine laufende Absenkung endet erst unter der Untergrenze. Räume mit offenem Fenster/Tür und bis zum Nachlauf nach dem Schließen zählen nicht (Fensterkontakte im selben Bereich wie der Regler, device_class window/door/opening) | Soll-Sensor | `input_number.eos_wp_absenk_untergrenze` (19,5 °C), `_absenk_hysterese` (0,5 K), `_luftung_nachlauf` (30 min) |
 | Keine Anhebung ab wärmstem Raum ≥ Max | Soll-Sensor | `input_number.eos_wp_max_raumtemperatur` (23,5 °C) |
 | Absenkung höchstens X min, danach gleich lange gesperrt | Automation + Soll-Sensor | `input_number.eos_wp_max_absenkdauer` (360 min) |
 | Höchstens N Umschaltungen/Tag, danach nur Normal | Automation | `input_number.eos_wp_max_umschaltungen_pro_tag` (15) |
@@ -500,7 +500,9 @@ Vorheizen: Komfortmaximum, Forciert: Komfortmaximum + 1 K). Meldet ein KNX-Regle
 | Höchstens N Warmwasserladungen/Tag | Automation | `input_number.eos_wp_max_warmwasserladungen_pro_tag` (2) |
 | DE2 > 90 min zu → öffnen + Push | Überwachung | – |
 | WP nicht im Heizbetrieb, Modbus weg, EOS-Plan fehlt, Tageslimit → Push | Überwachung | – |
-| Notabschaltung (Hauptschalter aus): wärmster Raum ≥ 24 °C 15 min / kältester < 19 °C 30 min | `automation.eos_warmepumpe_notabschaltung` | – |
+| Notabschaltung (Hauptschalter aus): wärmster Raum ≥ 24 °C 15 min / kältester < 19 °C 30 min (ohne Räume beim Lüften: `sensor.raumtemperatur_kaltester_raum_ohne_luften`) | `automation.eos_warmepumpe_notabschaltung` | – |
+
+**Temporär (wieder entfernen nach Einbau der neuen KNX-Spannungsversorgung):** `automation.knx_raumregler_aus_standby_auf_komfort_temporar` – fällt ein Raumregler mit Label `eos_raumregelung` 1 min in den Standby (MDT-Aktoren nach Busspannungseinbruch), sendet sie Komfort (1) auf die gemeinsame Betriebsart-GA 3/3/100; zusätzlich Prüfung beim HA-Start und alle 30 min, danach 5 min Sperre.
 
 ### Objekte
 
@@ -511,7 +513,8 @@ Vorheizen: Komfortmaximum, Forciert: Komfortmaximum + 1 K). Meldet ein KNX-Regle
 | `input_select.eos_wp_sg_ready_bei_*` | Mapping Heizmodus → SG (1 / 2 / 3 / 3 / 4) |
 | `input_number.eos_wp_raumsoll_*` | Raumsoll Normal / Angehoben / Vorheizen / Forciert (21 / 22 / 22 / 23 °C) |
 | `sensor.eos_wp_sg_ready_soll` | SG-Soll mit den Regeln des Soll-Sensors |
-| `sensor.raumtemperatur_warmster_raum` / `_kaltester_raum` | Grenzen für Anhebung / Absenkung |
+| `sensor.raumtemperatur_warmster_raum` / `_kaltester_raum` | Grenze für Anhebung / Anzeige kältester Raum |
+| `sensor.raumtemperatur_kaltester_raum_ohne_luften` | kältester Raum ohne lüftende Räume (Notabschaltung) |
 | `input_number.eos_wp_sg_ready_ist`, `input_number.eos_wp_raumsoll_ist` | zuletzt umgesetzter Zustand |
 | `counter.eos_wp_umschaltungen_heute`, `counter.eos_wp_warmwasserladungen_heute` | Tageszähler (Reset 0:00) |
 | `input_datetime.eos_wp_letzte_umschaltung`, `_absenkung_seit`, `_absenkung_gesperrt_bis`, `_pause_bis` | Zeitstempel der Regeln |
