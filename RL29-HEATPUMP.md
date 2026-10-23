@@ -341,7 +341,8 @@ EOS-Konfiguration nach dem Image-Wechsel:
   (UG Port 1) bleibt an.
 - Kalender-Pi: `script.urlaub_kalender_herunterfahren` ruft `rest_command.kalender_herunterfahren` (POST
   `http://192.168.60.112:8099/shutdown`, kleine API auf dem Pi, Quelle `/opt/dev/kalender-api` auf dem Server-Pi,
-  nur von HA und dem Server-Pi aus erlaubt) und schaltet 5 min später UG Port 4 ab. Beim Wiederanlauf Port 4 an →
+  nur von HA und dem Server-Pi aus und nur mit Schlüssel: `Authorization: Bearer …` aus
+  `/etc/kalender-api/token`, in HA als `!secret kalender_api_auth`) und schaltet 5 min später UG Port 4 ab. Beim Wiederanlauf Port 4 an →
   der Pi fährt hoch. Ohne erreichbare API wird der Port trotzdem nach 5 min abgeschaltet.
 - Warmwasser auf 20 °C: erst „WW Absenk“, dann „WW Normal“ – die Integration hält Normal ≥ Absenk und übernimmt die
   neue Grenze erst nach einem Neuladen, deshalb wird `weishaupt_modbus` dazwischen neu geladen. Zurück in
