@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610222399599460"
+    "version": "v0.3.0.dev2610230523672066"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -9511,6 +9511,32 @@
             ],
             "title": "Away Room C",
             "description": "Room temperature held while away [degC]; None = away.room_c."
+          },
+          "setback_room_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Setback Room C",
+            "description": "RL29 fork: temperature of the set-back zone [degC]; None = zone_setback.room_c."
+          },
+          "window_open_share": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Open Share",
+            "description": "RL29 fork: share of the monitored windows open now (0..1)."
           }
         },
         "additionalProperties": false,
@@ -10887,6 +10913,12 @@
               0.5
             ]
           },
+          "fit_ventilation_profile": {
+            "type": "boolean",
+            "title": "Fit Ventilation Profile",
+            "description": "Learn ventilation.profile (and a weekend profile) from '<id>-window-open' once 14 days with window data exist; needs ventilation.enabled.",
+            "default": true
+          },
           "weather_from_prediction": {
             "type": "boolean",
             "title": "Weather From Prediction",
@@ -11080,6 +11112,12 @@
           "away": {
             "$ref": "#/components/schemas/HeatPumpAwaySettings"
           },
+          "zone_setback": {
+            "$ref": "#/components/schemas/HeatPumpZoneSetbackSettings-Input"
+          },
+          "ventilation": {
+            "$ref": "#/components/schemas/HeatPumpVentilationSettings"
+          },
           "power_limit_w": {
             "anyOf": [
               {
@@ -11144,6 +11182,12 @@
           },
           "away": {
             "$ref": "#/components/schemas/HeatPumpAwaySettings"
+          },
+          "zone_setback": {
+            "$ref": "#/components/schemas/HeatPumpZoneSetbackSettings-Output"
+          },
+          "ventilation": {
+            "$ref": "#/components/schemas/HeatPumpVentilationSettings"
           },
           "power_limit_w": {
             "anyOf": [
@@ -11234,6 +11278,18 @@
             "description": "Room temperature to hold while away [degC].",
             "readOnly": true
           },
+          "measurement_key_setback_room_temperature": {
+            "type": "string",
+            "title": "Measurement Key Setback Room Temperature",
+            "description": "Temperature of the set-back zone [degC] (zone setback).",
+            "readOnly": true
+          },
+          "measurement_key_window_open": {
+            "type": "string",
+            "title": "Measurement Key Window Open",
+            "description": "Share of the monitored windows that are open, 0..1 (ventilation).",
+            "readOnly": true
+          },
           "measurement_key_dewpoint": {
             "type": "string",
             "title": "Measurement Key Dewpoint",
@@ -11254,6 +11310,8 @@
           "measurement_key_away",
           "measurement_key_return_ts",
           "measurement_key_away_room_temperature",
+          "measurement_key_setback_room_temperature",
+          "measurement_key_window_open",
           "measurement_key_dewpoint"
         ],
         "title": "HeatPumpCommonSettings",
@@ -11730,6 +11788,172 @@
         "type": "object",
         "title": "HeatPumpUnitSettings",
         "description": "Heat pump unit."
+      },
+      "HeatPumpVentilationSettings": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Model window ventilation.",
+            "default": false
+          },
+          "loss_w_per_k": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Loss W Per K",
+            "description": "Heat loss while all monitored windows are wide open [W/K] (air exchange; about 0.34 Wh/m3K x air volume x exchanges per hour).",
+            "default": 1000.0,
+            "examples": [
+              1000.0,
+              600.0
+            ]
+          },
+          "profile": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Profile",
+            "description": "Expected airing per hour of day: open share x hours, 24 values (0.1 = 40 % of the windows for 15 minutes); Monday to Friday when profile_weekend is set. Prior of the learned profile."
+          },
+          "profile_weekend": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Weekend",
+            "description": "Expected airing on Saturdays and Sundays; None = profile."
+          },
+          "recommend": {
+            "type": "boolean",
+            "title": "Recommend",
+            "description": "Recommend one airing slot per day around midday.",
+            "default": false
+          },
+          "recommend_start_hour": {
+            "type": "integer",
+            "maximum": 23.0,
+            "minimum": 0.0,
+            "title": "Recommend Start Hour",
+            "default": 11
+          },
+          "recommend_end_hour": {
+            "type": "integer",
+            "maximum": 24.0,
+            "minimum": 1.0,
+            "title": "Recommend End Hour",
+            "description": "End (exclusive) of the recommendation window [h].",
+            "default": 15
+          },
+          "recommend_open_hours": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Recommend Open Hours",
+            "description": "Airing planned in the recommended slot: open share x hours.",
+            "default": 0.15,
+            "examples": [
+              0.15
+            ]
+          }
+        },
+        "type": "object",
+        "title": "HeatPumpVentilationSettings",
+        "description": "Window ventilation (RL29 fork).\n\nThe controller reports ``<device_id>-window-open``: the share of the monitored\nwindows that are open (0..1). Airing removes heat with ``loss_w_per_k`` times\nthe open share times (room - outdoor temperature). The expected airing per\nhour of day is the profile (open share x hours); the calibration learns it\nfrom the window measurement and takes the measured airing out of the building\nbalance, so ``building.loss_w_per_k`` stays the closed-window loss. Slots with\nopen windows are left out of the plan-versus-actual room comparison.\n\nWith ``recommend`` EOS picks one slot per day in the midday window\n(warmest outdoor temperature, ties by PV surplus) and plans the airing there;\nthe solution column ``<device_id>_ventilate`` is 1 in that slot, for a\nnotification."
+      },
+      "HeatPumpZoneSetbackSettings-Input": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Lower the zone in the configured windows.",
+            "default": false
+          },
+          "share": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Share",
+            "description": "Share of the zone in the measured mean room temperature (rooms of the zone / all rooms), e.g. 6 of 15 rooms = 0.4.",
+            "default": 0.4,
+            "examples": [
+              0.4
+            ]
+          },
+          "room_c": {
+            "type": "number",
+            "title": "Room C",
+            "description": "Zone temperature while set back [degC]; overridden by the measurement '<device_id>-setback-room-temperature'.",
+            "default": 20.0,
+            "examples": [
+              20.0
+            ]
+          },
+          "min_offset_k": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Min Offset K",
+            "description": "The zone may fall this far below its setback temperature [K].",
+            "default": 0.5
+          },
+          "windows": {
+            "$ref": "#/components/schemas/ValueTimeWindowSequence-Input",
+            "description": "When the zone is set back (local time); default nights 22-24 and 0-12 on working days, 0-8 at weekends."
+          }
+        },
+        "type": "object",
+        "title": "HeatPumpZoneSetbackSettings",
+        "description": "Setback of one zone of the building (RL29 fork), e.g. the bedrooms upstairs.\n\nEOS models the building as one zone; the measured room temperature is the\nmean of all rooms. While the zone is set back, its rooms only need the setback\ntemperature (``<device_id>-setback-room-temperature``, e.g. the reduced\nsetpoint of the heating circuit, fallback ``room_c``). The comfort minimum and\nthe NORMAL setpoint of the whole house drop by the zone's ``share`` of the\ndifference, so EOS neither plans to heat the zone up against the controller\nnor counts the cooler zone as a comfort violation. The solution column\n``<device_id>_zone_setback`` (1 = set back) tells the controller when to lower\nthe zone's room setpoints."
+      },
+      "HeatPumpZoneSetbackSettings-Output": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Lower the zone in the configured windows.",
+            "default": false
+          },
+          "share": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Share",
+            "description": "Share of the zone in the measured mean room temperature (rooms of the zone / all rooms), e.g. 6 of 15 rooms = 0.4.",
+            "default": 0.4,
+            "examples": [
+              0.4
+            ]
+          },
+          "room_c": {
+            "type": "number",
+            "title": "Room C",
+            "description": "Zone temperature while set back [degC]; overridden by the measurement '<device_id>-setback-room-temperature'.",
+            "default": 20.0,
+            "examples": [
+              20.0
+            ]
+          },
+          "min_offset_k": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Min Offset K",
+            "description": "The zone may fall this far below its setback temperature [K].",
+            "default": 0.5
+          },
+          "windows": {
+            "$ref": "#/components/schemas/ValueTimeWindowSequence-Output",
+            "description": "When the zone is set back (local time); default nights 22-24 and 0-12 on working days, 0-8 at weekends."
+          }
+        },
+        "type": "object",
+        "title": "HeatPumpZoneSetbackSettings",
+        "description": "Setback of one zone of the building (RL29 fork), e.g. the bedrooms upstairs.\n\nEOS models the building as one zone; the measured room temperature is the\nmean of all rooms. While the zone is set back, its rooms only need the setback\ntemperature (``<device_id>-setback-room-temperature``, e.g. the reduced\nsetpoint of the heating circuit, fallback ``room_c``). The comfort minimum and\nthe NORMAL setpoint of the whole house drop by the zone's ``share`` of the\ndifference, so EOS neither plans to heat the zone up against the controller\nnor counts the cooler zone as a comfort violation. The solution column\n``<device_id>_zone_setback`` (1 = set back) tells the controller when to lower\nthe zone's room setpoints."
       },
       "HomeApplianceCommonSettings-Input": {
         "properties": {

@@ -60,6 +60,7 @@ KPI_COLUMNS: list[tuple[str, Callable[[Any, Any], Optional[float]]]] = [
     ("kpi_dhw_loss_w_per_k", lambda e, r: _fit(r, "dhw", "loss_w_per_k")),
     ("kpi_draw_kwh_per_day", lambda e, r: _fit(r, "draw", "daily_wh", 0.001)),
     ("kpi_draw_days", lambda e, r: _fit(r, "draw", "days")),
+    ("kpi_airing_open_h_per_day", lambda e, r: _fit(r, "ventilation", "daily_open_hours")),
 ]
 
 
@@ -70,7 +71,7 @@ def device_kpis(device_id: str, data_folder: Path) -> dict[str, Optional[float]]
     result = HeatPumpCalibrationStore(folder / "heatpump_calibration.json").result(device_id)
     kpis = {name: getter(evaluation, result) for name, getter in KPI_COLUMNS}
     fitted = result is not None and any(
-        (result.building, result.cop, result.emitter, result.dhw, result.draw)
+        (result.building, result.cop, result.emitter, result.dhw, result.draw, result.ventilation)
     )
     kpis["kpi_calibrated"] = 1.0 if fitted else 0.0
     return kpis

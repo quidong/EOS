@@ -60,6 +60,8 @@ HEAT_PUMP_SOLUTION_COLUMNS: list[tuple[str, str, Any]] = [
     ("slab_temperature_c", "slab_c", float),
     ("dhw_temperature_c", "dhw_c", float),
     ("away", "away", float),
+    ("zone_setback", "zone_setback", float),
+    ("ventilate", "ventilate", float),
 ]
 
 

@@ -243,6 +243,7 @@ async def calibrate_device(
             fit_dhw_enabled=settings.fit_dhw,
             fit_emitter_enabled=settings.fit_emitter,
             fit_draw_enabled=settings.fit_draw_profile,
+            fit_ventilation_enabled=settings.fit_ventilation_profile,
             dhw_series=dhw_series,
             dhw_heat_series=dhw_heat_series,
         )
@@ -252,7 +253,9 @@ async def calibrate_device(
     except (OSError, ValueError, ArithmeticError) as exc:
         logger.warning("Heat pump {}: calibration failed: {}", device.device_id, exc)
         return previous
-    if result.building or result.cop or result.dhw or result.emitter or result.draw:
+    if any(
+        (result.building, result.cop, result.dhw, result.emitter, result.draw, result.ventilation)
+    ):
         logger.info(
             "Heat pump {} calibration over {} days ({} hourly samples, {} weather hours filled): {}",
             device.device_id,

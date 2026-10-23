@@ -657,8 +657,31 @@ class ConfigOptimizationRequest(
                     away_until.isoformat() if away_until is not None else "unknown",
                     away_room if away_room is not None else device.away.room_c,
                 )
+        # Zone setback and window ventilation (RL29 fork).
+        setback_room: Optional[float] = None
+        if device.zone_setback.enabled:
+            value = await self._latest_measurement(
+                device.measurement_key_setback_room_temperature, observation_time, 7 * 24 * 3600
+            )
+            if value is not None and 14.0 <= value <= 24.0:
+                setback_room = value
+        window_share: Optional[float] = None
+        if device.ventilation.enabled:
+            value = await self._latest_measurement(
+                device.measurement_key_window_open, observation_time, max_age
+            )
+            if value is not None and math.isfinite(value):
+                window_share = min(1.0, max(0.0, value))
+                if window_share > 0:
+                    logger.info(
+                        "Heat pump {}: {:.0f} % of the windows open.",
+                        device.device_id,
+                        window_share * 100,
+                    )
         return GeneticHeatPumpParameters(
             device_id=device.device_id,
+            setback_room_c=setback_room,
+            window_open_share=window_share,
             away=away,
             away_until=away_until if away else None,
             away_room_c=away_room,

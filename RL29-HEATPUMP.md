@@ -327,6 +327,65 @@ Offen: Warmwasser ganz aus braucht einen Schaltweg an der WBB (die Integration b
 WW-Normal-Sollwert geht nur bis 44,5 °C). Bis dahin `away.dhw_off: false`: die WP hält ihre Hysterese, EOS plant
 kein Zapfen. WLAN (PoE der Access-Point-Ports) und Rechner folgen.
 
+## 2e. OG-Absenkung und Lüften (Fork + HA, ab 23.10.2026)
+
+**OG-Absenkung (`devices.heat_pumps.<id>.zone_setback`):** Alle Räume im Obergeschoss laufen nachts (22–24 und
+0–12 Uhr werktags, 0–8 Uhr am Wochenende) auf der Absenktemperatur des Heizkreises
+(`number.wh_heizkreis2_raumsolltemperatur_absenk2`, über den Messwert `<id>-setback-room-temperature`; wer sie an
+der WP ändert, ändert auch die OG-Absenkung). EOS rechnet mit einer Zone: Raumtemperatur = Mittel aller Räume. In
+den Absenkzeiten sinken deshalb NORMAL-Sollwert, RAISED-Ziel und Komfortmaximum um `share` (6 von 15 Räumen = 0,4)
+mal den Abstand zur Absenktemperatur, das Komfortminimum entsprechend bis Absenktemperatur − `min_offset_k`
+(0,5 K). Ohne das würde EOS die kühleren OG-Räume als Komfortverletzung lesen und gegen die Absenkung anheizen.
+Lösungsschlüssel `<id>_zone_setback` (1 = Absenkung) sagt HA, wann die OG-Regler auf die Absenktemperatur gehen.
+Nicht im Urlaub (dann sind alle Räume abgesenkt) und nicht in der Kühlsaison. Die Zeiten stehen in
+`zone_setback.windows` (TimeWindows mit `day_of_week`).
+
+**Lüften (`devices.heat_pumps.<id>.ventilation`):** Messwert `<id>-window-open` = Anteil offener Fenster (0..1, aus
+den Fensterkontakten). Modell: Lüften ist ein zusätzlicher Verlust des Raumknotens, `loss_w_per_k` (1000 W/K bei
+allen Fenstern weit offen) × Anteil × (Raum − Außen). Erwartetes Lüften je Stunde = `profile` (offener Anteil ×
+Stunden, Standard 0,1 um 7 und 21 Uhr); offene Fenster jetzt zählen im ersten Slot.
+
+- Kalibrierung: lernt das Profil aus `<id>-window-open` ab 14 Tagen (Werktag/Wochenende getrennt ab je 4 Tagen,
+  Schrumpfung 7 Tage, `calibration.fit_ventilation_profile`) und nimmt das gemessene Lüften aus der
+  Gebäudebilanz – `building.loss_w_per_k` bleibt der Verlust bei geschlossenen Fenstern, sonst zählte das Lüften
+  doppelt (einmal im Verlust, einmal im Profil).
+- Plan gegen Ist: Slots mit offenem Fenster (±30 min) werden beim Raum nicht verglichen.
+- Empfehlung (`recommend`): je Tag ein Slot zwischen `recommend_start_hour` (11) und `recommend_end_hour` (15), der
+  wärmste, bei Gleichstand der mit dem meisten PV-Überschuss; dort plant EOS `recommend_open_hours` (0,15) Lüften
+  ein (abzüglich dessen, was das Profil in dem Fenster schon erwartet). Lösungsschlüssel `<id>_ventilate`.
+- Kennzahl `kpi_airing_open_h_per_day` (gelerntes Lüften pro Tag).
+
+`<id>-window-open` gehört in `device_measurement_history_keys`: Stoßlüften dauert oft kürzer als der
+15-min-Takt der Läufe.
+
+**HA** (angelegt 23.10.2026):
+
+| Objekt | Zweck |
+|---|---|
+| `sensor.eos_fenster_offen_anteil` | Anteil offener Fenster der beheizten Räume (→ `wbb12-window-open`) |
+| `script.eos_wp_raumsoll_setzen` | Feld `temperatur_og`: Sollwert für die Regler im Obergeschoss |
+| `automation.eos_warmepumpe_heizmodus_umsetzen` | bei `sensor.eos_wbb12_zone_setback` = 1: OG auf min(Ziel, Absenktemperatur); nicht bei Feuchtewarnung |
+| `sensor.eos_wp_sg_ready_soll` | Untergrenze je Raum: OG während der Absenkung Absenktemperatur − 1 K, sonst 19,5 °C |
+| `automation.eos_luftungsempfehlung` | Push „Jetzt lüften“ an Steffen und Lena, wenn `sensor.eos_wbb12_ventilate` 1 wird (Heizbetrieb, kein Urlaub, Fenster zu, Schalter an) |
+| `input_boolean.eos_luftungsempfehlung` | Empfehlung an/aus |
+
+EOS-Konfiguration nach dem Image-Wechsel:
+
+```json
+"devices": {"heat_pumps": {"wbb12": {
+  "zone_setback": {"enabled": true, "share": 0.4},
+  "ventilation": {"enabled": true, "recommend": true}
+}}},
+"adapter": {"homeassistant": {
+  "device_measurement_entity_ids": {
+    "wbb12-setback-room-temperature": "number.wh_heizkreis2_raumsolltemperatur_absenk2",
+    "wbb12-window-open": "sensor.eos_fenster_offen_anteil"
+  },
+  "device_measurement_history_keys": ["...", "wbb12-window-open"],
+  "solution_entity_ids": ["...", "sensor.eos_wbb12_zone_setback", "sensor.eos_wbb12_ventilate"]
+}}
+```
+
 ## 3. §14a EnWG: Modul wählbar (keins, 1, 2, 1+3)
 
 Einstellung `elecfee.grid_control_14a` (generisch, für jede Anlage):

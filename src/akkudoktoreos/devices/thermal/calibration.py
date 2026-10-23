@@ -59,6 +59,7 @@ SAMPLE_FIELDS = (
     "dhw_c",
     "dhw_heat_w",
     "ghi_w_per_m2",
+    "window_open",
 )
 
 
@@ -78,6 +79,8 @@ class HourlySample:
     dhw_heat_w: Optional[float] = None
     """Thermal output into the hot water tank [W], if measured."""
     ghi_w_per_m2: Optional[float] = None
+    window_open: Optional[float] = None
+    """Mean share of the monitored windows open in the hour (0..1), if measured."""
 
     def get(self, key: str) -> Optional[float]:
         value = getattr(self, key, None)
@@ -193,6 +196,11 @@ class CalibrationPriors:
     """Configured hourly draw profile [Wh], 24 values; empty = no draw prior."""
     draw_profile_weekend_wh: tuple[float, ...] = ()
     """Configured weekend profile; empty = the draw profile holds every day."""
+    ventilation_w_per_k: float = 0.0
+    """Heat loss with all monitored windows open [W/K]; 0 = ventilation not modelled."""
+    ventilation_profile: tuple[float, ...] = ()
+    """Configured airing per hour (open share x hours), 24 values; empty = no prior."""
+    ventilation_profile_weekend: tuple[float, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -256,6 +264,10 @@ class CalibrationOptions:
     """Tank drops below this beyond the standby loss count as no tapping (sensor noise)."""
     draw_gap_share: float = 0.2
     """Days below this share of the median daily draw are left out (away, no data)."""
+    vent_min_days: int = 14
+    """Days with window data before a learned airing profile replaces the configured one."""
+    vent_min_hours_per_day: int = 20
+    vent_prior_days: float = 7.0
     draw_min_share: float = 0.3
     draw_max_share: float = 3.0
     """Band of the learned daily draw relative to the configured one."""
@@ -328,6 +340,18 @@ class DrawFit:
 
 
 @dataclass
+class VentilationFit:
+    profile: list[float]
+    """Learned airing per hour (open share x hours), 24 values (every day or Mon-Fri)."""
+    weekend: Optional[list[float]]
+    days: int
+    weekend_days: int = 0
+    daily_open_hours: float = 0.0
+    """Mean daily airing of the learned profile(s) [open share x hours]."""
+    prior_daily_open_hours: float = 0.0
+
+
+@dataclass
 class CalibrationResult:
     fitted_at: datetime
     window_days: int = 0
@@ -337,6 +361,7 @@ class CalibrationResult:
     dhw: Optional[DhwFit] = None
     emitter: Optional[EmitterFit] = None
     draw: Optional[DrawFit] = None
+    ventilation: Optional[VentilationFit] = None
     notes: list[str] = field(default_factory=list)
     """Why a fit was skipped, for the log."""
 
@@ -356,6 +381,9 @@ class CalibrationResult:
             dhw=DhwFit(**data["dhw"]) if data.get("dhw") else None,
             emitter=EmitterFit(**data["emitter"]) if data.get("emitter") else None,
             draw=DrawFit(**data["draw"]) if data.get("draw") else None,
+            ventilation=(
+                VentilationFit(**data["ventilation"]) if data.get("ventilation") else None
+            ),
             notes=list(data.get("notes") or []),
         )
 
@@ -395,6 +423,13 @@ class CalibrationResult:
                 f"hot water draw {w.prior_daily_wh / 1000:.1f} -> {w.daily_wh / 1000:.1f} kWh/day "
                 f"({w.days} days{weekend})"
             )
+        if self.ventilation:
+            v = self.ventilation
+            weekend = f", weekend profile from {v.weekend_days} days" if v.weekend else ""
+            parts.append(
+                f"airing {v.prior_daily_open_hours:.2f} -> {v.daily_open_hours:.2f} open-h/day "
+                f"({v.days} days{weekend})"
+            )
         parts.extend(self.notes)
         return "; ".join(parts) if parts else "nothing fitted"
 
@@ -418,7 +453,10 @@ def _local_day(stamp: datetime, tz: Optional[tzinfo]) -> date:
 
 
 def _daily_aggregates(
-    samples: Sequence[HourlySample], options: CalibrationOptions, tz: Optional[tzinfo]
+    samples: Sequence[HourlySample],
+    options: CalibrationOptions,
+    tz: Optional[tzinfo],
+    ventilation_w_per_k: float = 0.0,
 ) -> list[_Day]:
     days: dict[Any, list[HourlySample]] = defaultdict(list)
     for sample in samples:
@@ -437,6 +475,14 @@ def _daily_aggregates(
         heat = statistics.fmean(
             max(0.0, (s.get("heat_w") or 0.0) - (s.get("dhw_heat_w") or 0.0)) for s in usable
         )
+        if ventilation_w_per_k > 0:
+            # Measured airing is a known loss: take it out, the fit is the closed house.
+            heat -= statistics.fmean(
+                ventilation_w_per_k
+                * (s.get("window_open") or 0.0)
+                * max(0.0, (s.get("room_c") or 0.0) - (s.get("outdoor_c") or 0.0))
+                for s in usable
+            )
         ghis = [s.get("ghi_w_per_m2") for s in usable]
         ghi = (
             statistics.fmean(g for g in ghis if g is not None)
@@ -459,7 +505,7 @@ def fit_building(
     Returns the fit and a note; the fit is ``None`` when the data does not
     support one (the note says why).
     """
-    days = _daily_aggregates(samples, options, tz)
+    days = _daily_aggregates(samples, options, tz, priors.ventilation_w_per_k)
     if not days:
         return None, "building: no complete days"
     kept = [d for d in days if abs(d.room_drift_k) <= options.max_room_drift_k]
@@ -898,6 +944,75 @@ def fit_draw_profile(
     )
 
 
+def fit_ventilation_profile(
+    samples: Sequence[HourlySample],
+    priors: CalibrationPriors,
+    options: CalibrationOptions = CalibrationOptions(),
+    tz: Optional[tzinfo] = None,
+) -> tuple[Optional[VentilationFit], str]:
+    """Airing per local hour (weekday/weekend) from the measured open-window share."""
+    if len(priors.ventilation_profile) != 24:
+        return None, "airing: no configured profile as prior"
+    days: dict[date, dict[int, float]] = defaultdict(dict)
+    for sample in samples:
+        value = sample.get("window_open")
+        if value is None:
+            continue
+        local = sample.timestamp.astimezone(tz) if tz is not None else sample.timestamp
+        days[local.date()][local.hour] = min(1.0, max(0.0, value))
+    usable = {
+        d: [h.get(hour, 0.0) for hour in range(24)]
+        for d, h in days.items()
+        if len(h) >= options.vent_min_hours_per_day
+    }
+    if len(usable) < options.vent_min_days:
+        return None, f"airing: {len(usable)} day(s) with window data, need {options.vent_min_days}"
+    weekday_prior = list(priors.ventilation_profile)
+    weekend_prior = (
+        list(priors.ventilation_profile_weekend)
+        if len(priors.ventilation_profile_weekend) == 24
+        else weekday_prior
+    )
+    weekend_days = [h for d, h in usable.items() if d.weekday() >= 5]
+    workdays = [h for d, h in usable.items() if d.weekday() < 5]
+    split = (
+        len(weekend_days) >= options.draw_min_weekend_days
+        and len(workdays) >= options.draw_min_weekend_days
+    )
+
+    def learn(groups: list[list[float]], prior: list[float]) -> list[float]:
+        n = len(groups)
+        return [
+            round(
+                (sum(g[hour] for g in groups) + options.vent_prior_days * prior[hour])
+                / (n + options.vent_prior_days),
+                3,
+            )
+            for hour in range(24)
+        ]
+
+    if split:
+        profile = learn(workdays, weekday_prior)
+        weekend: Optional[list[float]] = learn(weekend_days, weekend_prior)
+        daily = (5 * sum(profile) + 2 * sum(weekend or [])) / 7
+    else:
+        profile = learn(list(usable.values()), weekday_prior)
+        weekend = None
+        daily = sum(profile)
+    prior_daily = (5 * sum(weekday_prior) + 2 * sum(weekend_prior)) / 7
+    return (
+        VentilationFit(
+            profile=profile,
+            weekend=weekend,
+            days=len(usable),
+            weekend_days=len(weekend_days) if split else 0,
+            daily_open_hours=round(daily, 3),
+            prior_daily_open_hours=round(prior_daily, 3),
+        ),
+        "",
+    )
+
+
 # ---------------------------------------------------------------------------
 # All together
 # ---------------------------------------------------------------------------
@@ -916,6 +1031,7 @@ def calibrate(
     fit_dhw_enabled: bool = True,
     fit_emitter_enabled: bool = True,
     fit_draw_enabled: bool = True,
+    fit_ventilation_enabled: bool = True,
     dhw_series: Sequence[tuple[datetime, float]] = (),
     dhw_heat_series: Sequence[tuple[datetime, float]] = (),
 ) -> CalibrationResult:
@@ -944,6 +1060,10 @@ def calibrate(
             result.notes.append(note)
     if fit_dhw_enabled:
         result.dhw, note = fit_dhw_loss(samples, priors, options, tz)
+        if note:
+            result.notes.append(note)
+    if fit_ventilation_enabled and priors.ventilation_w_per_k > 0:
+        result.ventilation, note = fit_ventilation_profile(samples, priors, options, tz)
         if note:
             result.notes.append(note)
     if fit_draw_enabled and dhw_series:  # the manual script has hourly means only

@@ -164,6 +164,11 @@ async def evaluate_plans(
     room = await _measurement_series(measurement, keys["room_c"], start, end)
     dhw = await _measurement_series(measurement, keys["dhw_c"], start, end)
     electric = await _measurement_series(measurement, keys["electric_w"], start, end)
+    # Airing (RL29 fork): the room air drops and recovers within the hour; the model
+    # only knows the expected airing, so slots near open windows are not compared.
+    windows = await _measurement_series(
+        measurement, keys["window_open"], start - timedelta(hours=1), end
+    )
     slot_hours = float(plans[-1]["slot_hours"])
     first_slot = (end - timedelta(hours=hours)).replace(minute=0, second=0, microsecond=0)
     half = timedelta(minutes=30)
@@ -181,7 +186,17 @@ async def evaluate_plans(
             if plan is not None:
                 slot_end = slot + timedelta(hours=slot_hours)
                 p_room = _plan_value(plan, "room_c", slot)
-                m_room = _mean_around(room, slot_end, half) if p_room is not None else None
+                aired = False
+                if windows and p_room is not None:
+                    # the slot plus the half hour around its end that the room
+                    # comparison averages over
+                    opened = hourly_means(
+                        windows, slot - half, slot_end + half, min_coverage_seconds=0
+                    )
+                    aired = any(v > 0.01 for v in opened.values())
+                m_room = (
+                    _mean_around(room, slot_end, half) if p_room is not None and not aired else None
+                )
                 if p_room is not None and m_room is not None:
                     room_err.append(p_room - m_room)
                 p_dhw = _plan_value(plan, "dhw_c", slot)
