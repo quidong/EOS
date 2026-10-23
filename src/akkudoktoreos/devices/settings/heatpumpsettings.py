@@ -25,7 +25,7 @@ Example::
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import Field, computed_field, field_validator, model_validator
 
@@ -633,6 +633,184 @@ class HeatPumpAwaySettings(SettingsBaseModel):
     )
 
 
+def _default_setback_windows() -> ValueTimeWindowSequence:
+    """Nights every day, working-day mornings until noon (local time)."""
+    windows: list[dict[str, Any]] = [{"start_time": "22:00", "duration": "2 hours"}]
+    for day in range(7):
+        windows.append(
+            {
+                "start_time": "00:00",
+                "duration": "12 hours" if day < 5 else "8 hours",
+                "day_of_week": day,
+            }
+        )
+    return ValueTimeWindowSequence.model_validate({"windows": windows})
+
+
+class HeatPumpZoneSetbackSettings(SettingsBaseModel):
+    """Setback of one zone of the building (RL29 fork), e.g. the bedrooms upstairs.
+
+    EOS models the building as one zone; the measured room temperature is the
+    mean of all rooms. While the zone is set back, its rooms only need the setback
+    temperature (``<device_id>-setback-room-temperature``, e.g. the reduced
+    setpoint of the heating circuit, fallback ``room_c``). The comfort minimum and
+    the NORMAL setpoint of the whole house drop by the zone's ``share`` of the
+    difference, so EOS neither plans to heat the zone up against the controller
+    nor counts the cooler zone as a comfort violation. The solution column
+    ``<device_id>_zone_setback`` (1 = set back) tells the controller when to lower
+    the zone's room setpoints.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        json_schema_extra={"description": "Lower the zone in the configured windows."},
+    )
+    share: float = Field(
+        default=0.4,
+        ge=0,
+        le=1,
+        json_schema_extra={
+            "description": (
+                "Share of the zone in the measured mean room temperature (rooms of the zone "
+                "/ all rooms), e.g. 6 of 15 rooms = 0.4."
+            ),
+            "examples": [0.4],
+        },
+    )
+    room_c: float = Field(
+        default=20.0,
+        json_schema_extra={
+            "description": (
+                "Zone temperature while set back [degC]; overridden by the measurement "
+                "'<device_id>-setback-room-temperature'."
+            ),
+            "examples": [20.0],
+        },
+    )
+    min_offset_k: float = Field(
+        default=0.5,
+        ge=0,
+        json_schema_extra={
+            "description": "The zone may fall this far below its setback temperature [K]."
+        },
+    )
+    windows: ValueTimeWindowSequence = Field(
+        default_factory=_default_setback_windows,
+        json_schema_extra={
+            "description": (
+                "When the zone is set back (local time); default nights 22-24 and 0-12 on "
+                "working days, 0-8 at weekends."
+            )
+        },
+    )
+
+    def active_at(self, dt: DateTime) -> bool:
+        return self.enabled and self.windows.contains(dt)
+
+
+def _default_ventilation_profile() -> list[float]:
+    """Open-window share x hours per hour of day: airing in the morning and evening."""
+    profile = [0.0] * 24
+    profile[7] = 0.1  # e.g. 40 % of the windows for 15 minutes
+    profile[21] = 0.1
+    return profile
+
+
+class HeatPumpVentilationSettings(SettingsBaseModel):
+    """Window ventilation (RL29 fork).
+
+    The controller reports ``<device_id>-window-open``: the share of the monitored
+    windows that are open (0..1). Airing removes heat with ``loss_w_per_k`` times
+    the open share times (room - outdoor temperature). The expected airing per
+    hour of day is the profile (open share x hours); the calibration learns it
+    from the window measurement and takes the measured airing out of the building
+    balance, so ``building.loss_w_per_k`` stays the closed-window loss. Slots with
+    open windows are left out of the plan-versus-actual room comparison.
+
+    With ``recommend`` EOS picks one slot per day in the midday window
+    (warmest outdoor temperature, ties by PV surplus) and plans the airing there;
+    the solution column ``<device_id>_ventilate`` is 1 in that slot, for a
+    notification.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        json_schema_extra={"description": "Model window ventilation."},
+    )
+    loss_w_per_k: float = Field(
+        default=1000.0,
+        ge=0,
+        json_schema_extra={
+            "description": (
+                "Heat loss while all monitored windows are wide open [W/K] (air exchange; "
+                "about 0.34 Wh/m3K x air volume x exchanges per hour)."
+            ),
+            "examples": [1000.0, 600.0],
+        },
+    )
+    profile: list[float] = Field(
+        default_factory=_default_ventilation_profile,
+        json_schema_extra={
+            "description": (
+                "Expected airing per hour of day: open share x hours, 24 values (0.1 = 40 % "
+                "of the windows for 15 minutes); Monday to Friday when profile_weekend is "
+                "set. Prior of the learned profile."
+            )
+        },
+    )
+    profile_weekend: Optional[list[float]] = Field(
+        default=None,
+        json_schema_extra={
+            "description": "Expected airing on Saturdays and Sundays; None = profile."
+        },
+    )
+    recommend: bool = Field(
+        default=False,
+        json_schema_extra={"description": "Recommend one airing slot per day around midday."},
+    )
+    recommend_start_hour: int = Field(default=11, ge=0, le=23)
+    recommend_end_hour: int = Field(
+        default=15,
+        ge=1,
+        le=24,
+        json_schema_extra={"description": "End (exclusive) of the recommendation window [h]."},
+    )
+    recommend_open_hours: float = Field(
+        default=0.15,
+        ge=0,
+        json_schema_extra={
+            "description": "Airing planned in the recommended slot: open share x hours.",
+            "examples": [0.15],
+        },
+    )
+
+    @field_validator("profile", "profile_weekend")
+    @classmethod
+    def validate_profile(cls, value: Optional[list[float]]) -> Optional[list[float]]:
+        if value is None:
+            return value
+        if len(value) != 24 or any(v < 0 or v > 1 for v in value):
+            raise ValueError("A ventilation profile needs 24 values between 0 and 1.")
+        return value
+
+    @model_validator(mode="after")
+    def validate_window(self) -> "HeatPumpVentilationSettings":
+        if self.recommend_end_hour <= self.recommend_start_hour:
+            raise ValueError("recommend_end_hour must be after recommend_start_hour.")
+        return self
+
+    def open_hours(self, start: DateTime) -> float:
+        """Expected open share x hours in the hour of ``start`` (local hour and weekday)."""
+        profile = self.profile
+        if self.profile_weekend is not None and start.weekday() >= 5:
+            profile = self.profile_weekend
+        return profile[start.hour]
+
+    def slot_loss_w_per_k(self, start: DateTime) -> float:
+        """Mean extra loss of the slot from airing [W/K]."""
+        return self.loss_w_per_k * self.open_hours(start) if self.enabled else 0.0
+
+
 class HeatPumpCalibrationSettings(SettingsBaseModel):
     """Automatic calibration of the model from measured operation (RL29 fork).
 
@@ -724,6 +902,15 @@ class HeatPumpCalibrationSettings(SettingsBaseModel):
                 "tapping at varying times), else this quantile."
             ),
             "examples": [None, 0.5],
+        },
+    )
+    fit_ventilation_profile: bool = Field(
+        default=True,
+        json_schema_extra={
+            "description": (
+                "Learn ventilation.profile (and a weekend profile) from '<id>-window-open' "
+                "once 14 days with window data exist; needs ventilation.enabled."
+            )
         },
     )
     weather_from_prediction: bool = Field(
@@ -844,6 +1031,8 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
     cooling: HeatPumpCoolingSettings = Field(default_factory=HeatPumpCoolingSettings)
     calibration: HeatPumpCalibrationSettings = Field(default_factory=HeatPumpCalibrationSettings)
     away: HeatPumpAwaySettings = Field(default_factory=HeatPumpAwaySettings)
+    zone_setback: HeatPumpZoneSetbackSettings = Field(default_factory=HeatPumpZoneSetbackSettings)
+    ventilation: HeatPumpVentilationSettings = Field(default_factory=HeatPumpVentilationSettings)
     power_limit_w: Optional[ValueTimeWindowSequence] = Field(
         default=None,
         json_schema_extra={
@@ -904,6 +1093,10 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
             self.measurement_key_return_ts,
             self.measurement_key_away_room_temperature,
         ]
+        if self.zone_setback.enabled:
+            keys.append(self.measurement_key_setback_room_temperature)
+        if self.ventilation.enabled:
+            keys.append(self.measurement_key_window_open)
         if self.calibration.enabled:
             keys += [k for k in self.calibration_measurement_keys.values() if k not in keys]
         return keys
@@ -922,6 +1115,7 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
             "dhw_c": self.measurement_key_dhw_temperature,
             "dhw_heat_w": f"{self.device_id}-dhw-heat-power",
             "ghi_w_per_m2": f"{self.device_id}-ghi",
+            "window_open": self.measurement_key_window_open,
         }
 
     @computed_field  # type: ignore[prop-decorator]
@@ -947,6 +1141,18 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
     def measurement_key_away_room_temperature(self) -> str:
         """Room temperature to hold while away [degC]."""
         return f"{self.device_id}-away-room-temperature"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def measurement_key_setback_room_temperature(self) -> str:
+        """Temperature of the set-back zone [degC] (zone setback)."""
+        return f"{self.device_id}-setback-room-temperature"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def measurement_key_window_open(self) -> str:
+        """Share of the monitored windows that are open, 0..1 (ventilation)."""
+        return f"{self.device_id}-window-open"
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -978,6 +1184,11 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
             dhw_ambient_c=self.dhw.ambient_c,
             draw_profile_wh=tuple(self.dhw.draw_profile_wh),
             draw_profile_weekend_wh=tuple(self.dhw.draw_profile_weekend_wh or ()),
+            ventilation_w_per_k=(
+                self.ventilation.loss_w_per_k if self.ventilation.enabled else 0.0
+            ),
+            ventilation_profile=tuple(self.ventilation.profile),
+            ventilation_profile_weekend=tuple(self.ventilation.profile_weekend or ()),
         )
 
     def calibrated(self, result: Optional[CalibrationResult]) -> "HeatPumpCommonSettings":
@@ -987,7 +1198,12 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
         next fit. Missing fits keep the configured value.
         """
         if result is None or not (
-            result.building or result.cop or result.dhw or result.emitter or result.draw
+            result.building
+            or result.cop
+            or result.dhw
+            or result.emitter
+            or result.draw
+            or result.ventilation
         ):
             return self
         data = self.model_dump(exclude=set(type(self).model_computed_fields))
@@ -1005,6 +1221,10 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
             data["dhw"]["draw_profile_wh"] = list(result.draw.profile_wh)
             if result.draw.weekend_wh is not None:
                 data["dhw"]["draw_profile_weekend_wh"] = list(result.draw.weekend_wh)
+        if result.ventilation:
+            data["ventilation"]["profile"] = list(result.ventilation.profile)
+            if result.ventilation.weekend is not None:
+                data["ventilation"]["profile_weekend"] = list(result.ventilation.weekend)
         return type(self).model_validate(data)
 
     def to_system(
@@ -1081,6 +1301,7 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
                     ghi_w_per_m2=ghi or 0.0,
                     draw_wh=self.dhw.draw_wh(start, slot_hours),
                     max_electric_w=limit,
+                    ventilation_w_per_k=self.ventilation.slot_loss_w_per_k(start),
                 )
             )
         return result

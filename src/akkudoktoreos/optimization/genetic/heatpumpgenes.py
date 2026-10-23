@@ -150,6 +150,22 @@ class GeneticHeatPumpParameters(GeneticParametersBaseModel):
             "description": "Room temperature held while away [degC]; None = away.room_c."
         },
     )
+    setback_room_c: Optional[float] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: temperature of the set-back zone [degC]; None = zone_setback.room_c."
+            )
+        },
+    )
+    window_open_share: Optional[float] = Field(
+        default=None,
+        ge=0,
+        le=1,
+        json_schema_extra={
+            "description": "RL29 fork: share of the monitored windows open now (0..1)."
+        },
+    )
 
 
 def _nearest(allowed: Sequence[int], wanted: int) -> int:
@@ -233,6 +249,10 @@ class HeatPumpRunPlan:
     """Cost per hour of an active mode; prefers NORMAL/HOLD where a mode changes nothing."""
     away_slots: int = 0
     """Holiday mode: number of slots before the return (0 = at home)."""
+    zone_setback_slots: tuple[bool, ...] = ()
+    """Zone setback active per slot (RL29 fork)."""
+    ventilate_slots: tuple[bool, ...] = ()
+    """Recommended airing per slot (RL29 fork)."""
     tank_heat_value_above_setpoint: Optional[float] = None
     """Value of tank heat above the heat pump setpoint [currency/Wh]; None = tank_heat_value.
     Water the rod heated beyond the setpoint loses more and is valued with a discount."""
@@ -382,6 +402,9 @@ class HeatPumpRunPlan:
                 "comfort_max_c",
                 "outdoor_c",
                 "away",
+                "zone_setback",
+                "ventilate",
+                "ventilation_w_per_k",
             ):
                 rows[name] = []
         for slot, inputs in enumerate(self.inputs):
@@ -431,6 +454,11 @@ class HeatPumpRunPlan:
                 rows["comfort_max_c"].append(high)
                 rows["outdoor_c"].append(inputs.outdoor_c)
                 rows["away"].append(1.0 if slot < self.away_slots else 0.0)
+                zone = self.zone_setback_slots
+                vent = self.ventilate_slots
+                rows["zone_setback"].append(1.0 if slot < len(zone) and zone[slot] else 0.0)
+                rows["ventilate"].append(1.0 if slot < len(vent) and vent[slot] else 0.0)
+                rows["ventilation_w_per_k"].append(float(inputs.ventilation_w_per_k))
 
         # Mode changes between consecutive gene periods.
         n = self.n_periods
@@ -900,6 +928,10 @@ def build_run_plan(
             "off" if away.dhw_off else "on",
         )
 
+    zone_slots, vent_slots = _apply_zone_setback_and_ventilation(
+        parameters, slot_starts, slot_hours, inputs, away_slots, pv_surplus_w
+    )
+
     # Active §14a dimming: limit the first slots.
     if parameters.power_limited_w is not None:
         limited_slots = max(1, math.ceil(parameters.power_limited_hours / slot_hours))
@@ -1038,7 +1070,104 @@ def build_run_plan(
         overheat_penalty=opt.overheat_penalty_amt_per_kh,
         active_mode_penalty=opt.active_mode_penalty_amt_per_h,
         away_slots=away_slots,
+        zone_setback_slots=tuple(zone_slots),
+        ventilate_slots=tuple(vent_slots),
     )
+
+
+def _apply_zone_setback_and_ventilation(
+    parameters: GeneticHeatPumpParameters,
+    slot_starts: list[Any],
+    slot_hours: float,
+    inputs: list[SlotInputs],
+    away_slots: int,
+    pv_surplus_w: Optional[Sequence[float]],
+) -> tuple[list[bool], list[bool]]:
+    """Zone setback and window ventilation of the slots (RL29 fork).
+
+    Zone setback: the zone's share of the difference to its setback temperature
+    comes off the comfort minimum and the NORMAL setpoint (the measured room
+    temperature is the mean over all rooms). Not while away (all rooms are
+    reduced then) and not in the cooling season.
+
+    Ventilation: the slot inputs already carry the expected airing of the
+    profile; windows open now count in the first slot, and with ``recommend``
+    one slot per day in the midday window gets the recommended airing.
+    """
+    settings = parameters.settings
+    n = len(inputs)
+    zone = settings.zone_setback
+    zone_slots = [False] * n
+    if zone.enabled:
+        zone_c = parameters.setback_room_c if parameters.setback_room_c is not None else zone.room_c
+        for i, (start, slot_input) in enumerate(zip(slot_starts, inputs)):
+            if i < away_slots or slot_input.cooling_season or not zone.active_at(start):
+                continue
+            zone_slots[i] = True
+            # The controller keeps the zone at zone_c in every mode; the other rooms
+            # follow the mode, so every target of the mean drops by the zone's share.
+            setpoint = slot_input.setpoint_c
+            if setpoint is not None and zone_c < setpoint:
+                raised = (
+                    slot_input.raised_c
+                    if slot_input.raised_c is not None
+                    else setpoint + settings.comfort.raised_offset_k
+                )
+                slot_input.setpoint_c = setpoint - zone.share * (setpoint - zone_c)
+                slot_input.raised_c = raised - zone.share * max(0.0, raised - zone_c)
+                high = slot_input.comfort_max_c
+                if high is not None:
+                    slot_input.comfort_max_c = max(
+                        slot_input.raised_c, high - zone.share * max(0.0, high - zone_c)
+                    )
+            zone_min = zone_c - zone.min_offset_k
+            if zone_min < slot_input.comfort_min_c:
+                slot_input.comfort_min_c -= zone.share * (slot_input.comfort_min_c - zone_min)
+        if any(zone_slots):
+            logger.info(
+                "Heat pump {}: zone setback to {} degC in {} of {} slots (share {}).",
+                parameters.device_id,
+                zone_c,
+                sum(zone_slots),
+                n,
+                zone.share,
+            )
+
+    vent = settings.ventilation
+    vent_slots = [False] * n
+    if not vent.enabled:
+        return zone_slots, vent_slots
+    share_now = parameters.window_open_share
+    if share_now is not None and share_now > 0 and n:
+        # Open now: assume they close within the hour.
+        open_hours = min(slot_hours, 0.5) * share_now
+        inputs[0].ventilation_w_per_k = max(
+            inputs[0].ventilation_w_per_k, vent.loss_w_per_k * open_hours / slot_hours
+        )
+    if vent.recommend:
+        by_day: dict[Any, list[int]] = {}
+        for i, start in enumerate(slot_starts):
+            if i < away_slots or inputs[i].cooling_season:
+                continue
+            if vent.recommend_start_hour <= start.hour < vent.recommend_end_hour:
+                by_day.setdefault(start.date(), []).append(i)
+        for candidates in by_day.values():
+
+            def score(i: int) -> tuple[float, float]:
+                surplus = (
+                    float(pv_surplus_w[i])
+                    if pv_surplus_w is not None and i < len(pv_surplus_w)
+                    else 0.0
+                )
+                return (inputs[i].outdoor_c, surplus)
+
+            best = max(candidates, key=score)
+            vent_slots[best] = True
+            # plan the recommended airing on top of what the profile expects in the window
+            expected = sum(vent.open_hours(slot_starts[i]) * slot_hours for i in candidates)
+            extra = max(0.0, vent.recommend_open_hours - expected)
+            inputs[best].ventilation_w_per_k += vent.loss_w_per_k * extra / slot_hours
+    return zone_slots, vent_slots
 
 
 def plan_result(plan: HeatPumpRunPlan, genes: Sequence[int]) -> dict[str, Any]:

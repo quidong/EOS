@@ -319,6 +319,7 @@
                        "fit_draw_profile": true,
                        "draw_min_days": 14,
                        "draw_quantile": null,
+                       "fit_ventilation_profile": true,
                        "weather_from_prediction": true,
                        "min_days": 5,
                        "prior_weight_days": 7.0,
@@ -335,6 +336,123 @@
                        "dhw_off": true,
                        "cooling_max_c": 28.0,
                        "max_age_hours": 48.0
+                   },
+                   "zone_setback": {
+                       "enabled": false,
+                       "share": 0.4,
+                       "room_c": 20.0,
+                       "min_offset_k": 0.5,
+                       "windows": {
+                           "windows": [
+                               {
+                                   "start_time": "22:00:00.000000",
+                                   "duration": "2 hours",
+                                   "day_of_week": null,
+                                   "date": null,
+                                   "months": null,
+                                   "locale": null,
+                                   "value": null
+                               },
+                               {
+                                   "start_time": "00:00:00.000000",
+                                   "duration": "12 hours",
+                                   "day_of_week": 0,
+                                   "date": null,
+                                   "months": null,
+                                   "locale": null,
+                                   "value": null
+                               },
+                               {
+                                   "start_time": "00:00:00.000000",
+                                   "duration": "12 hours",
+                                   "day_of_week": 1,
+                                   "date": null,
+                                   "months": null,
+                                   "locale": null,
+                                   "value": null
+                               },
+                               {
+                                   "start_time": "00:00:00.000000",
+                                   "duration": "12 hours",
+                                   "day_of_week": 2,
+                                   "date": null,
+                                   "months": null,
+                                   "locale": null,
+                                   "value": null
+                               },
+                               {
+                                   "start_time": "00:00:00.000000",
+                                   "duration": "12 hours",
+                                   "day_of_week": 3,
+                                   "date": null,
+                                   "months": null,
+                                   "locale": null,
+                                   "value": null
+                               },
+                               {
+                                   "start_time": "00:00:00.000000",
+                                   "duration": "12 hours",
+                                   "day_of_week": 4,
+                                   "date": null,
+                                   "months": null,
+                                   "locale": null,
+                                   "value": null
+                               },
+                               {
+                                   "start_time": "00:00:00.000000",
+                                   "duration": "8 hours",
+                                   "day_of_week": 5,
+                                   "date": null,
+                                   "months": null,
+                                   "locale": null,
+                                   "value": null
+                               },
+                               {
+                                   "start_time": "00:00:00.000000",
+                                   "duration": "8 hours",
+                                   "day_of_week": 6,
+                                   "date": null,
+                                   "months": null,
+                                   "locale": null,
+                                   "value": null
+                               }
+                           ]
+                       }
+                   },
+                   "ventilation": {
+                       "enabled": false,
+                       "loss_w_per_k": 1000.0,
+                       "profile": [
+                           0.0,
+                           0.0,
+                           0.0,
+                           0.0,
+                           0.0,
+                           0.0,
+                           0.0,
+                           0.1,
+                           0.0,
+                           0.0,
+                           0.0,
+                           0.0,
+                           0.0,
+                           0.0,
+                           0.0,
+                           0.0,
+                           0.0,
+                           0.0,
+                           0.0,
+                           0.0,
+                           0.0,
+                           0.1,
+                           0.0,
+                           0.0
+                       ],
+                       "profile_weekend": null,
+                       "recommend": false,
+                       "recommend_start_hour": 11,
+                       "recommend_end_hour": 15,
+                       "recommend_open_hours": 0.15
                    },
                    "power_limit_w": null
                }

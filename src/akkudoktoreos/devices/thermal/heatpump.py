@@ -223,6 +223,9 @@ class SlotInputs:
     raised_c: Optional[float] = None
     """Room target of RAISED in this slot; None = setpoint + raised_offset_k. Holiday mode
     sets the normal setpoint so that RAISED heats the house back up before the return."""
+    ventilation_w_per_k: float = 0.0
+    """Extra heat loss from window ventilation in this slot (RL29 fork) [W/K], applied
+    to the room node with the room temperature at the slot start."""
     dhw_off: bool = False
     """Hot water switched off (RL29 fork, holiday mode): the heat pump controller does
     not reheat on its own and the tank comfort minimum does not apply; only a planned
@@ -421,6 +424,9 @@ class HeatPumpSystem:
         dt = self.dt
         notes: list[str] = []
         gains = self.building.gains_w(inputs.ghi_w_per_m2)
+        if inputs.ventilation_w_per_k > 0:
+            # Airing: an extra loss of the room node, linearised at the slot start.
+            gains -= inputs.ventilation_w_per_k * (state.room_c - inputs.outdoor_c)
 
         # --- Hot water: decide heat pump share of the slot ---------------
         hp_setpoint = self.dhw_setpoint_c(heating_mode)
