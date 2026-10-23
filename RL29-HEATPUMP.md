@@ -337,10 +337,16 @@ EOS-Konfiguration nach dem Image-Wechsel:
   auskühlen, NORMAL hält die Absenktemperatur, RAISED heizt auf den Normal-Sollwert. Mit Standby ist auch das
   Warmwasser aus → `away.dhw_off: true`.
 - WLAN: PoE der Access Points aus (`switch.urlaub_wlan_access_points_poe` = OG Port 1, 2; UG Port 3, 9, 12).
-- Geräte: PoE der beiden 2N-Innenstationen (OG Port 7, UG Port 2) und des Kalender-Pi (UG Port 4) aus
-  (`switch.urlaub_gerate_poe`). Der Kalender-Pi verliert dabei hart den Strom; die Türstation (UG Port 1) bleibt an.
-- Warmwasser-Absenktemperatur auf 20 °C (vorher in `input_number.urlaub_ww_absenk_vorher`); WW-Normal lässt sich
-  über die Integration nicht unter 44,5 °C setzen.
+- Geräte: PoE der beiden 2N-Innenstationen (OG Port 7, UG Port 2) aus (`switch.urlaub_gerate_poe`); die Türstation
+  (UG Port 1) bleibt an.
+- Kalender-Pi: `script.urlaub_kalender_herunterfahren` ruft `rest_command.kalender_herunterfahren` (POST
+  `http://192.168.60.112:8099/shutdown`, kleine API auf dem Pi, Quelle `/opt/dev/kalender-api` auf dem Server-Pi,
+  nur von HA und dem Server-Pi aus erlaubt) und schaltet 5 min später UG Port 4 ab. Beim Wiederanlauf Port 4 an →
+  der Pi fährt hoch. Ohne erreichbare API wird der Port trotzdem nach 5 min abgeschaltet.
+- Warmwasser auf 20 °C: erst „WW Absenk“, dann „WW Normal“ – die Integration hält Normal ≥ Absenk und übernimmt die
+  neue Grenze erst nach einem Neuladen, deshalb wird `weishaupt_modbus` dazwischen neu geladen. Zurück in
+  umgekehrter Reihenfolge (erst Normal, dann Absenk). Werte vorher in `input_number.urlaub_ww_normal_vorher` /
+  `urlaub_ww_absenk_vorher`.
 - Zum Wiederanlauf (Rückkehr − 4 h) bzw. beim Ende des Urlaubs: WP zurück, PoE an, WW-Absenk zurück, Push „Haus
   fährt hoch“. WLAN-Geräte (Shellys, Waschmaschine, Saugroboter, ESP32-BT-Proxy, Tonieboxen) sind bis dahin offline;
   die Shellys behalten ihren Schaltzustand.
