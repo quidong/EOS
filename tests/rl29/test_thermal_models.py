@@ -17,7 +17,6 @@ from akkudoktoreos.devices.thermal.heatpump import (
     DhwControlParameters,
     DhwMode,
     HeatingMode,
-    HeatPumpParameters,
     HeatPumpSystem,
     SlotInputs,
     ThermalState,
@@ -266,7 +265,8 @@ class TestHeatPumpSystem:
 
     def test_forced_charge_counts_in_every_slot(self):
         """The controller's own reheat is reported as forced until it ends,
-        not only in its first slot; a charge the plan started is never forced."""
+        not only in its first slot; a charge the plan started is never forced.
+        """
         sim = system()
         state, results = run(
             sim, ThermalState(23.0, 21.0, 39.0), COLD, (HeatingMode.NORMAL, DhwMode.HOLD), 12
@@ -334,7 +334,7 @@ class TestSettings:
         assert isinstance(sim, HeatPumpSystem)
         assert sim.dhw.setpoint_c == 45.0
         assert settings.measurement_key_dhw_temperature == "wbb12-dhw-temperature"
-        assert len(settings.measurement_keys) == 8  # 5 state + 3 holiday-mode keys
+        assert len(settings.measurement_keys) == 9  # 5 state + 4 holiday-mode keys
 
     def test_measured_setpoint_overrides_config(self):
         sim = HeatPumpCommonSettings(device_id="x").to_system(0.25, dhw_setpoint_c=48.0)

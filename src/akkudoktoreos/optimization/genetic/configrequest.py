@@ -634,6 +634,7 @@ class ConfigOptimizationRequest(
         away = False
         away_until: Optional[DateTime] = None
         away_room: Optional[float] = None
+        away_min: Optional[float] = None
         away_age = device.away.max_age_hours * 3600
         flag = await self._latest_measurement(
             device.measurement_key_away, observation_time, away_age
@@ -650,6 +651,11 @@ class ConfigOptimizationRequest(
             )
             if room_value is not None and 10.0 <= room_value <= 24.0:
                 away_room = room_value
+            floor_value = await self._latest_measurement(
+                device.measurement_key_away_min_temperature, observation_time, 30 * 24 * 3600
+            )
+            if floor_value is not None and 5.0 <= floor_value <= 24.0:
+                away_min = floor_value
             if away:
                 logger.info(
                     "Heat pump {}: holiday mode until {}, room {} degC.",
@@ -685,6 +691,7 @@ class ConfigOptimizationRequest(
             away=away,
             away_until=away_until if away else None,
             away_room_c=away_room,
+            away_min_c=away_min if away else None,
             cooling_season=cooling_season,
             dewpoint_c=dewpoint,
             settings=device,

@@ -318,15 +318,32 @@ EOS-Konfiguration nach dem Image-Wechsel:
   "device_measurement_entity_ids": {
     "wbb12-away": "input_boolean.urlaubsmodus",
     "wbb12-return-ts": "sensor.eos_urlaub_ruckkehr_zeitstempel",
-    "wbb12-away-room-temperature": "number.wh_heizkreis2_raumsolltemperatur_absenk2"
+    "wbb12-away-room-temperature": "number.wh_heizkreis2_raumsolltemperatur_absenk2",
+    "wbb12-away-min-temperature": "input_number.urlaub_standby_untergrenze_raum"
   },
   "solution_entity_ids": ["...", "sensor.eos_wbb12_away"]
 }}
 ```
 
-Offen: Warmwasser ganz aus braucht einen Schaltweg an der WBB (die Integration bietet keine WW-Betriebsart; der
-WW-Normal-Sollwert geht nur bis 44,5 °C). Bis dahin `away.dhw_off: false`: die WP hält ihre Hysterese, EOS plant
-kein Zapfen. WLAN (PoE der Access-Point-Ports) und Rechner folgen.
+**WP-Standby, WLAN, Geräte** (`automation.urlaubsmodus_wp_standby_wlan_gerate`, angelegt 23.10.2026):
+
+- Systembetriebsart der WP auf **Standby** (Heizung und Warmwasser im Frostschutz), solange EOS „Reduziert“ und
+  keine Warmwasserladung plant, der kälteste Raum über `input_number.urlaub_standby_untergrenze_raum` (16 °C) liegt
+  und die Rückkehr weiter als `input_number.urlaub_wiederanlauf_vor_ruckkehr` (4 h) entfernt ist. Plant EOS
+  Normal/Angehoben oder eine Ladung, geht die WP zurück in ihre vorherige Betriebsart
+  (`input_text.urlaub_wp_betriebsart_vorher`). Ist EOS veraltet, bleibt Standby; die Raum-Untergrenze gilt weiter.
+- EOS weiß davon über `away.standby_min_c` bzw. den Messwert `<id>-away-min-temperature`
+  (→ `input_number.urlaub_standby_untergrenze_raum`): Bis zur Rückkehr darf REDUCED das Haus bis zu dieser Grenze
+  auskühlen, NORMAL hält die Absenktemperatur, RAISED heizt auf den Normal-Sollwert. Mit Standby ist auch das
+  Warmwasser aus → `away.dhw_off: true`.
+- WLAN: PoE der Access Points aus (`switch.urlaub_wlan_access_points_poe` = OG Port 1, 2; UG Port 3, 9, 12).
+- Geräte: PoE der beiden 2N-Innenstationen (OG Port 7, UG Port 2) und des Kalender-Pi (UG Port 4) aus
+  (`switch.urlaub_gerate_poe`). Der Kalender-Pi verliert dabei hart den Strom; die Türstation (UG Port 1) bleibt an.
+- Warmwasser-Absenktemperatur auf 20 °C (vorher in `input_number.urlaub_ww_absenk_vorher`); WW-Normal lässt sich
+  über die Integration nicht unter 44,5 °C setzen.
+- Zum Wiederanlauf (Rückkehr − 4 h) bzw. beim Ende des Urlaubs: WP zurück, PoE an, WW-Absenk zurück, Push „Haus
+  fährt hoch“. WLAN-Geräte (Shellys, Waschmaschine, Saugroboter, ESP32-BT-Proxy, Tonieboxen) sind bis dahin offline;
+  die Shellys behalten ihren Schaltzustand.
 
 ## 2e. OG-Absenkung und Lüften (Fork + HA, ab 23.10.2026)
 

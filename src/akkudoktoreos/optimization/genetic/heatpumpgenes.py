@@ -150,6 +150,15 @@ class GeneticHeatPumpParameters(GeneticParametersBaseModel):
             "description": "Room temperature held while away [degC]; None = away.room_c."
         },
     )
+    away_min_c: Optional[float] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: room floor while away with the heat pump in standby [degC]; "
+                "None = away.standby_min_c."
+            )
+        },
+    )
     setback_room_c: Optional[float] = Field(
         default=None,
         json_schema_extra={
@@ -901,6 +910,8 @@ def build_run_plan(
     if parameters.away:
         away = settings.away
         room_away = parameters.away_room_c if parameters.away_room_c is not None else away.room_c
+        floor = parameters.away_min_c if parameters.away_min_c is not None else away.standby_min_c
+        room_floor = min(floor, room_away) if floor is not None else room_away
         until = parameters.away_until
         for i, (start, slot_input) in enumerate(zip(slot_starts, inputs)):
             if until is not None and start.timestamp() >= until.timestamp():
@@ -911,7 +922,8 @@ def build_run_plan(
                 slot_input.comfort_max_c = max(away.cooling_max_c, slot_input.comfort_max_c or 0.0)
             else:
                 normal_setpoint = slot_input.setpoint_c
-                slot_input.comfort_min_c = min(slot_input.comfort_min_c, room_away)
+                # REDUCED (heat pump in standby) may let the house cool to the floor
+                slot_input.comfort_min_c = min(slot_input.comfort_min_c, room_floor)
                 slot_input.setpoint_c = room_away
                 slot_input.raised_c = normal_setpoint  # RAISED heats back to normal
                 # comfort_max_c stays: PREHEAT/FORCED heat up towards the return

@@ -618,6 +618,19 @@ class HeatPumpAwaySettings(SettingsBaseModel):
             )
         },
     )
+    standby_min_c: Optional[float] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "Lowest room temperature while away when the controller puts the heat pump "
+                "into standby for REDUCED [degC]; overridden by the measurement "
+                "'<device_id>-away-min-temperature'. REDUCED then lets the house cool down to "
+                "this floor, NORMAL holds the away temperature. None = the away temperature "
+                "is the floor."
+            ),
+            "examples": [16.0, None],
+        },
+    )
     cooling_max_c: float = Field(
         default=28.0,
         json_schema_extra={
@@ -1092,6 +1105,7 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
             self.measurement_key_away,
             self.measurement_key_return_ts,
             self.measurement_key_away_room_temperature,
+            self.measurement_key_away_min_temperature,
         ]
         if self.zone_setback.enabled:
             keys.append(self.measurement_key_setback_room_temperature)
@@ -1141,6 +1155,12 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
     def measurement_key_away_room_temperature(self) -> str:
         """Room temperature to hold while away [degC]."""
         return f"{self.device_id}-away-room-temperature"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def measurement_key_away_min_temperature(self) -> str:
+        """Room temperature floor while away with the heat pump in standby [degC]."""
+        return f"{self.device_id}-away-min-temperature"
 
     @computed_field  # type: ignore[prop-decorator]
     @property
