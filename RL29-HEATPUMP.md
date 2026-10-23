@@ -264,6 +264,7 @@ HA-Adapter wie jeden Lösungswert als `sensor.eos_<id>_kpi_*` setzt. Solange Dat
 | `kpi_cop_scale`, `kpi_measured_cop` | COP-Fit |
 | `kpi_emitter_w_per_k`, `kpi_dhw_loss_w_per_k` | Heizflächen- und Speicherverlust-Fit |
 | `kpi_draw_kwh_per_day`, `kpi_draw_days` | gelerntes Zapfprofil |
+| `kpi_airing_open_h_per_day` | gelerntes Lüften (offener Anteil × Stunden pro Tag) |
 | `kpi_calibrated` | 1 = mindestens ein Fit aktiv |
 
 In `adapter.homeassistant.solution_entity_ids` eintragen, z. B. `sensor.eos_wbb12_kpi_room_bias_6h_k`,
@@ -368,6 +369,7 @@ Stunden, Standard 0,1 um 7 und 21 Uhr); offene Fenster jetzt zählen im ersten S
 | `sensor.eos_wp_sg_ready_soll` | Untergrenze je Raum: OG während der Absenkung Absenktemperatur − 1 K, sonst 19,5 °C |
 | `automation.eos_luftungsempfehlung` | Push „Jetzt lüften“ an Bewohner A und Bewohner B, wenn `sensor.eos_wbb12_ventilate` 1 wird (Heizbetrieb, kein Urlaub, Fenster zu, Schalter an) |
 | `input_boolean.eos_luftungsempfehlung` | Empfehlung an/aus |
+| `input_boolean.eos_og_absenkung_aktiv` | OG-Absenkung an/aus (aus = OG folgt dem Haus) |
 
 EOS-Konfiguration nach dem Image-Wechsel:
 
