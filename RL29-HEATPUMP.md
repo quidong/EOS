@@ -515,6 +515,7 @@ Vorheizen: Komfortmaximum, Forciert: Komfortmaximum + 1 K). Meldet ein KNX-Regle
 | `script.eos_wp_sg_ready_kontakte` / `_modbus` | Übertragungswege |
 | `script.eos_wp_raumsoll_setzen` | Raumregler mit Label „EOS Raumregelung“ setzen |
 | `script.eos_wp_warmwasser_laden_kontakte` / `_modbus` | WW-Ladung je Weg |
+| KNX-Treppenlicht DE2 (3600 s) / H2 (90 min), `automation.eos_h2_lebenszeichen` | Zeitlogik im Aktor (nachtriggerbar, ohne Vorwarnung, nach Busspannungswiederkehr aus): DE2 öffnet nach 60 min, H2 nach 90 min von selbst, auch wenn HA ausfällt. Das WW-Skript triggert bei > 60 min nach; bei SG-Ist ≥ 3 schaltet die Lebenszeichen-Automation H2 alle 30 min erneut ein |
 | `automation.eos_warmwasser_push_beenden`, `input_datetime.eos_wp_warmwasser_push_bis` | Absicherung: DE2-Push endet zur gemerkten Endzeit, auch wenn das Skript abgebrochen wurde (Neustart/Reload); manueller Push ohne EOS bleibt unberührt |
 | `binary_sensor.wp_sg1_h1_status` (KNX 9/1/11) | Status H1 |
 | `switch.wp_sg2_h2_anhebung` (KNX 9/1/20/21) | H2 = SG Ready „Erhöhter Betrieb“ |
