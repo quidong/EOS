@@ -502,6 +502,12 @@ Vorheizen: Komfortmaximum, Forciert: Komfortmaximum + 1 K). Meldet ein KNX-Regle
 | WP nicht im Heizbetrieb, Modbus weg, EOS-Plan fehlt, Tageslimit → Push | Überwachung | – |
 | Notabschaltung (Hauptschalter aus): wärmster Raum ≥ 24 °C 15 min / kältester < 19 °C 30 min (ohne Räume beim Lüften: `sensor.raumtemperatur_kaltester_raum_ohne_luften`) | `automation.eos_warmepumpe_notabschaltung` | – |
 
+**Feuchteschutz** (`binary_sensor.feuchte_warnung_wohnraume`, Template, ab 23.10.2026): sperrt Absenkung und OG-Absenkung.
+An, wenn `binary_sensor.feuchte_wohnraume_hoch` (Max. Arbeitszimmer-Sensoren > 63 %, aus < 58 %) seit `input_number.feuchteschutz_verzogerung_wohnraume` (60 min)
+an ist, oder `binary_sensor.feuchte_bader_hoch` (Max. Bad OG/Bad EG > 70 %, aus < 65 %) seit `input_number.feuchteschutz_verzogerung_bader` (120 min).
+Kurzes Duschen löst damit nichts mehr aus; Werkstatt und `meter_7d57` zählen nicht mehr. `automation.bad_luften_erinnerung_nach_dem_duschen`:
+Push an Bewohner A und Bewohner B, wenn ein Bad 30 min über 70 % liegt (höchstens einmal pro Stunde).
+
 **Temporär (wieder entfernen nach Einbau der neuen KNX-Spannungsversorgung):** `automation.knx_raumregler_aus_standby_auf_komfort_temporar` – fällt ein Raumregler mit Label `eos_raumregelung` 1 min in den Standby (MDT-Aktoren nach Busspannungseinbruch), sendet sie Komfort (1) auf die gemeinsame Betriebsart-GA 3/3/100; zusätzlich Prüfung beim HA-Start und alle 30 min, danach 5 min Sperre.
 
 ### Objekte
