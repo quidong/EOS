@@ -494,7 +494,7 @@ Vorheizen: Komfortmaximum, Forciert: Komfortmaximum + 1 K). Meldet ein KNX-Regle
 | Keine Absenkung bei kältestem Raum < 19,5 °C oder Feuchtewarnung | Soll-Sensor | – |
 | Keine Anhebung ab wärmstem Raum ≥ Max | Soll-Sensor | `input_number.eos_wp_max_raumtemperatur` (23,5 °C) |
 | Absenkung höchstens X min, danach gleich lange gesperrt | Automation + Soll-Sensor | `input_number.eos_wp_max_absenkdauer` (360 min) |
-| Höchstens N Umschaltungen/Tag, danach nur Normal | Automation | `input_number.eos_wp_max_umschaltungen_pro_tag` (12) |
+| Höchstens N Umschaltungen/Tag, danach nur Normal | Automation | `input_number.eos_wp_max_umschaltungen_pro_tag` (15) |
 | Mindesthaltezeit (Rückkehr zu Normal immer sofort; 30 s Toleranz, damit der 5-min-Takt genau nach Ablauf schaltet) | Automation | `input_number.eos_wp_mindesthaltezeit` (55 min) |
 | Manueller Eingriff an Betriebsart/H2 → Pause + Push | Automation | `input_number.eos_wp_pause_nach_eingriff` (240 min) |
 | Höchstens N Warmwasserladungen/Tag | Automation | `input_number.eos_wp_max_warmwasserladungen_pro_tag` (2) |
