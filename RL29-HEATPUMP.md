@@ -311,7 +311,7 @@ Lösungsschlüssel `<id>_away` (1 = Slot vor der Rückkehr). Einstellungen: `roo
 | `automation.urlaubsmodus_start_ruckkehr_hochheizen` | Push Start/Ende, beendet den Urlaubsmodus zur Rückkehrzeit, meldet einmal den Beginn des Hochheizens |
 | `input_boolean.urlaub_hochheizen_gemeldet` | Merker „Hochheizen gemeldet“ |
 
-EOS-Konfiguration nach dem Image-Wechsel:
+EOS-Konfiguration (eingespielt 23.10.2026, zusammen mit `away.dhw_off: true`):
 
 ```json
 "adapter": {"homeassistant": {
@@ -395,7 +395,7 @@ Stunden, Standard 0,1 um 7 und 21 Uhr); offene Fenster jetzt zählen im ersten S
 | `input_boolean.eos_luftungsempfehlung` | Empfehlung an/aus |
 | `input_boolean.eos_og_absenkung_aktiv` | OG-Absenkung an/aus (aus = OG folgt dem Haus) |
 
-EOS-Konfiguration nach dem Image-Wechsel:
+EOS-Konfiguration (eingespielt 23.10.2026):
 
 ```json
 "devices": {"heat_pumps": {"wbb12": {

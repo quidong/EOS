@@ -42,6 +42,10 @@ _HISTORY_IMPORTED: dict[str, DateTime] = {}
 HISTORY_IMPORT_MAX_HOURS = 48
 
 
+_MISSING_STATES = {"unknown", "unavailable", "none"}
+"""Home Assistant states that carry no value (RL29 fork)."""
+
+
 def state_to_float(state: str) -> float:
     """Numeric value of a Home Assistant state; on/off style states map to 1/0."""
     text = str(state).strip()
@@ -658,13 +662,20 @@ class HomeAssistantAdapter(AdapterProvider):
                         try:
                             state = self.get_entity_state(entity_id)
                             logger.debug(f"Entity {entity_id}: {state}")
-                            if state:
+                            if state and str(state).strip().lower() in _MISSING_STATES:
+                                # RL29 fork: e.g. template sensors right after a Home
+                                # Assistant restart. Skip this run, name the entity.
+                                logger.warning(
+                                    f"Entity {entity_id} ({measurement_key}) is '{state}';"
+                                    " measurement skipped this run."
+                                )
+                            elif state:
                                 measurement_value = state_to_float(state)
                                 await self.measurement.update_value(
                                     observed_at, measurement_key, measurement_value
                                 )
                         except Exception as e:
-                            logger.error(f"{e}")
+                            logger.error(f"Entity {entity_id} ({measurement_key}): {e}")
 
             # Retrieve measurements for load prediction
             entity_ids = self.config.adapter.homeassistant.load_emr_entity_ids
