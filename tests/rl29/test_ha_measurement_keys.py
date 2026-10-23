@@ -100,3 +100,47 @@ async def test_adapter_writes_corrected_key(ha_adapter):
     assert written["battery1-soc-factor"] == pytest.approx(0.42)
     assert "battery9-soc-factor" not in written
     assert "battery1_soc_factor" not in written
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["unknown", "unavailable", "Unknown "])
+async def test_missing_state_is_skipped_and_names_the_entity(ha_adapter, monkeypatch, state):
+    """After a Home Assistant restart template sensors are 'unknown' for a moment."""
+    from loguru import logger
+
+    adapter, measurement = ha_adapter
+    states = {"sensor.byd_soc_factor": state, "sensor.unknown": "0.9"}
+    monkeypatch.setattr(
+        HomeAssistantAdapter, "get_entity_state", lambda self, entity_id: states[entity_id]
+    )
+    messages: list[tuple[str, str]] = []
+    sink = logger.add(lambda m: messages.append((m.record["level"].name, m.record["message"])))
+    try:
+        await adapter._update_data()
+    finally:
+        logger.remove(sink)
+    written = {key for (_, key, _v) in (c.args for c in measurement.update_value.await_args_list)}
+    assert "battery1-soc-factor" not in written
+    skipped = [m for level, m in messages if level == "WARNING" and "skipped" in m]
+    assert skipped and "sensor.byd_soc_factor" in skipped[0]
+    assert "battery1-soc-factor" in skipped[0]
+    assert not [m for level, m in messages if level == "ERROR" and "convert" in m]
+
+
+@pytest.mark.asyncio
+async def test_unparsable_state_error_names_the_entity(ha_adapter, monkeypatch):
+    from loguru import logger
+
+    adapter, measurement = ha_adapter
+    states = {"sensor.byd_soc_factor": "kaputt", "sensor.unknown": "0.9"}
+    monkeypatch.setattr(
+        HomeAssistantAdapter, "get_entity_state", lambda self, entity_id: states[entity_id]
+    )
+    messages: list[tuple[str, str]] = []
+    sink = logger.add(lambda m: messages.append((m.record["level"].name, m.record["message"])))
+    try:
+        await adapter._update_data()
+    finally:
+        logger.remove(sink)
+    errors = [m for level, m in messages if level == "ERROR" and "convert" in m]
+    assert errors and "sensor.byd_soc_factor" in errors[0]
