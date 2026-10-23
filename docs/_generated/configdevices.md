@@ -329,6 +329,7 @@ config path from ``self.device_id`` without needing an external index.
                    "away": {
                        "room_c": 20.0,
                        "dhw_off": true,
+                       "standby_min_c": null,
                        "cooling_max_c": 28.0,
                        "max_age_hours": 48.0
                    },
@@ -794,6 +795,7 @@ config path from ``self.device_id`` without needing an external index.
                    "away": {
                        "room_c": 20.0,
                        "dhw_off": true,
+                       "standby_min_c": null,
                        "cooling_max_c": 28.0,
                        "max_age_hours": 48.0
                    },
@@ -928,7 +930,8 @@ config path from ``self.device_id`` without needing an external index.
                        "wbb12-power-limited",
                        "wbb12-away",
                        "wbb12-return-ts",
-                       "wbb12-away-room-temperature"
+                       "wbb12-away-room-temperature",
+                       "wbb12-away-min-temperature"
                    ],
                    "calibration_measurement_keys": {
                        "outdoor_c": "wbb12-outdoor-temperature",
@@ -945,6 +948,7 @@ config path from ``self.device_id`` without needing an external index.
                    "measurement_key_away": "wbb12-away",
                    "measurement_key_return_ts": "wbb12-return-ts",
                    "measurement_key_away_room_temperature": "wbb12-away-room-temperature",
+                   "measurement_key_away_min_temperature": "wbb12-away-min-temperature",
                    "measurement_key_setback_room_temperature": "wbb12-setback-room-temperature",
                    "measurement_key_window_open": "wbb12-window-open",
                    "measurement_key_dewpoint": "wbb12-dewpoint"
@@ -970,7 +974,8 @@ config path from ``self.device_id`` without needing an external index.
                "wbb12-power-limited",
                "wbb12-away",
                "wbb12-return-ts",
-               "wbb12-away-room-temperature"
+               "wbb12-away-room-temperature",
+               "wbb12-away-min-temperature"
            ]
        }
    }

@@ -334,6 +334,7 @@
                    "away": {
                        "room_c": 20.0,
                        "dhw_off": true,
+                       "standby_min_c": null,
                        "cooling_max_c": 28.0,
                        "max_age_hours": 48.0
                    },

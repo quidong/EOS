@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610230523672066"
+    "version": "v0.3.0.dev2610230729042783"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -9512,6 +9512,18 @@
             "title": "Away Room C",
             "description": "Room temperature held while away [degC]; None = away.room_c."
           },
+          "away_min_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Away Min C",
+            "description": "RL29 fork: room floor while away with the heat pump in standby [degC]; None = away.standby_min_c."
+          },
           "setback_room_c": {
             "anyOf": [
               {
@@ -10746,6 +10758,22 @@
             "description": "Hot water is switched off while away: no reheating by the heat pump controller, no tank minimum, no tapping; the tank is charged back to the setpoint before the return.",
             "default": true
           },
+          "standby_min_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Standby Min C",
+            "description": "Lowest room temperature while away when the controller puts the heat pump into standby for REDUCED [degC]; overridden by the measurement '<device_id>-away-min-temperature'. REDUCED then lets the house cool down to this floor, NORMAL holds the away temperature. None = the away temperature is the floor.",
+            "examples": [
+              16.0,
+              null
+            ]
+          },
           "cooling_max_c": {
             "type": "number",
             "title": "Cooling Max C",
@@ -11278,6 +11306,12 @@
             "description": "Room temperature to hold while away [degC].",
             "readOnly": true
           },
+          "measurement_key_away_min_temperature": {
+            "type": "string",
+            "title": "Measurement Key Away Min Temperature",
+            "description": "Room temperature floor while away with the heat pump in standby [degC].",
+            "readOnly": true
+          },
           "measurement_key_setback_room_temperature": {
             "type": "string",
             "title": "Measurement Key Setback Room Temperature",
@@ -11310,6 +11344,7 @@
           "measurement_key_away",
           "measurement_key_return_ts",
           "measurement_key_away_room_temperature",
+          "measurement_key_away_min_temperature",
           "measurement_key_setback_room_temperature",
           "measurement_key_window_open",
           "measurement_key_dewpoint"

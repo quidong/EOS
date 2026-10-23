@@ -304,3 +304,65 @@ async def test_request_reads_holiday_mode_from_the_measurements(
     await isolated_measurement.update_value(now, "wbb12-room-temperature", 18.0)
     await isolated_measurement.update_value(now.subtract(hours=60), "wbb12-away", 1.0)
     assert not (await _request().resolve()).heat_pumps[0].away
+
+
+# ----------------------------------------------------------------------
+# Heat pump in standby while away (REDUCED may cool the house to a floor)
+# ----------------------------------------------------------------------
+
+
+def standby_plan(away_min_c=None, **away_settings):
+    device = HeatPumpCommonSettings(device_id="wbb12", away=away_settings)
+    params = GeneticHeatPumpParameters(
+        device_id="wbb12",
+        settings=device,
+        initial_room_c=19.0,
+        initial_dhw_c=40.0,
+        away=True,
+        away_until=T0.add(hours=40),
+        away_room_c=19.0,
+        away_min_c=away_min_c,
+    )
+    starts = [T0.add(hours=i) for i in range(48)]
+    return build_run_plan(params, starts, 1.0, [0.0] * 48, [0.0] * 48, [0.0003] * 48)
+
+
+def test_standby_floor_lets_reduced_cool_the_house_down():
+    held = standby_plan()
+    assert held.inputs[0].comfort_min_c == 19.0  # floor = away temperature
+    floor = standby_plan(away_min_c=16.0)
+    assert floor.inputs[0].comfort_min_c == 16.0
+    assert floor.inputs[0].setpoint_c == 19.0  # NORMAL still holds the away temperature
+    assert floor.inputs[40].comfort_min_c > 19.0  # at home again
+    configured = standby_plan(standby_min_c=15.0)
+    assert configured.inputs[0].comfort_min_c == 15.0
+    # REDUCED in standby: hardly any heat while the house is above the floor
+    reduced = floor.evaluate(floor.genes_for_modes([HeatingMode.REDUCED] * 48, [DhwMode.HOLD] * 48))
+    normal = floor.evaluate(floor.genes_for_modes([HeatingMode.NORMAL] * 48, [DhwMode.HOLD] * 48))
+    assert sum(reduced.electric_wh[:20]) < 0.5 * sum(normal.electric_wh[:20])
+    room = plan_result(
+        floor, floor.genes_for_modes([HeatingMode.REDUCED] * 48, [DhwMode.HOLD] * 48)
+    )["room_c"]
+    assert min(room[:40]) >= 15.5  # the floor holds while away
+    assert room[20] < 18.5  # and the house really cools down
+
+
+@pytest.mark.asyncio
+async def test_request_reads_the_standby_floor(
+    config_eos: ConfigEOS, isolated_measurement: Measurement
+):
+    _configure(config_eos)
+    now = pendulum.datetime(2026, 11, 20, 9, 7, tz="Europe/Berlin")
+    get_ems(init=True).set_start_datetime(now, interval_seconds=3600)
+    await isolated_measurement.update_value(now, "wbb12-room-temperature", 18.0)
+    await isolated_measurement.update_value(now, "wbb12-dhw-temperature", 30.0)
+    await isolated_measurement.update_value(
+        now.subtract(days=10), "wbb12-away-min-temperature", 16.0
+    )
+    # at home: no floor
+    assert (await _request().resolve()).heat_pumps[0].away_min_c is None
+    await isolated_measurement.update_value(now.subtract(hours=2), "wbb12-away", 1.0)
+    state = (await _request().resolve()).heat_pumps[0]
+    assert state.away and state.away_min_c == 16.0
+    await isolated_measurement.update_value(now, "wbb12-away-min-temperature", 2.0)  # implausible
+    assert (await _request().resolve()).heat_pumps[0].away_min_c is None
