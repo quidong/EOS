@@ -502,6 +502,12 @@ Vorheizen: Komfortmaximum, Forciert: Komfortmaximum + 1 K). Meldet ein KNX-Regle
 | WP nicht im Heizbetrieb, Modbus weg, EOS-Plan fehlt, Tageslimit → Push | Überwachung | – |
 | Notabschaltung (Hauptschalter aus): wärmster Raum ≥ 24 °C 15 min / kältester < 19 °C 30 min (ohne Räume beim Lüften: `sensor.raumtemperatur_kaltester_raum_ohne_luften`) | `automation.eos_warmepumpe_notabschaltung` | – |
 
+**Betriebsmodus Haus „Standby“** (ab 24.10.2026): `input_select.betriebsmodus_haus` hat zusätzlich `Standby`.
+`automation.heizung_betriebsmodus_ruckmelden` setzt es, wenn die WP-Systembetriebsart auf `sys_operationmode_standby` geht
+(z. B. Urlaubsmodus); `automation.heizung_betriebsmodus_umsetzen_knx_warmepumpe` schaltet bei Auswahl Standby die WP in Standby
+(Frostschutz), KNX Sommer/Winter bleibt. Bei Standby rechnet die EOS-Steuerung nicht (Soll-Sensor → SG 2), Zwangsstellung und
+Lüftungsempfehlung sind aus.
+
 **Feuchteschutz** (`binary_sensor.feuchte_warnung_wohnraume`, Template, ab 23.10.2026): sperrt Absenkung und OG-Absenkung.
 An, wenn `binary_sensor.feuchte_wohnraume_hoch` (Max. Arbeitszimmer-Sensoren > 63 %, aus < 58 %) seit `input_number.feuchteschutz_verzogerung_wohnraume` (60 min)
 an ist, oder `binary_sensor.feuchte_bader_hoch` (Max. Bad OG/Bad EG > 70 %, aus < 65 %) seit `input_number.feuchteschutz_verzogerung_bader` (120 min).
