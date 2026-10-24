@@ -508,6 +508,12 @@ Vorheizen: Komfortmaximum, Forciert: Komfortmaximum + 1 K). Meldet ein KNX-Regle
 (Frostschutz), KNX Sommer/Winter bleibt. Bei Standby rechnet die EOS-Steuerung nicht (Soll-Sensor → SG 2), Zwangsstellung und
 Lüftungsempfehlung sind aus.
 
+**Urlaubsmodus** (geändert 24.10.2026): Beim Einschalten bricht `automation.urlaubsmodus_wp_standby_wlan_gerate` sofort alle
+laufenden WP-Aktionen ab (Warmwasser-Skripte, DE2, H2) und schaltet die WP direkt in Standby. EOS-Pläne holen die WP im Urlaub
+nicht mehr aus dem Standby; zurück nur bei Raum unter `input_number.urlaub_standby_untergrenze_raum`, zum Wiederanlauf vor der
+Rückkehr oder am Urlaubsende. `automation.eos_warmepumpe_warmwasser_laden` startet im Urlaub keine Ladung. Geht die WP nach dem
+Urlaub zurück auf Automatik, setzt das Rückmelden den Betriebsmodus Haus von Standby auf Heizen (die WP bleibt in Automatik).
+
 **Feuchteschutz** (`binary_sensor.feuchte_warnung_wohnraume`, Template, ab 23.10.2026): sperrt Absenkung und OG-Absenkung.
 An, wenn `binary_sensor.feuchte_wohnraume_hoch` (Max. Arbeitszimmer-Sensoren > 63 %, aus < 58 %) seit `input_number.feuchteschutz_verzogerung_wohnraume` (60 min)
 an ist, oder `binary_sensor.feuchte_bader_hoch` (Max. Bad OG/Bad EG > 70 %, aus < 65 %) seit `input_number.feuchteschutz_verzogerung_bader` (120 min).
