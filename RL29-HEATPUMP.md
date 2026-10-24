@@ -509,11 +509,17 @@ Vorheizen: Komfortmaximum, Forciert: Komfortmaximum + 1 K). Meldet ein KNX-Regle
 Lüftungsempfehlung sind aus.
 
 **Urlaubsmodus** (geändert 24.10.2026): Beim Einschalten bricht `automation.urlaubsmodus_wp_standby_wlan_gerate` sofort alle
-laufenden WP-Aktionen ab (Warmwasser-Skripte, DE2, H2) und schaltet die WP direkt in Standby. Ein EOS-Plan, der den Urlaub
-noch nicht kennt (`sensor.eos_wbb12_away` ≠ 1), wird ignoriert – auch `automation.eos_warmepumpe_warmwasser_laden` startet im
-Urlaub nur mit einem solchen Plan. Sobald EOS mit Urlaub plant, steuert der Plan wieder (Normal/Angehoben oder Ladung → WP aus
-dem Standby, z. B. Hochheizen vor der Rückkehr). Raum-Untergrenze und Wiederanlauf gelten immer. Geht die WP nach dem Urlaub
-zurück auf Automatik, setzt das Rückmelden den Betriebsmodus Haus von Standby auf Heizen (die WP bleibt in Automatik).
+laufenden WP-Aktionen ab (Warmwasser-Skripte, DE2, H2) und schaltet die WP direkt in Standby (die WP sichert den Frostschutz
+selbst). Ein EOS-Plan, der den Urlaub noch nicht kennt (`sensor.eos_wbb12_away` ≠ 1), wird ignoriert. Sobald EOS mit Urlaub
+plant, entscheidet **EOS allein** über Zeitpunkt und Art des Aufheizens und der Warmwasserladung (Kostenminimum aus PV,
+Strompreis, Wärme- und Speicherverlust; Ziel: Komfortband und Warmwasser ≥ Minimum zur Rückkehr): Standby bei Reduziert ohne
+Ladung, sonst WP zurück in die vorherige Betriebsart. Plant EOS in den nächsten 3 h eine Warmwasserladung (aktueller Slot oder
+`sensor.eos_plan`-Daten), stellt `script.urlaub_warmwasser_zuruck` vorher die Warmwasser-Sollwerte zurück – eine frühe
+PV-Ladung lädt also wirklich auf 45 °C. `automation.eos_warmepumpe_warmwasser_laden` lädt im Urlaub nur mit einem Plan, der
+den Urlaub kennt. Der Wiederanlauf (`input_number.urlaub_wiederanlauf_vor_ruckkehr`) schaltet WLAN, Innenstationen, Kalender,
+Absenk- und Warmwasser-Sollwerte zurück; die WP holt er nur aus dem Standby, wenn EOS fehlt/veraltet ist (Notreserve). Die
+Raum-Untergrenze gilt immer. Geht die WP nach dem Urlaub zurück auf Automatik, setzt das Rückmelden den Betriebsmodus Haus von
+Standby auf Heizen (die WP bleibt in Automatik).
 Urlaubstemperatur `input_number.urlaub_raumtemperatur` (18 °C): beim Urlaubsstart wird die Absenktemperatur des Heizkreises
 (`number.wh_heizkreis2_raumsolltemperatur_absenk2`, geht als `wbb12-away-room-temperature` an EOS) in
 `input_number.urlaub_absenktemperatur_vorher` gesichert und auf die Urlaubstemperatur gesetzt (auch bei Änderung im Urlaub);
