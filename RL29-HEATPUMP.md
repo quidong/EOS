@@ -514,6 +514,10 @@ noch nicht kennt (`sensor.eos_wbb12_away` ≠ 1), wird ignoriert – auch `autom
 Urlaub nur mit einem solchen Plan. Sobald EOS mit Urlaub plant, steuert der Plan wieder (Normal/Angehoben oder Ladung → WP aus
 dem Standby, z. B. Hochheizen vor der Rückkehr). Raum-Untergrenze und Wiederanlauf gelten immer. Geht die WP nach dem Urlaub
 zurück auf Automatik, setzt das Rückmelden den Betriebsmodus Haus von Standby auf Heizen (die WP bleibt in Automatik).
+Urlaubstemperatur `input_number.urlaub_raumtemperatur` (18 °C): beim Urlaubsstart wird die Absenktemperatur des Heizkreises
+(`number.wh_heizkreis2_raumsolltemperatur_absenk2`, geht als `wbb12-away-room-temperature` an EOS) in
+`input_number.urlaub_absenktemperatur_vorher` gesichert und auf die Urlaubstemperatur gesetzt (auch bei Änderung im Urlaub);
+Wiederanlauf/Urlaubsende stellt sie zurück. `input_number.urlaub_standby_untergrenze_raum` (16 °C) bleibt der Rückfall.
 
 **Feuchteschutz** (`binary_sensor.feuchte_warnung_wohnraume`, Template, ab 23.10.2026): sperrt Absenkung und OG-Absenkung.
 An, wenn `binary_sensor.feuchte_wohnraume_hoch` (Max. Arbeitszimmer-Sensoren > 63 %, aus < 58 %) seit `input_number.feuchteschutz_verzogerung_wohnraume` (60 min)
