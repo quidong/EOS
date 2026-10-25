@@ -500,7 +500,7 @@ Vorheizen: Komfortmaximum, Forciert: Komfortmaximum + 1 K). Meldet ein KNX-Regle
 | Höchstens N Warmwasserladungen/Tag | Automation | `input_number.eos_wp_max_warmwasserladungen_pro_tag` (2) |
 | DE2 > 90 min zu → öffnen + Push | Überwachung | – |
 | WP nicht im Heizbetrieb, Modbus weg, EOS-Plan fehlt, Tageslimit → Push | Überwachung | – |
-| Notabschaltung (Hauptschalter aus): wärmster Raum ≥ 24 °C 15 min / kältester < 19 °C 30 min (ohne Räume beim Lüften: `sensor.raumtemperatur_kaltester_raum_ohne_luften`) | `automation.eos_warmepumpe_notabschaltung` | – |
+| Notabschaltung (Hauptschalter aus): wärmster Raum ≥ 24 °C 15 min / kältester < 19 °C 30 min (ohne Räume beim Lüften: `sensor.raumtemperatur_kaltester_raum_ohne_luften`); im Urlaub statt 19 °C die Urlaubs-Untergrenze (`input_number.urlaub_standby_untergrenze_raum`) 60 min | `automation.eos_warmepumpe_notabschaltung` | – |
 
 **Betriebsmodus Haus „Standby“** (ab 24.10.2026): `input_select.betriebsmodus_haus` hat zusätzlich `Standby`.
 `automation.heizung_betriebsmodus_ruckmelden` setzt es, wenn die WP-Systembetriebsart auf `sys_operationmode_standby` geht
