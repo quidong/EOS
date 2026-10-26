@@ -44,6 +44,7 @@ def solution(
     prices: list[float] | None = None,
     dhw: list[int] | None = None,
     generated: datetime = START,
+    away: list[int] | None = None,
 ) -> dict[str, Any]:
     n = len(modes)
     rooms = rooms or [21.0] * n
@@ -60,6 +61,8 @@ def solution(
             "load_energy_wh": 800.0,
             "grid_feedin_energy_wh": max(0.0, pv[i] - 800.0),
         }
+        if away is not None:
+            data[t]["wbb12_away"] = float(away[i])
         pred[t] = {"elec_price_amt_kwh": prices[i], "pvforecast_ac_energy_wh": pv[i]}
     return {
         "generated_at": generated.isoformat(),
@@ -183,3 +186,113 @@ def test_unreachable_eos_fails(capsys: pytest.CaptureFixture[str]):
     code = script.main(["--url", "http://127.0.0.1:9"])
     assert code == 2
     assert "Kein Plan abrufbar" in capsys.readouterr().out
+
+
+# --- Holiday mode -----------------------------------------------------------
+
+CONFIG_AWAY = {
+    "devices": {
+        "heat_pumps": {
+            "wbb12": {
+                **CONFIG["devices"]["heat_pumps"]["wbb12"],
+                "away": {"room_c": 20.0, "dhw_off": True, "standby_min_c": None},
+            }
+        }
+    }
+}
+
+
+def test_holiday_plan_of_26_october_is_plausible():
+    """Live plan 26 Oct 21:30: away 18 degC / floor 16 degC, rooms 17.6-18.7 degC."""
+    modes = [1] * 6 + [0] * 6 + [1] * 3 + [2] + [1] * 8
+    rooms = [18.7] * 6 + [18.2, 18.0, 17.8, 17.7, 17.6, 17.6] + [18.0] * 12
+    report = script.check(
+        solution(modes, rooms=rooms, away=[1] * 24),
+        CONFIG_AWAY,
+        "wbb12",
+        NOW,
+        away_room_c=18.0,
+        away_min_c=16.0,
+    )
+    assert report.exit_code == 0, report.lines()
+    assert any("Urlaub in 24 von 24 Stunden, Untergrenze 16.0" in m for m in report.info)
+
+
+def test_same_plan_without_holiday_is_implausible():
+    rooms = [18.7] * 6 + [17.6] * 18
+    assert run(solution([1] * 24, rooms=rooms)).exit_code == 2
+
+
+def test_holiday_plan_below_the_floor_fails():
+    rooms = [17.0] * 12 + [14.8] * 12
+    report = script.check(
+        solution([0] * 24, rooms=rooms, away=[1] * 24),
+        CONFIG_AWAY,
+        "wbb12",
+        NOW,
+        away_room_c=18.0,
+        away_min_c=16.0,
+    )
+    assert report.exit_code == 2
+    assert "14.8 °C < 15.0 °C (Urlaub)" in report.failures[0]
+
+
+def test_slots_after_the_return_use_the_normal_band():
+    """Away until 12:00, then the normal comfort band applies again."""
+    rooms = [17.0] * 2 + [17.5] * 22
+    away = [1] * 2 + [0] * 22
+    report = script.check(
+        solution([1] * 24, rooms=rooms, away=away), CONFIG_AWAY, "wbb12", NOW, away_min_c=16.0
+    )
+    assert report.exit_code == 2
+    assert "(Urlaub)" not in report.failures[0]
+
+
+def test_holiday_floor_falls_back_to_the_configuration():
+    assert script.away_floor(CONFIG_AWAY, "wbb12") == 20.0
+    assert script.away_floor(CONFIG_AWAY, "wbb12", away_room_c=18.0) == 18.0
+    assert script.away_floor(CONFIG_AWAY, "wbb12", 18.0, 16.0) == 16.0
+    assert script.away_floor(CONFIG, "wbb12") == 20.0
+
+
+def test_long_holiday_reduction_does_not_warn():
+    report = script.check(
+        solution([0] * 24, rooms=[18.0] * 24, away=[1] * 24),
+        CONFIG_AWAY,
+        "wbb12",
+        NOW,
+        away_min_c=16.0,
+    )
+    assert report.exit_code == 0, report.lines()
+
+
+def test_latest_measurement_value(monkeypatch: pytest.MonkeyPatch):
+    calls = []
+
+    def fake_get(base: str, path: str) -> Any:
+        calls.append(path)
+        return {"data": {"2026-10-25T10:00:00+01:00": 19.0, "2026-10-26T10:00:00+01:00": 18.0}}
+
+    monkeypatch.setattr(script, "_get", fake_get)
+    assert script._latest("http://eos", "wbb12-away-room-temperature") == 18.0
+    assert "key=wbb12-away-room-temperature" in calls[0]
+
+    monkeypatch.setattr(script, "_get", lambda base, path: {"data": {}})
+    assert script._latest("http://eos", "x") is None
+
+    def broken(base: str, path: str) -> Any:
+        raise OSError("down")
+
+    monkeypatch.setattr(script, "_get", broken)
+    assert script._latest("http://eos", "x") is None
+
+
+def test_cli_holiday_overrides(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    sol = tmp_path / "solution.json"
+    cfg = tmp_path / "config.json"
+    sol.write_text(json.dumps(solution([0] * 24, rooms=[17.0] * 24, away=[1] * 24)))
+    cfg.write_text(json.dumps(CONFIG_AWAY))
+    base = ["--solution", str(sol), "--config", str(cfg), "--now", NOW.isoformat()]
+    assert script.main(base) == 2  # fallback room_c 20 -> lower bound 19
+    assert script.main(base + ["--away-room-c", "18", "--away-min-c", "16"]) == 0
+    assert "Untergrenze 16.0" in capsys.readouterr().out

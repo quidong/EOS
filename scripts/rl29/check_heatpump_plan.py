@@ -9,7 +9,10 @@ Rules (thresholds from the heat pump configuration, overridable):
 
 - FAIL  plan older than ``--max-age-min`` (default 45 min)
 - FAIL  planned room temperature above comfort max + forced overshoot + 0.5 K
-- FAIL  planned room temperature below comfort minimum - 1 K
+- FAIL  planned room temperature below comfort minimum - 1 K; in holiday slots
+  (``<device>_away`` = 1) the lower bound is min(holiday floor, holiday room
+  temperature) - 1 K instead (measurements ``<device>-away-min-temperature`` /
+  ``<device>-away-room-temperature``, else ``away.standby_min_c`` / ``away.room_c``)
 - FAIL  strong heating (PREHEAT/FORCED) for more than ``--max-active-h``
   consecutive hours (default 6)
 - WARN  active heating incl. RAISED for more than ``--max-raised-h`` consecutive
@@ -17,7 +20,8 @@ Rules (thresholds from the heat pump configuration, overridable):
 - WARN  active heating in an hour without PV surplus and with a price above
   the 75th percentile of the horizon
 - WARN  REDUCED for more than ``--max-reduced-h`` consecutive hours (default 6,
-  matching the HA limit input_number.eos_wp_max_absenkdauer)
+  matching the HA limit input_number.eos_wp_max_absenkdauer); holiday slots do
+  not count (HA does not limit the reduction while away)
 - WARN  hot water HEAT_PUMP in more than 4 hours of the horizon
 
 Input: ``--url http://eos.local:8503`` (reads the solution and the
@@ -34,9 +38,10 @@ import argparse
 import json
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 ACTIVE = {2, 3, 4}
@@ -70,6 +75,24 @@ def _get(base: str, path: str) -> Any:
         return json.loads(resp.read().decode("utf-8"))
 
 
+def _latest(base: str, key: str, days: int = 30) -> Optional[float]:
+    """Latest value of an EOS measurement within ``days`` (None if unavailable)."""
+    start = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    query = urllib.parse.urlencode({"key": key, "start_datetime": start})
+    try:
+        series = _get(base, f"/v1/measurement/series?{query}")
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+    data = series.get("data") if isinstance(series, dict) else None
+    if not data:
+        return None
+    values = [v for _, v in sorted(data.items()) if v is not None]
+    try:
+        return float(values[-1]) if values else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _runs(flags: list[bool]) -> int:
     best = current = 0
     for flag in flags:
@@ -97,6 +120,24 @@ def comfort_limits(config: dict[str, Any], device: str) -> tuple[float, float]:
     return (min(minima) if minima else 19.5), max_c + overshoot
 
 
+def away_floor(
+    config: dict[str, Any],
+    device: str,
+    away_room_c: Optional[float] = None,
+    away_min_c: Optional[float] = None,
+) -> float:
+    """Lowest comfort temperature EOS may plan in a holiday slot.
+
+    Mirrors the optimizer: min(floor, holiday room temperature); the floor is
+    optional (``away.standby_min_c`` or the measurement).
+    """
+    away = config.get("devices", {}).get("heat_pumps", {}).get(device, {}).get("away") or {}
+    room = away_room_c if away_room_c is not None else away.get("room_c")
+    room = float(room) if room is not None else 20.0
+    floor = away_min_c if away_min_c is not None else away.get("standby_min_c")
+    return min(float(floor), room) if floor is not None else room
+
+
 def check(
     solution: dict[str, Any],
     config: dict[str, Any],
@@ -106,6 +147,8 @@ def check(
     max_active_h: int = 6,
     max_raised_h: int = 8,
     max_reduced_h: int = 6,
+    away_room_c: Optional[float] = None,
+    away_min_c: Optional[float] = None,
 ) -> Report:
     report = Report()
     now = now or datetime.now(timezone.utc)
@@ -140,6 +183,7 @@ def check(
     prices = [float(prediction.get(t, {}).get("elec_price_amt_kwh", 0.0)) for t in upcoming]
     pv = [float(prediction.get(t, {}).get("pvforecast_ac_energy_wh", 0.0)) for t in upcoming]
     load = [float(rows[t].get("load_energy_wh", 0.0)) for t in upcoming]
+    away = [float(rows[t].get(f"{device}_away", 0.0) or 0.0) >= 0.5 for t in upcoming]
     feedin = [float(rows[t].get("grid_feedin_energy_wh", 0.0)) for t in upcoming]
 
     low, high = comfort_limits(config, device)
@@ -147,14 +191,24 @@ def check(
         "Modi: "
         + " ".join(f"{datetime.fromisoformat(t).hour:02d}:{m}" for t, m in zip(upcoming, modes))
     )
+    low_away = away_floor(config, device, away_room_c, away_min_c)
     report.info.append(
         f"Raum geplant {min(rooms):.1f}–{max(rooms):.1f} °C (Band {low:.1f}–{high:.1f})"
     )
+    if any(away):
+        report.info.append(
+            f"Urlaub in {sum(away)} von {len(away)} Stunden, Untergrenze {low_away:.1f} °C"
+        )
 
     if max(rooms) > high + 0.5:
         report.failures.append(f"Geplante Raumtemperatur {max(rooms):.1f} °C > {high + 0.5:.1f} °C")
-    if min(rooms) < low - 1.0:
-        report.failures.append(f"Geplante Raumtemperatur {min(rooms):.1f} °C < {low - 1.0:.1f} °C")
+    lows = [(low_away if a else low) - 1.0 for a in away]
+    cold = [(r, lim, a) for r, lim, a in zip(rooms, lows, away) if r < lim]
+    if cold:
+        r, lim, a = min(cold, key=lambda x: x[0] - x[1])
+        report.failures.append(
+            f"Geplante Raumtemperatur {r:.1f} °C < {lim:.1f} °C" + (" (Urlaub)" if a else "")
+        )
 
     strong_run = _runs([m in STRONG for m in modes])
     if strong_run > max_active_h:
@@ -174,7 +228,7 @@ def check(
                 f"bei {p * 100:.1f} ct/kWh"
             )
 
-    reduced_run = _runs([m == 0 for m in modes])
+    reduced_run = _runs([m == 0 and not a for m, a in zip(modes, away)])
     if reduced_run > max_reduced_h:
         report.warnings.append(
             f"{reduced_run} h am Stück Reduziert (> {max_reduced_h} h, HA begrenzt die Absenkung)"
@@ -202,6 +256,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument(
         "--max-reduced-h", type=int, default=6, help="Warn above this many reduced hours in a row"
     )
+    parser.add_argument("--away-room-c", type=float, help="Holiday room temperature (override)")
+    parser.add_argument("--away-min-c", type=float, help="Holiday floor temperature (override)")
     parser.add_argument("--now", help="ISO time instead of the current time (tests)")
     args = parser.parse_args(argv)
 
@@ -209,6 +265,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         try:
             solution = _get(args.url, "/v1/energy-management/optimization/solution")
             config = _get(args.url, "/v1/config")
+            if args.away_room_c is None:
+                args.away_room_c = _latest(args.url, f"{args.device}-away-room-temperature")
+            if args.away_min_c is None:
+                args.away_min_c = _latest(args.url, f"{args.device}-away-min-temperature")
         except (urllib.error.URLError, OSError, ValueError) as exc:
             report = Report(failures=[f"Kein Plan abrufbar: {exc}"])
             print("\n".join(report.lines()))
@@ -231,6 +291,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         max_active_h=args.max_active_h,
         max_raised_h=args.max_raised_h,
         max_reduced_h=args.max_reduced_h,
+        away_room_c=args.away_room_c,
+        away_min_c=args.away_min_c,
     )
     print("\n".join(report.lines()))
     return report.exit_code
