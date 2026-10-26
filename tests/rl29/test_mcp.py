@@ -225,3 +225,11 @@ def test_http_endpoint_requires_token_and_lists_tools(allow_write):
             _rpc(client, "tools/call", {"name": "eos_config_get", "arguments": {"path": "adapter"}})
         )
         assert "real-ha-token" not in json.dumps(call)
+
+
+def test_rounding_keeps_small_values():
+    from akkudoktoreos.rl29mcp.server import _round
+
+    assert _round(0.000287345) == 0.000287345
+    assert _round(123.4567891) == 123.457
+    assert _round(5) == 5

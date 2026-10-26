@@ -244,8 +244,9 @@ class EosTools:
 
 
 def _round(value: Any) -> Any:
+    """Six significant digits: compact, and prices per Wh (0.000287) keep their value."""
     if isinstance(value, float):
-        return round(value, 4)
+        return float(f"{value:.6g}")
     return value
 
 
