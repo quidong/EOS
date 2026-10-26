@@ -66,6 +66,15 @@ No port is published: only EOS reaches it.
 
 ## EOS configuration
 
+Set the fields one by one (`PUT /v1/config/database/history/enabled`, `.../actuals`,
+`.../accuracy`). A `PUT /v1/config/database/history` with the whole object replaces the
+DSN from the environment with `null` (runtime settings beat environment variables) and
+the history stays off until the container is restarted.
+
+Live setup (26.10.2026): the house meter key in EOS is already the base load
+(`sensor.eos_grundlast_gesamt` = house − heat pump − washer − heating rod), so
+`base_load_wh` is read directly and `load` is compared against it.
+
 ```json
 {
   "database": {
