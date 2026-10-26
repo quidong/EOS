@@ -125,3 +125,16 @@ Test ohne Client:
 curl -s http://eos.local:8505/health                       # {"status":"ok"}
 curl -s -o /dev/null -w '%{http_code}\n' -X POST http://eos.local:8505/mcp   # 401
 ```
+
+### Claude Desktop als Erweiterung (ohne Dateien zu bearbeiten)
+
+`scripts/rl29/mcpb/` enthält eine Claude-Desktop-Erweiterung (MCPB), die `mcp-remote` mitbringt
+und Adresse und Token beim Installieren abfragt (Token wird als vertraulich gespeichert):
+
+```bash
+cd scripts/rl29/mcpb/server && npm ci --omit=dev && cd ..
+npx -y @anthropic-ai/mcpb@2.1.2 pack . eos-rl29.mcpb
+```
+
+Installieren: Claude Desktop → Einstellungen → Erweiterungen → `eos-rl29.mcpb` hineinziehen (oder
+doppelklicken), Token eintragen, aktivieren.

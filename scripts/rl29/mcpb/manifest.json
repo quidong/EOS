@@ -1,0 +1,60 @@
+{
+  "manifest_version": "0.2",
+  "name": "eos-rl29",
+  "display_name": "EOS Energiemanagement (RL29)",
+  "version": "1.0.0",
+  "description": "Zugriff auf das EOS-Energiemanagement im Heimnetz: Plan, Prognosen, Kennzahlen, Modellberichte und freigegebene Einstellungen.",
+  "long_description": "Verbindet Claude mit dem EOS-MCP-Server (Container eos-mcp, http://eos.local:8505/mcp). Der Zugriff braucht den Token aus EOS_MCP_TOKEN; er wird beim Installieren abgefragt und sicher gespeichert. Funktioniert nur im Heimnetz bzw. per VPN.",
+  "author": {
+    "name": "Bewohner A"
+  },
+  "server": {
+    "type": "node",
+    "entry_point": "server/node_modules/mcp-remote/dist/proxy.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/server/node_modules/mcp-remote/dist/proxy.js",
+        "${user_config.url}",
+        "--allow-http",
+        "--transport",
+        "http-only",
+        "--header",
+        "Authorization: Bearer ${user_config.token}"
+      ]
+    }
+  },
+  "tools": [
+    {"name": "eos_status", "description": "Gesundheit, Algorithmus, letzter Plan"},
+    {"name": "eos_plan", "description": "Plan je Slot"},
+    {"name": "eos_forecast", "description": "Prognosereihen (Preis, PV, Last, Wetter)"},
+    {"name": "eos_kpis", "description": "Prognosegüte und realisierte Kosten"},
+    {"name": "eos_hours", "description": "Ist vs. Prognose je Stunde"},
+    {"name": "eos_reports", "description": "Berichte der Lernmodelle"},
+    {"name": "eos_config_get", "description": "Konfiguration lesen (Geheimnisse maskiert)"},
+    {"name": "eos_config_set", "description": "Freigegebenen Wert ändern"},
+    {"name": "eos_config_undo", "description": "Letzte Änderung zurücknehmen"},
+    {"name": "eos_config_save", "description": "Konfiguration dauerhaft speichern"}
+  ],
+  "user_config": {
+    "url": {
+      "type": "string",
+      "title": "EOS-MCP-Adresse",
+      "description": "URL des eos-mcp-Containers",
+      "default": "http://eos.local:8505/mcp",
+      "required": true
+    },
+    "token": {
+      "type": "string",
+      "title": "Token (EOS_MCP_TOKEN)",
+      "description": "Der Wert von EOS_MCP_TOKEN aus dem Portainer-Stack",
+      "sensitive": true,
+      "required": true
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {"node": ">=20.0.0"}
+  },
+  "license": "Apache-2.0"
+}
