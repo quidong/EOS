@@ -23,7 +23,9 @@ from akkudoktoreos.prediction.loadakkudoktor import (
 )
 from akkudoktoreos.prediction.loadimport import LoadImport
 from akkudoktoreos.prediction.loadmeasured import LoadMeasured
+from akkudoktoreos.prediction.loadml import LoadML
 from akkudoktoreos.prediction.loadvrm import LoadVrm
+from akkudoktoreos.prediction.pvforecastensemble import PVForecastEnsemble
 from akkudoktoreos.prediction.prediction import (
     Prediction,
     PredictionCommonSettings,
@@ -84,6 +86,8 @@ def forecast_providers():
         PVForecastSolcast(),
         PVForecastVrm(),
         LoadMeasured(),  # RL29 fork
+        LoadML(),  # RL29 fork
+        PVForecastEnsemble(),  # RL29 fork
     ]
 
 
@@ -148,6 +152,8 @@ def test_provider_sequence(prediction):
     assert isinstance(prediction.providers[29], PVForecastSolcast)
     assert isinstance(prediction.providers[30], PVForecastVrm)
     assert isinstance(prediction.providers[31], LoadMeasured)  # RL29 fork
+    assert isinstance(prediction.providers[32], LoadML)  # RL29 fork
+    assert isinstance(prediction.providers[33], PVForecastEnsemble)  # RL29 fork
 
 
 def test_provider_by_id(prediction, forecast_providers):

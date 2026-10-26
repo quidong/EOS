@@ -34,6 +34,7 @@ from akkudoktoreos.core.databaseabc import (
     DATABASE_METADATA_KEY,
     DatabaseBackendABC,
 )
+from akkudoktoreos.core.history import HistorySettings  # RL29 fork
 
 # Valid database providers
 database_providers: List[str] = ["LMDB", "SQLite", "NoDB"]
@@ -126,6 +127,14 @@ class DatabaseCommonSettings(SettingsBaseModel):
         json_schema_extra={
             "description": "Number of records to process in batch operations.",
             "examples": [100],
+        },
+    )
+
+    # RL29 fork: long-term history of forecasts, plans and actuals in PostgreSQL.
+    history: HistorySettings = Field(
+        default_factory=HistorySettings,
+        json_schema_extra={
+            "description": "Long-term history in PostgreSQL / TimescaleDB (RL29 fork).",
         },
     )
 

@@ -49,6 +49,47 @@ class RuntimeForecasts(GeneticParametersBaseModel):
     ghi_forecast: Optional[list[Optional[float]]] = None
 
 
+PLANNED_SOC_MAX_AGE_SECONDS = 3 * 3600
+"""A plan older than this is not used as a SoC substitute (RL29 fork)."""
+
+
+def planned_soc_percentage(ems: Any, device_id: str, moment: Any) -> Optional[int]:
+    """SoC [%] the latest plan expected for ``device_id`` at ``moment`` (RL29 fork).
+
+    Used when the measured SoC is missing or stale. Only a plan generated within the
+    last ``PLANNED_SOC_MAX_AGE_SECONDS`` whose slots cover ``moment`` counts.
+    """
+    try:
+        solution = ems.optimization_solution()
+        if solution is None:
+            return None
+        moment_ts = moment.timestamp()
+        age = moment_ts - solution.generated_at.timestamp()
+        # Only a plan made before this moment and not too long ago.
+        if age > PLANNED_SOC_MAX_AGE_SECONDS or age < -60:
+            return None
+        frame = solution.solution.to_dataframe()
+        column = f"{device_id}_soc_factor"
+        if column not in frame.columns or len(frame) == 0:
+            return None
+        stamps = [stamp.timestamp() for stamp in frame.index]
+        position = None
+        for i, stamp in enumerate(stamps):
+            if stamp <= moment_ts:
+                position = i
+        if position is None:
+            return None
+        if position == len(stamps) - 1 and len(stamps) > 1:
+            if moment_ts - stamps[-1] > stamps[-1] - stamps[-2]:
+                return None
+        value = float(frame[column].iloc[position])
+        if not math.isfinite(value) or not 0 <= value <= 1:
+            return None
+        return int(round(value * 100))
+    except Exception:
+        return None
+
+
 class ConfigOptimizationRequest(
     ConfigMixin, MeasurementMixin, PredictionMixin, GeneticParametersBaseModel
 ):
@@ -129,6 +170,18 @@ class ConfigOptimizationRequest(
                     raise ValueError("Invalid or stale SoC factor")
                 return int(value * 100)
             except (ValueError, KeyError) as exc:
+                # RL29 fork: rolling horizon - continue from the last plan's SoC for
+                # this moment instead of assuming an empty battery.
+                planned = planned_soc_percentage(ems, device.device_id, observation_time)
+                if planned is not None:
+                    logger.warning(
+                        "No usable fresh SoC for {}; continuing from the last plan's "
+                        "{}% for this optimization (not a measurement): {}",
+                        device.device_id,
+                        planned,
+                        exc,
+                    )
+                    return planned
                 logger.warning(
                     "No usable fresh SoC for {}; assuming 0% initial SoC for this "
                     "optimization (not a measurement): {}",

@@ -3973,6 +3973,15 @@ class GeneticOptimization(OptimizationBase):
 
         return (gesamtbilanz,)
 
+    def _extra_seeds(
+        self, parameters: GeneticOptimizationParameters, start_slot: int
+    ) -> list[list[int]]:
+        """Candidates from another method for the initial population (RL29 fork).
+
+        Called once per run after all layouts are built; the GENETIC algorithm has none.
+        """
+        return []
+
     def optimize(
         self,
         start_solution: Optional[list[float]] = None,
@@ -4059,10 +4068,31 @@ class GeneticOptimization(OptimizationBase):
         seed_budget = max(individuals - minimum_random, 0)
         seeded: list[list[Any]] = []
 
+        # RL29 fork: priority seeds (MILP) first: each exact once plus mutated
+        # neighbours of the best one; they count against the seed budget.
+        priority_seeds = [
+            seed
+            for seed in (getattr(self, "_priority_seeds", None) or [])
+            if len(seed)
+            == self.control_end_slot * (2 if self.optimize_ev else 1) + self._tail_gene_count()
+        ]
+        if priority_seeds and seed_budget > 0:
+            seeded.extend(priority_seeds[:seed_budget])
+            neighbours = self._mutated_warm_start_neighbors(
+                priority_seeds[0], min(warm_mutation_target, max(seed_budget - len(seeded), 0))
+            )
+            seeded.extend(neighbours)
+            logger.info(
+                "Initial population: {} priority seeds, {} of their mutations.",
+                min(len(priority_seeds), seed_budget),
+                len(neighbours),
+            )
+        seed_budget = max(seed_budget, len(seeded))
+
         exact_warm_count = 0
         warm_neighbors: list[list[int]] = []
-        if valid_start_solution is not None and seed_budget > 0:
-            exact_warm_count = min(exact_warm_target, seed_budget)
+        if valid_start_solution is not None and seed_budget > len(seeded):
+            exact_warm_count = min(exact_warm_target, seed_budget - len(seeded))
             seeded.extend([valid_start_solution] * exact_warm_count)
             remaining_seed_budget = seed_budget - len(seeded)
             warm_neighbors = self._mutated_warm_start_neighbors(
@@ -4473,6 +4503,10 @@ class GeneticOptimization(OptimizationBase):
             "evaluate",
             lambda ind: self.evaluate(ind, parameters, start_slot, worst_case),
         )
+
+        # RL29 fork: candidates computed by another method (MILP) enter the
+        # initial population ahead of the warm start; empty for plain GENETIC.
+        self._priority_seeds = self._extra_seeds(parameters, start_slot)
 
         start_time = time.time()
         start_solution_datetime = self._resolve_start_solution_datetime(parameters)

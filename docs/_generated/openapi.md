@@ -1,6 +1,6 @@
 # Akkudoktor-EOS
 
-**Version**: `v0.3.0.dev2610230729042783`
+**Version**: `v0.3.0.dev2610261632814698`
 
 <!-- pyml disable line-length -->
 **Description**: This project provides a comprehensive solution for simulating and optimizing an energy system based on renewable energy sources. With a focus on photovoltaic (PV) systems, battery storage (batteries), load management (consumer requirements), heat pumps, electric vehicles, and consideration of electricity price data, this system enables forecasting and optimization of energy flow and costs over a specified period.
@@ -719,6 +719,37 @@ Returns:
   "description": "The value to assign to the specified configuration path (can be None).",
   "title": "Value"
 }
+
+**Responses**:
+
+- **200**: Successful Response
+
+- **422**: Validation Error
+
+---
+
+## GET /v1/energy-management/history
+
+<!-- pyml disable line-length -->
+**Links**: [local](http://localhost:8503/docs#/default/fastapi_energy_management_history_get_v1_energy-management_history_get), [eos](https://petstore3.swagger.io/?url=https://raw.githubusercontent.com/Akkudoktor-EOS/EOS/refs/heads/main/openapi.json#/default/fastapi_energy_management_history_get_v1_energy-management_history_get)
+<!-- pyml enable line-length -->
+
+Fastapi Energy Management History Get
+
+<!-- pyml disable line-length -->
+```python
+"""
+Long-term history status, latest forecast accuracy and recent runs (RL29 fork).
+
+``runs`` lists the runs of the last ``days`` days with planned net costs and the
+self-consumption baseline for the same forecasts.
+"""
+```
+<!-- pyml enable line-length -->
+
+**Parameters**:
+
+- `days` (query, optional): No description provided.
 
 **Responses**:
 

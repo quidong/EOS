@@ -7,11 +7,12 @@
 
 | Name | Environment Variable | Type | Read-Only | Default | Description |
 | ---- | -------------------- | ---- | --------- | ------- | ----------- |
-| algorithm | `EOS_OPTIMIZATION__ALGORITHM` | `<enum 'OptimizationAlgorithm'>` | `rw` | `required` | Optimization algorithm [GENETIC | GENETIC0]. Defaults to GENETIC. |
+| algorithm | `EOS_OPTIMIZATION__ALGORITHM` | `<enum 'OptimizationAlgorithm'>` | `rw` | `required` | Optimization algorithm [GENETIC | GENETIC0 | MILP]. Defaults to GENETIC. |
 | algorithms | | `list[str]` | `ro` | `N/A` | Available optimization algorithms. |
 | genetic | `EOS_OPTIMIZATION__GENETIC` | `GeneticCommonSettings` | `rw` | `required` | GENETIC optimization algorithm configuration. |
 | genetic0 | `EOS_OPTIMIZATION__GENETIC0` | `Genetic0CommonSettings` | `rw` | `required` | GENETIC0 optimization algorithm configuration. |
 | keys | | `list[str]` | `ro` | `N/A` | The keys of the solution. |
+| milp | `EOS_OPTIMIZATION__MILP` | `MilpCommonSettings` | `rw` | `required` | MILP optimization configuration (RL29 fork). MILP uses the GENETIC settings (slots, horizons, terminal value) and adds these. |
 | self_consumption_interpolator | `EOS_OPTIMIZATION__SELF_CONSUMPTION_INTERPOLATOR` | `<enum 'GridInterpolatorBackend'>` | `rw` | `scipy` | How the inverter's self-consumption probability table is evaluated [scipy | numpy]. 'scipy' (default) uses scipy.interpolate. 'numpy' gives the same values without importing SciPy, which saves about 35 MB RSS after the first optimization run (useful on devices with little RAM); a run takes about 2.5 % longer. |
 :::
 <!-- pyml enable line-length -->
@@ -51,6 +52,14 @@
                "penalties": {
                    "ev_soc_miss": 10
                }
+           },
+           "milp": {
+               "time_limit_s": 10.0,
+               "mip_rel_gap": 0.0001,
+               "hp_search_seconds": 20.0,
+               "seeds": 3,
+               "polish_generations": 30,
+               "polish_individuals": 60
            },
            "self_consumption_interpolator": "scipy"
        }
@@ -97,12 +106,60 @@
                "interval_sec": 3600,
                "horizon": 24
            },
+           "milp": {
+               "time_limit_s": 10.0,
+               "mip_rel_gap": 0.0001,
+               "hp_search_seconds": 20.0,
+               "seeds": 3,
+               "polish_generations": 30,
+               "polish_individuals": 60
+           },
            "self_consumption_interpolator": "scipy",
            "algorithms": [
                "GENETIC",
-               "GENETIC0"
+               "GENETIC0",
+               "MILP"
            ],
            "keys": []
+       }
+   }
+```
+<!-- pyml enable line-length -->
+
+### MILP optimization settings (RL29 fork)
+
+<!-- pyml disable line-length -->
+:::{table} optimization::milp
+:widths: 10 10 5 5 30
+:align: left
+
+| Name | Type | Read-Only | Default | Description |
+| ---- | ---- | --------- | ------- | ----------- |
+| hp_search_seconds | `float` | `rw` | `20.0` | Time budget of the coordinate search over the heat pump modes [s]. |
+| mip_rel_gap | `float` | `rw` | `0.0001` | Relative optimality gap of the MILP. |
+| polish_generations | `int` | `rw` | `30` | GENETIC generations on the exact simulation after the MILP (0 = MILP plan only). |
+| polish_individuals | `int` | `rw` | `60` | Population of the polish step. |
+| seeds | `int` | `rw` | `3` | Best candidates handed to the polish step. |
+| time_limit_s | `float` | `rw` | `10.0` | Time limit of one dispatch MILP [s]. |
+:::
+<!-- pyml enable line-length -->
+
+<!-- pyml disable no-emphasis-as-heading -->
+**Example Input/Output**
+<!-- pyml enable no-emphasis-as-heading -->
+
+<!-- pyml disable line-length -->
+```json
+   {
+       "optimization": {
+           "milp": {
+               "time_limit_s": 10.0,
+               "mip_rel_gap": 0.0001,
+               "hp_search_seconds": 20.0,
+               "seeds": 3,
+               "polish_generations": 30,
+               "polish_individuals": 60
+           }
        }
    }
 ```

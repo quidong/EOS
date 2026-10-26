@@ -43,7 +43,10 @@ def test_energy_parameter_aliases_preserve_wh_prices(model, tariff):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("algorithm", list(OptimizationAlgorithm))
+# RL29 fork: MILP returns the GENETIC solution (tests/rl29/test_milp_optimization.py).
+@pytest.mark.parametrize(
+    "algorithm", [OptimizationAlgorithm.GENETIC, OptimizationAlgorithm.GENETIC0]
+)
 async def test_algorithm_result_endpoint_keeps_solution_types_separate(monkeypatch, algorithm):
     from akkudoktoreos.server import eos
 

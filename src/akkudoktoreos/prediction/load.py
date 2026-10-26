@@ -10,6 +10,7 @@ from akkudoktoreos.prediction.loadabc import LoadProvider
 from akkudoktoreos.prediction.loadakkudoktor import LoadAkkudoktorCommonSettings
 from akkudoktoreos.prediction.loadimport import LoadImportCommonSettings
 from akkudoktoreos.prediction.loadmeasured import LoadMeasuredCommonSettings
+from akkudoktoreos.prediction.loadml import LoadMLCommonSettings
 from akkudoktoreos.prediction.loadvrm import LoadVrmCommonSettings
 
 
@@ -20,7 +21,7 @@ def load_providers() -> list[str]:
     except Exception:
         # Prediction may not be initialized
         # Return at least provider used in example
-        return ["LoadAkkudoktor", "LoadVrm", "LoadImport", "LoadMeasured"]
+        return ["LoadAkkudoktor", "LoadVrm", "LoadImport", "LoadMeasured", "LoadML"]
 
     return [
         provider.provider_id()
@@ -49,6 +50,13 @@ class LoadCommonSettings(SettingsBaseModel):
         default_factory=LoadMeasuredCommonSettings,
         json_schema_extra={
             "description": "LoadMeasured provider settings (RL29 fork: own measured history)."
+        },
+    )
+
+    loadml: LoadMLCommonSettings = Field(
+        default_factory=LoadMLCommonSettings,
+        json_schema_extra={
+            "description": "LoadML provider settings (RL29 fork: gradient boosting base load)."
         },
     )
 

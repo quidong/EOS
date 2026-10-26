@@ -10,6 +10,7 @@
 | loadakkudoktor | `EOS_LOAD__LOADAKKUDOKTOR` | `LoadAkkudoktorCommonSettings` | `rw` | `required` | LoadAkkudoktor provider settings. |
 | loadimport | `EOS_LOAD__LOADIMPORT` | `LoadImportCommonSettings` | `rw` | `required` | LoadImport provider settings. |
 | loadmeasured | `EOS_LOAD__LOADMEASURED` | `LoadMeasuredCommonSettings` | `rw` | `required` | LoadMeasured provider settings (RL29 fork: own measured history). |
+| loadml | `EOS_LOAD__LOADML` | `LoadMLCommonSettings` | `rw` | `required` | LoadML provider settings (RL29 fork: gradient boosting base load). |
 | provider | `EOS_LOAD__PROVIDER` | `Optional[str]` | `rw` | `None` | Load provider id of provider to be used. |
 | providers | | `list[str]` | `ro` | `N/A` | Available load provider ids. |
 | vrm | `EOS_LOAD__VRM` | `LoadVrmCommonSettings` | `rw` | `required` | Victron Remote Management (VRM) provider settings. |
@@ -34,6 +35,29 @@
                "min_days_per_type": 3,
                "quantile": 0.5,
                "gap_threshold": 0.3
+           },
+           "loadml": {
+               "history_weeks": 52,
+               "min_days": 21,
+               "holdout_days": 7,
+               "quantiles": [
+                   0.1,
+                   0.5,
+                   0.9
+               ],
+               "plan_quantile": 0.5,
+               "subtract_power_keys": [],
+               "subtract_max_hold_hours": 24.0,
+               "temperature_key": null,
+               "away_key": null,
+               "away_return_key": null,
+               "state": "BW",
+               "refit_hours": 24.0,
+               "gap_threshold": 0.3,
+               "num_leaves": 15,
+               "n_estimators": 300,
+               "learning_rate": 0.05,
+               "min_data_in_leaf": 20
            },
            "loadimport": {
                "import_file_path": null,
@@ -67,6 +91,29 @@
                "quantile": 0.5,
                "gap_threshold": 0.3
            },
+           "loadml": {
+               "history_weeks": 52,
+               "min_days": 21,
+               "holdout_days": 7,
+               "quantiles": [
+                   0.1,
+                   0.5,
+                   0.9
+               ],
+               "plan_quantile": 0.5,
+               "subtract_power_keys": [],
+               "subtract_max_hold_hours": 24.0,
+               "temperature_key": null,
+               "away_key": null,
+               "away_return_key": null,
+               "state": "BW",
+               "refit_hours": 24.0,
+               "gap_threshold": 0.3,
+               "num_leaves": 15,
+               "n_estimators": 300,
+               "learning_rate": 0.05,
+               "min_data_in_leaf": 20
+           },
            "loadimport": {
                "import_file_path": null,
                "import_json": null
@@ -80,7 +127,8 @@
                "LoadAkkudoktorAdjusted",
                "LoadImport",
                "LoadVrm",
-               "LoadMeasured"
+               "LoadMeasured",
+               "LoadML"
            ]
        }
    }
@@ -112,6 +160,74 @@
            "vrm": {
                "token": "your-token",
                "site_id": 12345
+           }
+       }
+   }
+```
+<!-- pyml enable line-length -->
+
+### Settings of the gradient boosting base load provider (RL29 fork)
+
+<!-- pyml disable line-length -->
+:::{table} load::loadml
+:widths: 10 10 5 5 30
+:align: left
+
+| Name | Type | Read-Only | Default | Description |
+| ---- | ---- | --------- | ------- | ----------- |
+| away_key | `Optional[str]` | `rw` | `None` | Measurement 1 = away / holiday mode. |
+| away_return_key | `Optional[str]` | `rw` | `None` | Measurement with the return time (Unix seconds) of the away mode. |
+| gap_threshold | `float` | `rw` | `0.3` | Days below this share of the median daily base load are left out. |
+| history_weeks | `int` | `rw` | `52` | Training window [weeks]. |
+| holdout_days | `int` | `rw` | `7` | The model must beat the LoadMeasured profile on these last days (trained without them) to be used. |
+| learning_rate | `float` | `rw` | `0.05` | LightGBM learning rate. |
+| min_data_in_leaf | `int` | `rw` | `20` | LightGBM min_data_in_leaf. |
+| min_days | `int` | `rw` | `21` | Healthy days needed before the model is used. |
+| n_estimators | `int` | `rw` | `300` | LightGBM trees. |
+| num_leaves | `int` | `rw` | `15` | LightGBM num_leaves. |
+| plan_quantile | `float` | `rw` | `0.5` | Quantile EOS plans with (must be in `quantiles`). Above 0.5 plans with more load than expected, i.e. keeps reserve for uncertain hours. |
+| quantiles | `list[float]` | `rw` | `required` | Quantiles that are modelled. |
+| refit_hours | `float` | `rw` | `24.0` | Models are retrained after this many hours. |
+| state | `str` | `rw` | `BW` | German federal state for public holidays. |
+| subtract_max_hold_hours | `float` | `rw` | `24.0` | A power value is held until the next sample, at most this long; hours without a held value are not used for training. |
+| subtract_power_keys | `list[str]` | `rw` | `required` | Power measurements [W] of consumers EOS plans itself; their energy is removed from the load meter to get the base load. |
+| temperature_key | `Optional[str]` | `rw` | `None` | Measured outdoor temperature for the history (the forecast uses `weather_temp_air`). None: feature from the weather prediction store only. |
+:::
+<!-- pyml enable line-length -->
+
+<!-- pyml disable no-emphasis-as-heading -->
+**Example Input/Output**
+<!-- pyml enable no-emphasis-as-heading -->
+
+<!-- pyml disable line-length -->
+```json
+   {
+       "load": {
+           "loadml": {
+               "history_weeks": 52,
+               "min_days": 21,
+               "holdout_days": 7,
+               "quantiles": [
+                   0.1,
+                   0.5,
+                   0.9
+               ],
+               "plan_quantile": 0.5,
+               "subtract_power_keys": [
+                   "wbb12-electric-power",
+                   "waschmaschine-power"
+               ],
+               "subtract_max_hold_hours": 24.0,
+               "temperature_key": "wbb12-outdoor-temperature",
+               "away_key": "wbb12-away",
+               "away_return_key": "wbb12-return-ts",
+               "state": "BW",
+               "refit_hours": 24.0,
+               "gap_threshold": 0.3,
+               "num_leaves": 15,
+               "n_estimators": 300,
+               "learning_rate": 0.05,
+               "min_data_in_leaf": 20
            }
        }
    }

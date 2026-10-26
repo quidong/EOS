@@ -84,7 +84,7 @@ async def test_implicit_genetic_start_uses_site_timezone(
     observed = ems_module.EnergyManagement._observation_datetime
     assert start is not None and observed is not None
     assert observed.timestamp() == now.timestamp()
-    if algorithm == OptimizationAlgorithm.GENETIC:
+    if algorithm in (OptimizationAlgorithm.GENETIC, OptimizationAlgorithm.MILP):  # RL29 fork
         assert start.minute == 45
         assert start.hour == (22 if explicit_start else 0)
         assert start.day == (16 if explicit_start else 17)
@@ -97,7 +97,10 @@ async def test_implicit_genetic_start_uses_site_timezone(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("algorithm", list(OptimizationAlgorithm))
+# RL29 fork: MILP routing is covered in tests/rl29/test_milp_optimization.py.
+@pytest.mark.parametrize(
+    "algorithm", [OptimizationAlgorithm.GENETIC, OptimizationAlgorithm.GENETIC0]
+)
 @pytest.mark.parametrize("selection", ["configured", "explicit"])
 @pytest.mark.parametrize("supplied", [False, True])
 @pytest.mark.parametrize("timezone, expected_hour", [("UTC", 8), ("Europe/Berlin", 10)])

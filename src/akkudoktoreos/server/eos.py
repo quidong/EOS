@@ -1854,7 +1854,8 @@ async def fastapi_energy_management_optimization_solution_algorithm_get(
             detail=f"Optimization algorithm '{algorithm}' unknown.",
         )
 
-    if algorithm == OptimizationAlgorithm.GENETIC:
+    if algorithm in (OptimizationAlgorithm.GENETIC, OptimizationAlgorithm.MILP):
+        # RL29 fork: MILP produces a GENETIC solution (same format, same report).
         solution = get_ems().genetic_solution()
     elif algorithm == OptimizationAlgorithm.GENETIC0:
         solution = get_ems().genetic0_solution()
@@ -1923,6 +1924,41 @@ def fastapi_energy_management_plan_get() -> EnergyManagementPlan:
         )
 
     return plan
+
+
+@app.get("/v1/energy-management/history", tags=["energy-management"])
+async def fastapi_energy_management_history_get(days: int = 7) -> dict:
+    """Long-term history status, latest forecast accuracy and recent runs (RL29 fork).
+
+    ``runs`` lists the runs of the last ``days`` days with planned net costs and the
+    self-consumption baseline for the same forecasts.
+    """
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+
+    from akkudoktoreos.core.historyrecorder import HistoryRecorder
+
+    recorder = HistoryRecorder.instance()
+    settings = get_config().database.history
+    result: dict = {
+        "enabled": bool(settings.enabled and settings.dsn),
+        "last_error": recorder.last_error,
+        "accuracy": [],
+        "runs": [],
+    }
+    store = recorder.store(settings)
+    if store is None:
+        return result
+    try:
+        now = datetime.now(timezone.utc)
+        result["accuracy"] = await asyncio.to_thread(store.latest_accuracy)
+        result["runs"] = await asyncio.to_thread(
+            store.runs, now - timedelta(days=max(1, min(days, 90))), now
+        )
+        result["timescale"] = store.timescale
+    except Exception as exc:
+        result["last_error"] = str(exc)
+    return result
 
 
 @app.get("/strompreis", tags=["prediction"], deprecated=True)

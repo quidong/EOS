@@ -8,6 +8,7 @@
 | Name | Environment Variable | Type | Read-Only | Default | Description |
 | ---- | -------------------- | ---- | --------- | ------- | ----------- |
 | akkudoktor | `EOS_PVFORECAST__AKKUDOKTOR` | `PVForecastAkkudoktorLocalCommonSettings` | `rw` | `required` | Akkudoktor forecast backend and local calibration settings |
+| ensemble | `EOS_PVFORECAST__ENSEMBLE` | `PVForecastEnsembleCommonSettings` | `rw` | `required` | PV ensemble provider settings (RL29 fork) |
 | forecastsolar | `EOS_PVFORECAST__FORECASTSOLAR` | `PVForecastForecastSolarCommonSettings` | `rw` | `required` | ForecastSolar provider settings |
 | homeassistant | `EOS_PVFORECAST__HOMEASSISTANT` | `PVForecastHomeAssistantCommonSettings` | `rw` | `required` | Home Assistant provider settings |
 | max_planes | `EOS_PVFORECAST__MAX_PLANES` | `Optional[int]` | `rw` | `0` | Maximum number of planes that can be set |
@@ -77,6 +78,17 @@
                "value_unit": "W",
                "base_url": null,
                "token": null
+           },
+           "ensemble": {
+               "members": [
+                   "pvlib"
+               ],
+               "days": 14,
+               "min_days": 4,
+               "scale_quantile": 0.5,
+               "scale_min": 0.6,
+               "scale_max": 1.3,
+               "min_day_fraction": 0.15
            },
            "pvlib": {
                "max_ac_power_w": null
@@ -196,6 +208,17 @@
                "base_url": null,
                "token": null
            },
+           "ensemble": {
+               "members": [
+                   "pvlib"
+               ],
+               "days": 14,
+               "min_days": 4,
+               "scale_quantile": 0.5,
+               "scale_min": 0.6,
+               "scale_max": 1.3,
+               "min_day_fraction": 0.15
+           },
            "pvlib": {
                "max_ac_power_w": null
            },
@@ -266,7 +289,8 @@
                "PVForecastPVLib",
                "PVForecastPVNode",
                "PVForecastSolcast",
-               "PVForecastVrm"
+               "PVForecastVrm",
+               "PVForecastEnsemble"
            ],
            "planes_peakpower": [
                5.0,
@@ -585,6 +609,50 @@
        "pvforecast": {
            "forecastsolar": {
                "api_key": null
+           }
+       }
+   }
+```
+<!-- pyml enable line-length -->
+
+### Settings of the PV ensemble (RL29 fork)
+
+<!-- pyml disable line-length -->
+:::{table} pvforecast::ensemble
+:widths: 10 10 5 5 30
+:align: left
+
+| Name | Type | Read-Only | Default | Description |
+| ---- | ---- | --------- | ------- | ----------- |
+| days | `int` | `rw` | `14` | Days used for weights and calibration. |
+| members | `list[str]` | `rw` | `required` | Members of the ensemble [pvlib | homeassistant]. 'homeassistant' reads the entity configured in pvforecast.homeassistant. |
+| min_day_fraction | `float` | `rw` | `0.15` | Days whose measured energy is below this share of the forecast are not used for the factor (outage, snow) - only for the weights. |
+| min_days | `int` | `rw` | `4` | Days with measurements needed before weights/calibration apply. |
+| scale_max | `float` | `rw` | `1.3` | Upper bound of the factor. |
+| scale_min | `float` | `rw` | `0.6` | Lower bound of the factor. |
+| scale_quantile | `float` | `rw` | `0.5` | Quantile of the daily measured/forecast ratio used as calibration factor; < 0.5 is conservative. |
+:::
+<!-- pyml enable line-length -->
+
+<!-- pyml disable no-emphasis-as-heading -->
+**Example Input/Output**
+<!-- pyml enable no-emphasis-as-heading -->
+
+<!-- pyml disable line-length -->
+```json
+   {
+       "pvforecast": {
+           "ensemble": {
+               "members": [
+                   "pvlib",
+                   "homeassistant"
+               ],
+               "days": 14,
+               "min_days": 4,
+               "scale_quantile": 0.5,
+               "scale_min": 0.6,
+               "scale_max": 1.3,
+               "min_day_fraction": 0.15
            }
        }
    }

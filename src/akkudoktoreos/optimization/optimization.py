@@ -14,6 +14,7 @@ from akkudoktoreos.optimization.genetic.geneticsettings import (
     GeneticCommonSettings,
     normalize_genetic_settings,
 )
+from akkudoktoreos.optimization.milp.milpsettings import MilpCommonSettings
 from akkudoktoreos.utils.datetimeutil import DateTime
 from akkudoktoreos.utils.gridinterpolator import GridInterpolatorBackend
 
@@ -23,6 +24,8 @@ class OptimizationAlgorithm(StrEnum):
 
     GENETIC = "GENETIC"
     GENETIC0 = "GENETIC0"
+    MILP = "MILP"
+    """RL29 fork: MILP dispatch + heat pump search, checked and polished by GENETIC."""
 
 
 def optimization_default_algorithm() -> OptimizationAlgorithm:
@@ -47,7 +50,7 @@ class OptimizationCommonSettings(SettingsBaseModel):
                 f"[{' | '.join(mode.value for mode in OptimizationAlgorithm)}]. "
                 f"Defaults to {optimization_default_algorithm()}."
             ),
-            "examples": ["GENETIC", "GENETIC0"],
+            "examples": ["GENETIC", "GENETIC0", "MILP"],
         },
     )
 
@@ -64,6 +67,17 @@ class OptimizationCommonSettings(SettingsBaseModel):
         json_schema_extra={
             "description": "GENETIC0 optimization algorithm configuration.",
             "examples": [{"individuals": 400, "seed": None, "penalties": {"ev_soc_miss": 10}}],
+        },
+    )
+
+    milp: MilpCommonSettings = Field(
+        default_factory=MilpCommonSettings,
+        json_schema_extra={
+            "description": (
+                "MILP optimization configuration (RL29 fork). MILP uses the GENETIC "
+                "settings (slots, horizons, terminal value) and adds these."
+            ),
+            "examples": [{"hp_search_seconds": 20, "polish_generations": 30}],
         },
     )
 

@@ -11,6 +11,7 @@ from akkudoktoreos.prediction.pvforecastakkudoktorlocal import (
     PVForecastAkkudoktorLocalCommonSettings,
     normalize_akkudoktor_settings,
 )
+from akkudoktoreos.prediction.pvforecastensemble import PVForecastEnsembleCommonSettings
 from akkudoktoreos.prediction.pvforecastforecastsolar import (
     PVForecastForecastSolarCommonSettings,
 )
@@ -33,6 +34,7 @@ def pvforecast_provider_ids() -> list[str]:
         # Return at least provider used in example
         return [
             "PVForecastAkkudoktor",
+            "PVForecastEnsemble",
             "PVForecastForecastSolar",
             "PVForecastHomeAssistant",
             "PVForecastImport",
@@ -226,6 +228,11 @@ class PVForecastCommonSettings(SettingsBaseModel):
     homeassistant: PVForecastHomeAssistantCommonSettings = Field(
         default_factory=PVForecastHomeAssistantCommonSettings,
         json_schema_extra={"description": "Home Assistant provider settings"},
+    )
+
+    ensemble: PVForecastEnsembleCommonSettings = Field(
+        default_factory=PVForecastEnsembleCommonSettings,
+        json_schema_extra={"description": "PV ensemble provider settings (RL29 fork)"},
     )
 
     pvlib: PVForecastPVLibCommonSettings = Field(

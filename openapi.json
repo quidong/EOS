@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610230729042783"
+    "version": "v0.3.0.dev2610261632814698"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -2874,6 +2874,52 @@
         }
       }
     },
+    "/v1/energy-management/history": {
+      "get": {
+        "tags": [
+          "energy-management"
+        ],
+        "summary": "Fastapi Energy Management History Get",
+        "description": "Long-term history status, latest forecast accuracy and recent runs (RL29 fork).\n\n``runs`` lists the runs of the last ``days`` days with planned net costs and the\nself-consumption baseline for the same forecasts.",
+        "operationId": "fastapi_energy_management_history_get_v1_energy_management_history_get",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 7,
+              "title": "Days"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Fastapi Energy Management History Get V1 Energy Management History Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/strompreis": {
       "get": {
         "tags": [
@@ -4448,6 +4494,9 @@
             "examples": [
               100
             ]
+          },
+          "history": {
+            "$ref": "#/components/schemas/HistorySettings"
           }
         },
         "type": "object",
@@ -4559,6 +4608,9 @@
             "examples": [
               100
             ]
+          },
+          "history": {
+            "$ref": "#/components/schemas/HistorySettings"
           },
           "providers": {
             "items": {
@@ -6036,6 +6088,26 @@
               "OPTIMIZATION"
             ]
           },
+          "run_on_slot_start": {
+            "type": "boolean",
+            "title": "Run On Slot Start",
+            "description": "Run the energy management right after every optimization slot starts (plus slot_start_offset_sec) instead of every `interval` seconds since start-up. `interval` then is only the polling period (60 s recommended), so the first slot of every plan is (almost) complete instead of partly elapsed.",
+            "default": false,
+            "examples": [
+              true
+            ]
+          },
+          "slot_start_offset_sec": {
+            "type": "number",
+            "maximum": 600.0,
+            "minimum": 0.0,
+            "title": "Slot Start Offset Sec",
+            "description": "Delay after the slot start before the aligned run [seconds]; gives the measurements of the slot boundary time to arrive.",
+            "default": 20.0,
+            "examples": [
+              20.0
+            ]
+          },
           "notify_url": {
             "anyOf": [
               {
@@ -6081,6 +6153,26 @@
             "description": "Energy management mode [DISABLED | PREDICTION | OPTIMIZATION]. Defaults to DISABLED.",
             "examples": [
               "OPTIMIZATION"
+            ]
+          },
+          "run_on_slot_start": {
+            "type": "boolean",
+            "title": "Run On Slot Start",
+            "description": "Run the energy management right after every optimization slot starts (plus slot_start_offset_sec) instead of every `interval` seconds since start-up. `interval` then is only the polling period (60 s recommended), so the first slot of every plan is (almost) complete instead of partly elapsed.",
+            "default": false,
+            "examples": [
+              true
+            ]
+          },
+          "slot_start_offset_sec": {
+            "type": "number",
+            "maximum": 600.0,
+            "minimum": 0.0,
+            "title": "Slot Start Offset Sec",
+            "description": "Delay after the slot start before the aligned run [seconds]; gives the measurements of the slot boundary time to arrive.",
+            "default": 20.0,
+            "examples": [
+              20.0
             ]
           },
           "notify_url": {
@@ -11990,6 +12082,230 @@
         "title": "HeatPumpZoneSetbackSettings",
         "description": "Setback of one zone of the building (RL29 fork), e.g. the bedrooms upstairs.\n\nEOS models the building as one zone; the measured room temperature is the\nmean of all rooms. While the zone is set back, its rooms only need the setback\ntemperature (``<device_id>-setback-room-temperature``, e.g. the reduced\nsetpoint of the heating circuit, fallback ``room_c``). The comfort minimum and\nthe NORMAL setpoint of the whole house drop by the zone's ``share`` of the\ndifference, so EOS neither plans to heat the zone up against the controller\nnor counts the cooler zone as a comfort violation. The solution column\n``<device_id>_zone_setback`` (1 = set back) tells the controller when to lower\nthe zone's room setpoints."
       },
+      "HistoryAccuracyPair": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Name of the pair in reports.",
+            "examples": [
+              "pv"
+            ]
+          },
+          "predicted": {
+            "type": "string",
+            "title": "Predicted",
+            "description": "Series in eos_forecast (prediction columns) or eos_plan (solution columns).",
+            "examples": [
+              "pvforecast_ac_energy_wh",
+              "loadforecast_energy_wh"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Where the predicted series lives [forecast | plan].",
+            "default": "forecast",
+            "examples": [
+              "forecast",
+              "plan"
+            ]
+          },
+          "actual": {
+            "type": "string",
+            "title": "Actual",
+            "description": "Series in eos_actual (hourly).",
+            "examples": [
+              "pv_wh",
+              "load_wh"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "description": "energy: predicted slot values are summed per hour; level: predicted slot values are averaged per hour.",
+            "default": "energy",
+            "examples": [
+              "energy",
+              "level"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "predicted",
+          "actual"
+        ],
+        "title": "HistoryAccuracyPair",
+        "description": "A forecast or plan series and the actual series it is judged against."
+      },
+      "HistoryActualSource": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Series name in eos_actual.",
+            "examples": [
+              "pv_wh"
+            ]
+          },
+          "keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Keys",
+            "description": "Measurement keys. kind=meter: cumulative energy meters in kWh (summed); kind=mean: values averaged per hour (summed over keys).",
+            "examples": [
+              [
+                "sensor.energie_pv_erzeugung_gesamt"
+              ]
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "description": "meter | mean | household",
+            "default": "meter",
+            "examples": [
+              "meter"
+            ]
+          },
+          "subtract": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Subtract",
+            "description": "Other actual series (by name, derived before this one) subtracted per hour, e.g. heat pump energy from the household meter to get the base load.",
+            "examples": [
+              [
+                "heatpump_wh"
+              ]
+            ]
+          },
+          "scale": {
+            "type": "number",
+            "title": "Scale",
+            "description": "Factor applied to the derived value (meter kWh \u2192 Wh: 1000).",
+            "default": 1000.0,
+            "examples": [
+              1000.0,
+              1.0
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "keys"
+        ],
+        "title": "HistoryActualSource",
+        "description": "How an hourly actual series is derived from EOS measurements."
+      },
+      "HistorySettings": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Write runs, forecasts, plans and actuals.",
+            "default": false,
+            "examples": [
+              true
+            ]
+          },
+          "dsn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dsn",
+            "description": "libpq connection string, e.g. postgresql://eos:secret@eos-history:5432/eos. Prefer the environment variable EOS_DATABASE__HISTORY__DSN for the password.",
+            "examples": [
+              "postgresql://eos@eos-history:5432/eos"
+            ]
+          },
+          "retention_days": {
+            "type": "integer",
+            "minimum": 30.0,
+            "title": "Retention Days",
+            "description": "Rows older than this are dropped.",
+            "default": 1095,
+            "examples": [
+              1095
+            ]
+          },
+          "forecast_hours": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Forecast Hours",
+            "description": "Hours of every forecast and plan that are stored.",
+            "default": 48,
+            "examples": [
+              48
+            ]
+          },
+          "min_store_interval_minutes": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Min Store Interval Minutes",
+            "description": "A run is stored at most this often (EOS may optimize every few minutes; the lead time analysis needs one plan per slot length, not every run).",
+            "default": 14,
+            "examples": [
+              14
+            ]
+          },
+          "actuals": {
+            "items": {
+              "$ref": "#/components/schemas/HistoryActualSource"
+            },
+            "type": "array",
+            "title": "Actuals",
+            "description": "Hourly actual series derived from measurements."
+          },
+          "accuracy": {
+            "items": {
+              "$ref": "#/components/schemas/HistoryAccuracyPair"
+            },
+            "type": "array",
+            "title": "Accuracy",
+            "description": "Forecast/plan series judged against actuals."
+          },
+          "lead_bands_h": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Lead Bands H",
+            "description": "Lead time bands for the accuracy: for each band the newest prediction issued at least this many hours before the target hour is used.",
+            "examples": [
+              [
+                1.0,
+                6.0,
+                24.0
+              ]
+            ]
+          },
+          "accuracy_days": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Accuracy Days",
+            "description": "Days evaluated for the published accuracy.",
+            "default": 14,
+            "examples": [
+              14
+            ]
+          }
+        },
+        "type": "object",
+        "title": "HistorySettings",
+        "description": "Long-term history in PostgreSQL / TimescaleDB (RL29 fork)."
+      },
       "HomeApplianceCommonSettings-Input": {
         "properties": {
           "device_id": {
@@ -14743,6 +15059,10 @@
             "$ref": "#/components/schemas/LoadMeasuredCommonSettings",
             "description": "LoadMeasured provider settings (RL29 fork: own measured history)."
           },
+          "loadml": {
+            "$ref": "#/components/schemas/LoadMLCommonSettings",
+            "description": "LoadML provider settings (RL29 fork: gradient boosting base load)."
+          },
           "loadimport": {
             "$ref": "#/components/schemas/LoadImportCommonSettings",
             "description": "LoadImport provider settings."
@@ -14780,6 +15100,10 @@
           "loadmeasured": {
             "$ref": "#/components/schemas/LoadMeasuredCommonSettings",
             "description": "LoadMeasured provider settings (RL29 fork: own measured history)."
+          },
+          "loadml": {
+            "$ref": "#/components/schemas/LoadMLCommonSettings",
+            "description": "LoadML provider settings (RL29 fork: gradient boosting base load)."
           },
           "loadimport": {
             "$ref": "#/components/schemas/LoadImportCommonSettings",
@@ -14847,6 +15171,202 @@
         "type": "object",
         "title": "LoadImportCommonSettings",
         "description": "Common settings for load data import from file or JSON string."
+      },
+      "LoadMLCommonSettings": {
+        "properties": {
+          "history_weeks": {
+            "type": "integer",
+            "maximum": 156.0,
+            "minimum": 2.0,
+            "title": "History Weeks",
+            "description": "Training window [weeks].",
+            "default": 52,
+            "examples": [
+              52
+            ]
+          },
+          "min_days": {
+            "type": "integer",
+            "minimum": 7.0,
+            "title": "Min Days",
+            "description": "Healthy days needed before the model is used.",
+            "default": 21,
+            "examples": [
+              21
+            ]
+          },
+          "holdout_days": {
+            "type": "integer",
+            "maximum": 28.0,
+            "minimum": 1.0,
+            "title": "Holdout Days",
+            "description": "The model must beat the LoadMeasured profile on these last days (trained without them) to be used.",
+            "default": 7,
+            "examples": [
+              7
+            ]
+          },
+          "quantiles": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Quantiles",
+            "description": "Quantiles that are modelled.",
+            "examples": [
+              [
+                0.1,
+                0.5,
+                0.9
+              ]
+            ]
+          },
+          "plan_quantile": {
+            "type": "number",
+            "exclusiveMaximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Plan Quantile",
+            "description": "Quantile EOS plans with (must be in `quantiles`). Above 0.5 plans with more load than expected, i.e. keeps reserve for uncertain hours.",
+            "default": 0.5,
+            "examples": [
+              0.5,
+              0.6
+            ]
+          },
+          "subtract_power_keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Subtract Power Keys",
+            "description": "Power measurements [W] of consumers EOS plans itself; their energy is removed from the load meter to get the base load.",
+            "examples": [
+              [
+                "wbb12-electric-power",
+                "waschmaschine-power"
+              ]
+            ]
+          },
+          "subtract_max_hold_hours": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Subtract Max Hold Hours",
+            "description": "A power value is held until the next sample, at most this long; hours without a held value are not used for training.",
+            "default": 24.0,
+            "examples": [
+              24.0
+            ]
+          },
+          "temperature_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature Key",
+            "description": "Measured outdoor temperature for the history (the forecast uses `weather_temp_air`). None: feature from the weather prediction store only.",
+            "examples": [
+              "wbb12-outdoor-temperature"
+            ]
+          },
+          "away_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Away Key",
+            "description": "Measurement 1 = away / holiday mode.",
+            "examples": [
+              "wbb12-away"
+            ]
+          },
+          "away_return_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Away Return Key",
+            "description": "Measurement with the return time (Unix seconds) of the away mode.",
+            "examples": [
+              "wbb12-return-ts"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "title": "State",
+            "description": "German federal state for public holidays.",
+            "default": "BW",
+            "examples": [
+              "BW"
+            ]
+          },
+          "refit_hours": {
+            "type": "number",
+            "minimum": 1.0,
+            "title": "Refit Hours",
+            "description": "Models are retrained after this many hours.",
+            "default": 24.0,
+            "examples": [
+              24
+            ]
+          },
+          "gap_threshold": {
+            "type": "number",
+            "exclusiveMaximum": 1.0,
+            "minimum": 0.0,
+            "title": "Gap Threshold",
+            "description": "Days below this share of the median daily base load are left out.",
+            "default": 0.3,
+            "examples": [
+              0.3
+            ]
+          },
+          "num_leaves": {
+            "type": "integer",
+            "maximum": 127.0,
+            "minimum": 4.0,
+            "title": "Num Leaves",
+            "description": "LightGBM num_leaves.",
+            "default": 15
+          },
+          "n_estimators": {
+            "type": "integer",
+            "maximum": 3000.0,
+            "minimum": 20.0,
+            "title": "N Estimators",
+            "description": "LightGBM trees.",
+            "default": 300
+          },
+          "learning_rate": {
+            "type": "number",
+            "maximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Learning Rate",
+            "description": "LightGBM learning rate.",
+            "default": 0.05
+          },
+          "min_data_in_leaf": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Min Data In Leaf",
+            "description": "LightGBM min_data_in_leaf.",
+            "default": 20
+          }
+        },
+        "type": "object",
+        "title": "LoadMLCommonSettings",
+        "description": "Settings of the gradient boosting base load provider (RL29 fork)."
       },
       "LoadMeasuredCommonSettings": {
         "properties": {
@@ -15484,6 +16004,80 @@
         "title": "MeasurementSample",
         "description": "Complete replacement of one key/timestamp, including its quality."
       },
+      "MilpCommonSettings": {
+        "properties": {
+          "time_limit_s": {
+            "type": "number",
+            "maximum": 300.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Time Limit S",
+            "description": "Time limit of one dispatch MILP [s].",
+            "default": 10.0,
+            "examples": [
+              10.0
+            ]
+          },
+          "mip_rel_gap": {
+            "type": "number",
+            "maximum": 0.1,
+            "minimum": 0.0,
+            "title": "Mip Rel Gap",
+            "description": "Relative optimality gap of the MILP.",
+            "default": 0.0001,
+            "examples": [
+              0.0001
+            ]
+          },
+          "hp_search_seconds": {
+            "type": "number",
+            "maximum": 600.0,
+            "minimum": 0.0,
+            "title": "Hp Search Seconds",
+            "description": "Time budget of the coordinate search over the heat pump modes [s].",
+            "default": 20.0,
+            "examples": [
+              20.0
+            ]
+          },
+          "seeds": {
+            "type": "integer",
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Seeds",
+            "description": "Best candidates handed to the polish step.",
+            "default": 3,
+            "examples": [
+              3
+            ]
+          },
+          "polish_generations": {
+            "type": "integer",
+            "maximum": 2000.0,
+            "minimum": 0.0,
+            "title": "Polish Generations",
+            "description": "GENETIC generations on the exact simulation after the MILP (0 = MILP plan only).",
+            "default": 30,
+            "examples": [
+              30,
+              0
+            ]
+          },
+          "polish_individuals": {
+            "type": "integer",
+            "maximum": 2000.0,
+            "minimum": 10.0,
+            "title": "Polish Individuals",
+            "description": "Population of the polish step.",
+            "default": 60,
+            "examples": [
+              60
+            ]
+          }
+        },
+        "type": "object",
+        "title": "MilpCommonSettings",
+        "description": "MILP optimization settings (RL29 fork)."
+      },
       "NodeREDAdapterCommonSettings": {
         "properties": {
           "host": {
@@ -15643,7 +16237,8 @@
         "type": "string",
         "enum": [
           "GENETIC",
-          "GENETIC0"
+          "GENETIC0",
+          "MILP"
         ],
         "title": "OptimizationAlgorithm",
         "description": "Optimization Algorithm."
@@ -15652,10 +16247,11 @@
         "properties": {
           "algorithm": {
             "$ref": "#/components/schemas/OptimizationAlgorithm",
-            "description": "Optimization algorithm [GENETIC | GENETIC0]. Defaults to GENETIC.",
+            "description": "Optimization algorithm [GENETIC | GENETIC0 | MILP]. Defaults to GENETIC.",
             "examples": [
               "GENETIC",
-              "GENETIC0"
+              "GENETIC0",
+              "MILP"
             ]
           },
           "genetic": {
@@ -15682,6 +16278,16 @@
               }
             ]
           },
+          "milp": {
+            "$ref": "#/components/schemas/MilpCommonSettings",
+            "description": "MILP optimization configuration (RL29 fork). MILP uses the GENETIC settings (slots, horizons, terminal value) and adds these.",
+            "examples": [
+              {
+                "hp_search_seconds": 20,
+                "polish_generations": 30
+              }
+            ]
+          },
           "self_consumption_interpolator": {
             "$ref": "#/components/schemas/GridInterpolatorBackend",
             "description": "How the inverter's self-consumption probability table is evaluated [scipy | numpy]. 'scipy' (default) uses scipy.interpolate. 'numpy' gives the same values without importing SciPy, which saves about 35 MB RSS after the first optimization run (useful on devices with little RAM); a run takes about 2.5 % longer.",
@@ -15700,10 +16306,11 @@
         "properties": {
           "algorithm": {
             "$ref": "#/components/schemas/OptimizationAlgorithm",
-            "description": "Optimization algorithm [GENETIC | GENETIC0]. Defaults to GENETIC.",
+            "description": "Optimization algorithm [GENETIC | GENETIC0 | MILP]. Defaults to GENETIC.",
             "examples": [
               "GENETIC",
-              "GENETIC0"
+              "GENETIC0",
+              "MILP"
             ]
           },
           "genetic": {
@@ -15727,6 +16334,16 @@
                 "penalties": {
                   "ev_soc_miss": 10
                 }
+              }
+            ]
+          },
+          "milp": {
+            "$ref": "#/components/schemas/MilpCommonSettings",
+            "description": "MILP optimization configuration (RL29 fork). MILP uses the GENETIC settings (slots, horizons, terminal value) and adds these.",
+            "examples": [
+              {
+                "hp_search_seconds": 20,
+                "polish_generations": 30
               }
             ]
           },
@@ -16562,6 +17179,10 @@
             "$ref": "#/components/schemas/PVForecastHomeAssistantCommonSettings",
             "description": "Home Assistant provider settings"
           },
+          "ensemble": {
+            "$ref": "#/components/schemas/PVForecastEnsembleCommonSettings",
+            "description": "PV ensemble provider settings (RL29 fork)"
+          },
           "pvlib": {
             "$ref": "#/components/schemas/PVForecastPVLibCommonSettings",
             "description": "PVLib provider settings"
@@ -16690,6 +17311,10 @@
           "homeassistant": {
             "$ref": "#/components/schemas/PVForecastHomeAssistantCommonSettings",
             "description": "Home Assistant provider settings"
+          },
+          "ensemble": {
+            "$ref": "#/components/schemas/PVForecastEnsembleCommonSettings",
+            "description": "PV ensemble provider settings (RL29 fork)"
           },
           "pvlib": {
             "$ref": "#/components/schemas/PVForecastPVLibCommonSettings",
@@ -16840,6 +17465,85 @@
         ],
         "title": "PVForecastCommonSettings",
         "description": "PV Forecast Configuration."
+      },
+      "PVForecastEnsembleCommonSettings": {
+        "properties": {
+          "members": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Members",
+            "description": "Members of the ensemble [pvlib | homeassistant]. 'homeassistant' reads the entity configured in pvforecast.homeassistant.",
+            "examples": [
+              [
+                "pvlib",
+                "homeassistant"
+              ]
+            ]
+          },
+          "days": {
+            "type": "integer",
+            "maximum": 60.0,
+            "minimum": 3.0,
+            "title": "Days",
+            "description": "Days used for weights and calibration.",
+            "default": 14,
+            "examples": [
+              14
+            ]
+          },
+          "min_days": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Min Days",
+            "description": "Days with measurements needed before weights/calibration apply.",
+            "default": 4,
+            "examples": [
+              4
+            ]
+          },
+          "scale_quantile": {
+            "type": "number",
+            "exclusiveMaximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Scale Quantile",
+            "description": "Quantile of the daily measured/forecast ratio used as calibration factor; < 0.5 is conservative.",
+            "default": 0.5,
+            "examples": [
+              0.5,
+              0.4
+            ]
+          },
+          "scale_min": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Scale Min",
+            "description": "Lower bound of the factor.",
+            "default": 0.6
+          },
+          "scale_max": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Scale Max",
+            "description": "Upper bound of the factor.",
+            "default": 1.3
+          },
+          "min_day_fraction": {
+            "type": "number",
+            "exclusiveMaximum": 1.0,
+            "minimum": 0.0,
+            "title": "Min Day Fraction",
+            "description": "Days whose measured energy is below this share of the forecast are not used for the factor (outage, snow) - only for the weights.",
+            "default": 0.15,
+            "examples": [
+              0.15
+            ]
+          }
+        },
+        "type": "object",
+        "title": "PVForecastEnsembleCommonSettings",
+        "description": "Settings of the PV ensemble (RL29 fork)."
       },
       "PVForecastForecastSolarCommonSettings": {
         "properties": {

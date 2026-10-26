@@ -61,6 +61,33 @@ class EnergyManagementCommonSettings(SettingsBaseModel):
         },
     )
 
+    # RL29 fork: rolling horizon aligned to the optimization slots.
+    run_on_slot_start: bool = Field(
+        default=False,
+        json_schema_extra={
+            "description": (
+                "Run the energy management right after every optimization slot starts "
+                "(plus slot_start_offset_sec) instead of every `interval` seconds since start-up. "
+                "`interval` then is only the polling period (60 s recommended), so the first "
+                "slot of every plan is (almost) complete instead of partly elapsed."
+            ),
+            "examples": [True],
+        },
+    )
+
+    slot_start_offset_sec: float = Field(
+        default=20.0,
+        ge=0.0,
+        le=600.0,
+        json_schema_extra={
+            "description": (
+                "Delay after the slot start before the aligned run [seconds]; gives the "
+                "measurements of the slot boundary time to arrive."
+            ),
+            "examples": [20.0],
+        },
+    )
+
     notify_url: Optional[str] = Field(
         default=None,
         json_schema_extra={

@@ -91,7 +91,7 @@ WORKDIR ${EOS_DIR}
 # Runtime shared libraries only (no -dev packages, no compilers). Create the eos
 # user and the persistent data directories with eos ownership.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    adduser python3 libopenblas0 liblapack3 \
+    adduser python3 libopenblas0 liblapack3 libgomp1 \
     && adduser --system --group --no-create-home eos \
     && mkdir -p "${EOS_DATA_DIR}" "${EOS_CACHE_DIR}" "${EOS_OUTPUT_DIR}" "${EOS_CONFIG_DIR}" "${MPLCONFIGDIR}" \
     && chown -R eos:eos "${EOS_DATA_DIR}" \

@@ -50,13 +50,53 @@ class EnergyManagementStage(StrEnum):
     CONTROL_DISPATCH = "CONTROL_DISPATCH"
 
 
+_aligned_last_slot: Optional[int] = None
+
+
+def slot_run_due(
+    now_ts: float, slot_seconds: float, offset_seconds: float, last_slot: Optional[int]
+) -> Optional[int]:
+    """Slot number to run now in slot-aligned mode, None when nothing is due (RL29 fork).
+
+    A slot is due once ``offset_seconds`` of it have passed and it has not run yet.
+    A run that is late (EOS was busy or just started) still happens within the slot.
+    """
+    if slot_seconds <= 0:
+        return None
+    slot = int(now_ts // slot_seconds)
+    if last_slot is not None and slot <= last_slot:
+        return None
+    if now_ts - slot * slot_seconds < offset_seconds:
+        return None
+    return slot
+
+
 async def ems_manage_energy() -> None:
     """Repeating task for managing energy.
 
     This task should be executed by the server regularly
     to ensure proper energy management.
     """
-    await EnergyManagement().run()
+    global _aligned_last_slot
+    ems = EnergyManagement()
+    settings = ems.config.ems
+    if getattr(settings, "run_on_slot_start", False):
+        algorithm = ems.config.optimization.algorithm
+        slot_seconds = (
+            3600.0
+            if algorithm == OptimizationAlgorithm.GENETIC0
+            else float(ems.config.optimization.genetic.interval_sec)
+        )
+        due = slot_run_due(
+            to_datetime().timestamp(),
+            slot_seconds,
+            settings.slot_start_offset_sec,
+            _aligned_last_slot,
+        )
+        if due is None:
+            return
+        _aligned_last_slot = due
+    await ems.run()
 
 
 NOTIFY_TIMEOUT_SECONDS = 5.0
@@ -177,7 +217,8 @@ class EnergyManagement(
         if interval_seconds is None:
             interval_seconds = (
                 cls.config.optimization.genetic.interval_sec
-                if cls.config.optimization.algorithm == OptimizationAlgorithm.GENETIC
+                if cls.config.optimization.algorithm
+                in (OptimizationAlgorithm.GENETIC, OptimizationAlgorithm.MILP)
                 else 3600
             )
         if interval_seconds not in (900, 3600):
@@ -319,16 +360,15 @@ class EnergyManagement(
             # None leads to current time as start datetime
             if algorithm is None:
                 algorithm = self.config.optimization.algorithm
-            if start_datetime is None and algorithm == OptimizationAlgorithm.GENETIC:
+            genetic_like = algorithm in (OptimizationAlgorithm.GENETIC, OptimizationAlgorithm.MILP)
+            if start_datetime is None and genetic_like:
                 # Consumer windows and midnight-based forecasts use the site clock,
                 # which can differ from the server's local timezone.
                 start_datetime = to_datetime(in_timezone=self.config.general.timezone)
             self.set_start_datetime(
                 start_datetime,
                 interval_seconds=(
-                    self.config.optimization.genetic.interval_sec
-                    if algorithm == OptimizationAlgorithm.GENETIC
-                    else 3600
+                    self.config.optimization.genetic.interval_sec if genetic_like else 3600
                 ),
             )
 
@@ -376,8 +416,8 @@ class EnergyManagement(
 
             run_solution: GeneticSolution | Genetic0Solution
 
-            # --- GENETIC algorithm ---
-            if algorithm == OptimizationAlgorithm.GENETIC:
+            # --- GENETIC algorithm (and RL29 MILP, which runs on the GENETIC machinery) ---
+            if algorithm in (OptimizationAlgorithm.GENETIC, OptimizationAlgorithm.MILP):
                 # Prepare optimization parameters
                 # This also creates default configurations for missing values and updates the predictions
                 logger.info(f"{algorithm}: Starting optimzation parameter preparation.")
@@ -396,6 +436,11 @@ class EnergyManagement(
                     return None
 
                 # Take values from config if not given
+                if algorithm == OptimizationAlgorithm.MILP:
+                    if genetic_generations is None:
+                        genetic_generations = self.config.optimization.milp.polish_generations
+                    if genetic_individuals is None:
+                        genetic_individuals = self.config.optimization.milp.polish_individuals
                 if genetic_generations is None:
                     genetic_generations = self.config.optimization.genetic.generations
                 if genetic_seed is None:
@@ -406,7 +451,14 @@ class EnergyManagement(
 
                 # --- Optimization (CPU-bound → MUST offload) ---
                 try:
-                    genetic_optimization = GeneticOptimization(
+                    optimizer_class: type[GeneticOptimization] = GeneticOptimization
+                    if algorithm == OptimizationAlgorithm.MILP:
+                        from akkudoktoreos.optimization.milp.milpoptimization import (
+                            MilpOptimization,
+                        )
+
+                        optimizer_class = MilpOptimization
+                    genetic_optimization = optimizer_class(
                         verbose=bool(self.config.server.verbose),
                         fixed_seed=genetic_seed,
                     )
@@ -546,6 +598,19 @@ class EnergyManagement(
                     "duration_s": round(optimization_duration.total_seconds(), 1),
                 },
             )
+
+            # RL29 fork: long-term history (background task, never blocks the run).
+            if EnergyManagement._optimization_solution is not None:
+                from akkudoktoreos.core.coreabc import get_measurement
+                from akkudoktoreos.core.historyrecorder import HistoryRecorder
+
+                HistoryRecorder.instance().schedule(
+                    self.config,
+                    get_measurement(),
+                    EnergyManagement._optimization_solution,
+                    str(algorithm),
+                    optimization_duration.total_seconds(),
+                )
 
             # --- Dispatch control by adapters ---
             EnergyManagement._stage = EnergyManagementStage.CONTROL_DISPATCH

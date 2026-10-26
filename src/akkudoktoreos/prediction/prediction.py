@@ -52,9 +52,11 @@ from akkudoktoreos.prediction.loadakkudoktor import (
 )
 from akkudoktoreos.prediction.loadimport import LoadImport
 from akkudoktoreos.prediction.loadmeasured import LoadMeasured
+from akkudoktoreos.prediction.loadml import LoadML
 from akkudoktoreos.prediction.loadvrm import LoadVrm
 from akkudoktoreos.prediction.predictionabc import PredictionContainer
 from akkudoktoreos.prediction.pvforecastakkudoktor import PVForecastAkkudoktor
+from akkudoktoreos.prediction.pvforecastensemble import PVForecastEnsemble
 from akkudoktoreos.prediction.pvforecastforecastsolar import PVForecastForecastSolar
 from akkudoktoreos.prediction.pvforecasthomeassistant import PVForecastHomeAssistant
 from akkudoktoreos.prediction.pvforecastimport import PVForecastImport
@@ -107,6 +109,8 @@ loadforecast_akkudoktor_adjusted = LoadAkkudoktorAdjusted()
 loadforecast_vrm = LoadVrm()
 loadforecast_import = LoadImport()
 loadforecast_measured = LoadMeasured()
+loadforecast_ml = LoadML()
+pvforecast_ensemble = PVForecastEnsemble()
 pvforecast_akkudoktor = PVForecastAkkudoktor()
 pvforecast_vrm = PVForecastVrm()
 pvforecast_homeassistant = PVForecastHomeAssistant()
@@ -141,8 +145,10 @@ PredictionProviderType = Union[
     LoadAkkudoktorAdjusted,
     LoadImport,
     LoadMeasured,
+    LoadML,
     LoadVrm,
     PVForecastAkkudoktor,
+    PVForecastEnsemble,
     PVForecastForecastSolar,
     PVForecastHomeAssistant,
     PVForecastImport,
@@ -183,6 +189,8 @@ def prediction_providers() -> list[PredictionProviderType]:
         loadforecast_vrm, \
         loadforecast_import, \
         loadforecast_measured, \
+        loadforecast_ml, \
+        pvforecast_ensemble, \
         pvforecast_akkudoktor, \
         pvforecast_vrm, \
         pvforecast_homeassistant, \
@@ -233,6 +241,8 @@ def prediction_providers() -> list[PredictionProviderType]:
         pvforecast_solcast,
         pvforecast_vrm,
         loadforecast_measured,  # RL29 fork, appended to keep the upstream sequence
+        loadforecast_ml,  # RL29 fork
+        pvforecast_ensemble,  # RL29 fork (after weather, like PVLib)
     ]
 
 

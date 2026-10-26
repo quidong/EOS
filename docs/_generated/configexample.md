@@ -36,7 +36,22 @@
            "keep_duration_h": 48,
            "autosave_interval_sec": 5,
            "compaction_interval_sec": 3600,
-           "batch_size": 100
+           "batch_size": 100,
+           "history": {
+               "enabled": false,
+               "dsn": null,
+               "retention_days": 1095,
+               "forecast_hours": 48,
+               "min_store_interval_minutes": 14,
+               "actuals": [],
+               "accuracy": [],
+               "lead_bands_h": [
+                   1.0,
+                   6.0,
+                   24.0
+               ],
+               "accuracy_days": 14
+           }
        },
        "devices": {
            "batteries": {
@@ -520,6 +535,8 @@
            "startup_delay": 5.0,
            "interval": 300.0,
            "mode": "OPTIMIZATION",
+           "run_on_slot_start": true,
+           "slot_start_offset_sec": 20.0,
            "notify_url": null
        },
        "feedintariff": {
@@ -564,6 +581,29 @@
                "min_days_per_type": 3,
                "quantile": 0.5,
                "gap_threshold": 0.3
+           },
+           "loadml": {
+               "history_weeks": 52,
+               "min_days": 21,
+               "holdout_days": 7,
+               "quantiles": [
+                   0.1,
+                   0.5,
+                   0.9
+               ],
+               "plan_quantile": 0.5,
+               "subtract_power_keys": [],
+               "subtract_max_hold_hours": 24.0,
+               "temperature_key": null,
+               "away_key": null,
+               "away_return_key": null,
+               "state": "BW",
+               "refit_hours": 24.0,
+               "gap_threshold": 0.3,
+               "num_leaves": 15,
+               "n_estimators": 300,
+               "learning_rate": 0.05,
+               "min_data_in_leaf": 20
            },
            "loadimport": {
                "import_file_path": null,
@@ -626,6 +666,14 @@
                    "ev_soc_miss": 10
                }
            },
+           "milp": {
+               "time_limit_s": 10.0,
+               "mip_rel_gap": 0.0001,
+               "hp_search_seconds": 20.0,
+               "seeds": 3,
+               "polish_generations": 30,
+               "polish_individuals": 60
+           },
            "self_consumption_interpolator": "scipy"
        },
        "prediction": {
@@ -675,6 +723,17 @@
                "value_unit": "W",
                "base_url": null,
                "token": null
+           },
+           "ensemble": {
+               "members": [
+                   "pvlib"
+               ],
+               "days": 14,
+               "min_days": 4,
+               "scale_quantile": 0.5,
+               "scale_min": 0.6,
+               "scale_max": 1.3,
+               "min_day_fraction": 0.15
            },
            "pvlib": {
                "max_ac_power_w": null
