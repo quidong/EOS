@@ -88,10 +88,11 @@ class ElecPriceEnergyCharts(ElecPriceProvider):
     """
 
     highest_orig_datetime: Optional[DateTime] = None
+    _ml_backfilled: bool = False
 
     def historic_hours_min(self) -> int:
-        """Keep enough history for weekly seasonal price extrapolation."""
-        return 24 * 35
+        """Keep enough history for weekly seasonal price extrapolation (and the price ML)."""
+        return 24 * self._ml_history_days()
 
     @classmethod
     def provider_id(cls) -> str:
@@ -271,7 +272,7 @@ class ElecPriceEnergyCharts(ElecPriceProvider):
         gross_start_datetime = self.ems_start_datetime
 
         # Set default start_datetime - try to take data from 5 weeks back for prediction
-        past_days = 35
+        past_days = self._ml_history_days()
         start_datetime = self.ems_start_datetime - to_duration(f"{past_days} days")
 
         # Determine if update is needed and what start date is really necessary
@@ -294,6 +295,14 @@ class ElecPriceEnergyCharts(ElecPriceProvider):
 
             if raw_history.empty:
                 # We need the default start date (35 days in past)
+                needs_update = True
+            elif (
+                past_days > 35
+                and not self._ml_backfilled
+                and raw_history.index.min() > pd.Timestamp(start_datetime) + pd.Timedelta(days=2)
+            ):
+                # RL29 fork: the price ML wants a longer history; fetch it once.
+                self._ml_backfilled = True
                 needs_update = True
             else:
                 # A later update must not mistake the current forecast window for
@@ -416,7 +425,9 @@ class ElecPriceEnergyCharts(ElecPriceProvider):
             )
             return
 
-        prediction = self._predict(history, needed_slots, slots_per_hour=slots_per_hour)
+        prediction = await self._predict_tail(
+            history, needed_slots, slots_per_hour, resolution_seconds, self.highest_orig_datetime
+        )
 
         # write predictions into the records, update if exist.
         prediction_series = pd.Series(

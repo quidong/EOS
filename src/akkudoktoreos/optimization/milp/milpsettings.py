@@ -37,6 +37,17 @@ class MilpCommonSettings(SettingsBaseModel):
             "examples": [20.0],
         },
     )
+    thermal_model: bool = Field(
+        default=True,
+        json_schema_extra={
+            "description": (
+                "Plan the heat pump inside the MILP (linear building and tank model, COP "
+                "secants) and turn the heat schedule into mode candidates; off = mode "
+                "candidates from heuristics and the coordinate search only."
+            ),
+            "examples": [True],
+        },
+    )
     seeds: int = Field(
         default=3,
         ge=1,

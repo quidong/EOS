@@ -52,6 +52,7 @@ class EnergyManagementStage(StrEnum):
 
 
 _aligned_last_slot: Optional[int] = None
+_dispatched_slot: Optional[int] = None
 
 
 def slot_run_due(
@@ -78,7 +79,7 @@ async def ems_manage_energy() -> None:
     This task should be executed by the server regularly
     to ensure proper energy management.
     """
-    global _aligned_last_slot
+    global _aligned_last_slot, _dispatched_slot
     ems = EnergyManagement()
     settings = ems.config.ems
     if getattr(settings, "run_on_slot_start", False):
@@ -89,6 +90,12 @@ async def ems_manage_energy() -> None:
             else float(ems.config.optimization.genetic.interval_sec)
         )
         now = to_datetime()
+        # RL29 fork: a new slot starts - hand its values of the current plan to the
+        # adapters right away; the new run (offset, duration) follows later.
+        slot_now = int(now.timestamp() // slot_seconds) if slot_seconds > 0 else None
+        if slot_now is not None and _dispatched_slot is not None and slot_now > _dispatched_slot:
+            await ems.dispatch_current()
+        _dispatched_slot = slot_now
         due = slot_run_due(
             now.timestamp(),
             slot_seconds,
@@ -307,6 +314,25 @@ class EnergyManagement(
             Optional[Genetic0Solution]: The latest solution of the genetic algorithm.
         """
         return cls._genetic0_solution
+
+    async def dispatch_current(self) -> bool:
+        """Push the current slot of the existing plan to the adapters (RL29 fork).
+
+        Used at slot starts with 15-minute slots: the values of the new slot reach Home
+        Assistant at once instead of after the next optimization. Skipped while a run is
+        in progress (it dispatches itself) or before the first plan exists.
+        """
+        if EnergyManagement._run_lock.locked() or EnergyManagement._optimization_solution is None:
+            return False
+        async with EnergyManagement._run_lock:
+            EnergyManagement._stage = EnergyManagementStage.CONTROL_DISPATCH
+            try:
+                await self.adapter.update_data(False)
+            except Exception as e:
+                logger.error("Adapter dispatch at slot start failed: {}", e)
+            finally:
+                EnergyManagement._stage = EnergyManagementStage.IDLE
+        return True
 
     async def run(
         self,

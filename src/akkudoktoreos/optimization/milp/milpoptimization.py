@@ -8,13 +8,14 @@ random search by mathematical optimization:
 1. **Dispatch MILP** (``dispatch.py``): battery charge/discharge, grid import/export and
    appliance starts, cost-optimal for a given heat pump schedule, with the terminal value
    of the battery energy (HiGHS, typically well below a second).
-2. **Heat pump schedule**: the thermal model of the heat pump is not linear (COP and
-   flow temperature depend on the heat, the controller logic depends on the mode), so
-   its modes are chosen by evaluating candidates *with* the dispatch MILP: status quo,
-   the warm start of the previous run, the PV-/price-led heuristics, then a coordinate
-   search over the modes of each hour within ``hp_search_seconds``. Every candidate is
-   scored with the exact thermal simulation (penalties, stored heat) plus the optimal
-   dispatch cost for its electric load.
+2. **Heat pump schedule**: first the joint MILP of battery, grid, appliances *and* the
+   linear heat pump model (``thermal.py``, ``milp.thermal_model``) plans the heat for
+   building and tank over the whole horizon in one solve; its heat schedule is turned
+   into operating modes by following it with the exact simulation. These candidates,
+   the status quo, the warm start of the previous run and the PV-/price-led heuristics
+   are then scored with the exact thermal simulation (penalties, stored heat) plus the
+   optimal dispatch cost for their electric load; a coordinate search over the modes of
+   each hour improves the best one within ``hp_search_seconds``.
 3. **Check and polish**: the best candidates are encoded as genomes and put at the head
    of the initial population; ``polish_generations`` GENETIC generations then run on the
    exact simulation (0 = take the MILP plan as it is, after simulating it). The result
@@ -44,6 +45,7 @@ from akkudoktoreos.optimization.milp.dispatch import (
     solve_dispatch,
 )
 from akkudoktoreos.optimization.milp.milpsettings import MilpCommonSettings
+from akkudoktoreos.optimization.milp.thermal import project_modes, thermal_block
 
 
 def terminal_segments(
@@ -171,6 +173,7 @@ class MilpOptimization(GeneticOptimization):
         )
 
     _ignore_import_limit: bool = False
+    _thermal_keys: set[tuple[int, ...]] = set()
 
     def _load_spread(self) -> float:
         """Relative load spread of the outer scenarios (setting, LoadML quantiles, 0.2)."""
@@ -289,6 +292,65 @@ class MilpOptimization(GeneticOptimization):
             unique.setdefault(tuple(int(g) for g in genes), [int(g) for g in genes])
         return list(unique.values())
 
+    def _thermal_candidates(self) -> list[list[int]]:
+        """Heat pump modes that follow the joint MILP heat schedule (see ``thermal.py``)."""
+        layout = self._hp_layout()
+        self.thermal_summary: dict[str, Any] = {}
+        if not layout or not self._milp.thermal_model:
+            return []
+        started = time.monotonic()
+        try:
+            blocks = [thermal_block(plan) for plan in layout.plans]
+            if any(block is None for block in blocks):
+                logger.info(
+                    "MILP: heat pump model not applicable (cooling season); mode search only."
+                )
+                return []
+            data = self._dispatch_input(None)
+            data.thermal = [block for block in blocks if block is not None]
+            result = solve_dispatch(data)
+            self._milp_solves += 1
+            if (
+                not result.success
+                and self._milp.max_grid_import_w
+                and not self._ignore_import_limit
+            ):
+                self._ignore_import_limit = True
+                data = self._dispatch_input(None)
+                data.thermal = [block for block in blocks if block is not None]
+                result = solve_dispatch(data)
+                self._milp_solves += 1
+            if not result.success or not result.thermal:
+                logger.warning("MILP: heat pump model not solved ({}).", result.status)
+                return []
+            variants: list[list[int]] = []
+            for room_weight in (1.0, 0.0, 3.0):
+                genes: list[int] = []
+                for plan, traj in zip(layout.plans, result.thermal):
+                    genes.extend(project_modes(plan, traj, room_weight=room_weight))
+                if genes not in variants:
+                    variants.append(genes)
+            seconds = time.monotonic() - started
+            self.thermal_summary = {
+                "seconds": round(seconds, 2),
+                "objective": round(result.objective, 4) if result.objective is not None else None,
+                "heat_pump_wh": round(sum(sum(t.electric_wh) for t in result.thermal), 1),
+                "candidates": len(variants),
+            }
+            logger.info(
+                "MILP: heat pump model solved in {:.1f} s (objective {:.3f}, heat pump {:.1f} kWh), "
+                "{} mode candidate(s).",
+                seconds,
+                result.objective if result.objective is not None else float("nan"),
+                self.thermal_summary["heat_pump_wh"] / 1000.0,
+                len(variants),
+            )
+            self._thermal_keys.update(tuple(v) for v in variants)
+            return variants
+        except Exception as exc:  # never lose the run because of the heat pump model
+            logger.warning("MILP: heat pump model failed ({}); mode search only.", exc)
+            return []
+
     def _coordinate_search(
         self, best: list[int], best_score: float, deadline: float
     ) -> tuple[list[int], float]:
@@ -344,8 +406,14 @@ class MilpOptimization(GeneticOptimization):
                 logger.debug("MILP: warm start heat pump genes unusable: {}", exc)
 
         scored: list[tuple[float, list[int], DispatchResult]] = []
+        self._thermal_keys = set()
+        self._thermal_start = False
         if self._hp_layout():
-            for genes in self._hp_candidates(parameters):
+            candidates = self._hp_candidates(parameters)
+            for genes in self._thermal_candidates():
+                if genes not in candidates:
+                    candidates.append(genes)
+            for genes in candidates:
                 score, result = self._score(genes)
                 if result is not None and result.success:
                     scored.append((score, genes, result))
@@ -353,10 +421,36 @@ class MilpOptimization(GeneticOptimization):
                 logger.error("MILP: no feasible dispatch; GENETIC search only.")
                 return []
             scored.sort(key=lambda item: item[0])
-            deadline = time.monotonic() + self._milp.hp_search_seconds
-            best_genes, best_score = self._coordinate_search(
-                list(scored[0][1]), scored[0][0], deadline
+            status_quo = self._score(self._hp_layout().default_genes())[0]
+            start_from_thermal = tuple(scored[0][1]) in self._thermal_keys
+            self._thermal_start = start_from_thermal
+            logger.info(
+                "MILP: best heat pump start {} ({:.3f}; status quo {:.3f}).",
+                "from the heat pump model" if start_from_thermal else "from the heuristics",
+                scored[0][0],
+                status_quo,
             )
+            # Local search from the best start of each family (heat pump model and
+            # heuristics): they often end in different local optima. Time left over by
+            # the first search goes to the second.
+            starts = [scored[0]]
+            other = next(
+                (
+                    item
+                    for item in scored[1:]
+                    if (tuple(item[1]) in self._thermal_keys) != start_from_thermal
+                ),
+                None,
+            )
+            if other is not None:
+                starts.append(other)
+            end = time.monotonic() + self._milp.hp_search_seconds
+            found: list[tuple[float, list[int]]] = []
+            for index, (score0, genes0, _) in enumerate(starts):
+                remaining = max(0.0, end - time.monotonic())
+                deadline = time.monotonic() + remaining / (len(starts) - index)
+                found.append(self._coordinate_search(list(genes0), score0, deadline)[::-1])
+            best_score, best_genes = min(found, key=lambda item: item[0])
             if best_score < scored[0][0] - 1e-9:
                 _, result = self._score(best_genes)
                 scored.insert(0, (best_score, best_genes, result))  # type: ignore[arg-type]
@@ -391,6 +485,8 @@ class MilpOptimization(GeneticOptimization):
             len(seeds),
         )
         self.milp_summary = {
+            "thermal": getattr(self, "thermal_summary", {}),
+            "thermal_best_start": bool(getattr(self, "_thermal_start", False)),
             "solves": self._milp_solves,
             "seconds": round(time.monotonic() - started, 2),
             "best_cost": round(best_score, 4),

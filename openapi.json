@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610261877809611"
+    "version": "v0.3.0.dev2610262196159948"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -5538,6 +5538,10 @@
             "$ref": "#/components/schemas/ElecPriceSMARDCommonSettings",
             "description": "SMARD electricity price provider settings."
           },
+          "ml": {
+            "$ref": "#/components/schemas/ElecPriceMLSettings",
+            "description": "RL29 fork: LightGBM forecast of the hours after the published day-ahead prices (Energy-Charts provider)."
+          },
           "tibber": {
             "$ref": "#/components/schemas/ElecPriceTibberCommonSettings",
             "description": "Tibber electricity price provider settings."
@@ -5583,6 +5587,10 @@
           "smard": {
             "$ref": "#/components/schemas/ElecPriceSMARDCommonSettings",
             "description": "SMARD electricity price provider settings."
+          },
+          "ml": {
+            "$ref": "#/components/schemas/ElecPriceMLSettings",
+            "description": "RL29 fork: LightGBM forecast of the hours after the published day-ahead prices (Energy-Charts provider)."
           },
           "tibber": {
             "$ref": "#/components/schemas/ElecPriceTibberCommonSettings",
@@ -5715,6 +5723,111 @@
         "type": "object",
         "title": "ElecPriceImportCommonSettings",
         "description": "Common settings for elecprice data import from file or JSON String."
+      },
+      "ElecPriceMLSettings": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Forecast the hours after the last published price with LightGBM (used only when it beats the ETS forecast on the holdout days).",
+            "default": false,
+            "examples": [
+              true
+            ]
+          },
+          "history_days": {
+            "type": "integer",
+            "maximum": 730.0,
+            "minimum": 35.0,
+            "title": "History Days",
+            "description": "Price history fetched and used for training [days].",
+            "default": 180,
+            "examples": [
+              180
+            ]
+          },
+          "min_days": {
+            "type": "integer",
+            "minimum": 14.0,
+            "title": "Min Days",
+            "description": "Days of history needed before training.",
+            "default": 28,
+            "examples": [
+              28
+            ]
+          },
+          "holdout_days": {
+            "type": "integer",
+            "maximum": 28.0,
+            "minimum": 2.0,
+            "title": "Holdout Days",
+            "description": "The model must beat ETS on these last days to be used.",
+            "default": 7,
+            "examples": [
+              7
+            ]
+          },
+          "horizon_hours": {
+            "type": "integer",
+            "maximum": 168.0,
+            "minimum": 24.0,
+            "title": "Horizon Hours",
+            "description": "Longest lead time after the last known price that is trained [h].",
+            "default": 72,
+            "examples": [
+              72
+            ]
+          },
+          "refit_hours": {
+            "type": "number",
+            "minimum": 1.0,
+            "title": "Refit Hours",
+            "description": "Retrain after this many hours.",
+            "default": 6.0,
+            "examples": [
+              6
+            ]
+          },
+          "state": {
+            "type": "string",
+            "title": "State",
+            "description": "Federal state for public holidays.",
+            "default": "BW",
+            "examples": [
+              "BW"
+            ]
+          },
+          "num_leaves": {
+            "type": "integer",
+            "maximum": 127.0,
+            "minimum": 4.0,
+            "title": "Num Leaves",
+            "default": 15
+          },
+          "n_estimators": {
+            "type": "integer",
+            "maximum": 3000.0,
+            "minimum": 20.0,
+            "title": "N Estimators",
+            "default": 300
+          },
+          "learning_rate": {
+            "type": "number",
+            "maximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Learning Rate",
+            "default": 0.05
+          },
+          "min_data_in_leaf": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Min Data In Leaf",
+            "default": 40
+          }
+        },
+        "type": "object",
+        "title": "ElecPriceMLSettings",
+        "description": "Machine-learning forecast of the prices after the published day-ahead (RL29 fork)."
       },
       "ElecPriceSMARDCommonSettings": {
         "properties": {
@@ -16227,6 +16340,15 @@
             "default": 20.0,
             "examples": [
               20.0
+            ]
+          },
+          "thermal_model": {
+            "type": "boolean",
+            "title": "Thermal Model",
+            "description": "Plan the heat pump inside the MILP (linear building and tank model, COP secants) and turn the heat schedule into mode candidates; off = mode candidates from heuristics and the coordinate search only.",
+            "default": true,
+            "examples": [
+              true
             ]
           },
           "seeds": {

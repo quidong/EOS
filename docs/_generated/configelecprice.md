@@ -11,6 +11,7 @@
 | elecpricefixed | `EOS_ELECPRICE__ELECPRICEFIXED` | `ElecPriceFixedCommonSettings` | `rw` | `required` | Fixed electricity price provider settings. |
 | elecpriceimport | `EOS_ELECPRICE__ELECPRICEIMPORT` | `ElecPriceImportCommonSettings` | `rw` | `required` | Electricity price import provider settings. |
 | energycharts | `EOS_ELECPRICE__ENERGYCHARTS` | `ElecPriceEnergyChartsCommonSettings` | `rw` | `required` | Energy Charts provider settings. |
+| ml | `EOS_ELECPRICE__ML` | `ElecPriceMLSettings` | `rw` | `required` | RL29 fork: LightGBM forecast of the hours after the published day-ahead prices (Energy-Charts provider). |
 | provider | `EOS_ELECPRICE__PROVIDER` | `Optional[str]` | `rw` | `None` | Electricity price provider id of provider to be used. |
 | providers | | `list[str]` | `ro` | `N/A` | Available electricity price provider ids. |
 | smard | `EOS_ELECPRICE__SMARD` | `ElecPriceSMARDCommonSettings` | `rw` | `required` | SMARD electricity price provider settings. |
@@ -43,6 +44,19 @@
            "smard": {
                "filter_id": 4169,
                "region": "DE"
+           },
+           "ml": {
+               "enabled": false,
+               "history_days": 180,
+               "min_days": 28,
+               "holdout_days": 7,
+               "horizon_hours": 72,
+               "refit_hours": 6.0,
+               "state": "BW",
+               "num_leaves": 15,
+               "n_estimators": 300,
+               "learning_rate": 0.05,
+               "min_data_in_leaf": 40
            },
            "tibber": {
                "access_token": null,
@@ -78,6 +92,19 @@
            "smard": {
                "filter_id": 4169,
                "region": "DE"
+           },
+           "ml": {
+               "enabled": false,
+               "history_days": 180,
+               "min_days": 28,
+               "holdout_days": 7,
+               "horizon_hours": 72,
+               "refit_hours": 6.0,
+               "state": "BW",
+               "num_leaves": 15,
+               "n_estimators": 300,
+               "learning_rate": 0.05,
+               "min_data_in_leaf": 40
            },
            "tibber": {
                "access_token": null,
@@ -152,6 +179,55 @@
            "smard": {
                "filter_id": 4169,
                "region": "DE"
+           }
+       }
+   }
+```
+<!-- pyml enable line-length -->
+
+### Machine-learning forecast of the prices after the published day-ahead (RL29 fork)
+
+<!-- pyml disable line-length -->
+:::{table} elecprice::ml
+:widths: 10 10 5 5 30
+:align: left
+
+| Name | Type | Read-Only | Default | Description |
+| ---- | ---- | --------- | ------- | ----------- |
+| enabled | `bool` | `rw` | `False` | Forecast the hours after the last published price with LightGBM (used only when it beats the ETS forecast on the holdout days). |
+| history_days | `int` | `rw` | `180` | Price history fetched and used for training [days]. |
+| holdout_days | `int` | `rw` | `7` | The model must beat ETS on these last days to be used. |
+| horizon_hours | `int` | `rw` | `72` | Longest lead time after the last known price that is trained [h]. |
+| learning_rate | `float` | `rw` | `0.05` | None |
+| min_data_in_leaf | `int` | `rw` | `40` | None |
+| min_days | `int` | `rw` | `28` | Days of history needed before training. |
+| n_estimators | `int` | `rw` | `300` | None |
+| num_leaves | `int` | `rw` | `15` | None |
+| refit_hours | `float` | `rw` | `6.0` | Retrain after this many hours. |
+| state | `str` | `rw` | `BW` | Federal state for public holidays. |
+:::
+<!-- pyml enable line-length -->
+
+<!-- pyml disable no-emphasis-as-heading -->
+**Example Input/Output**
+<!-- pyml enable no-emphasis-as-heading -->
+
+<!-- pyml disable line-length -->
+```json
+   {
+       "elecprice": {
+           "ml": {
+               "enabled": true,
+               "history_days": 180,
+               "min_days": 28,
+               "holdout_days": 7,
+               "horizon_hours": 72,
+               "refit_hours": 6.0,
+               "state": "BW",
+               "num_leaves": 15,
+               "n_estimators": 300,
+               "learning_rate": 0.05,
+               "min_data_in_leaf": 40
            }
        }
    }

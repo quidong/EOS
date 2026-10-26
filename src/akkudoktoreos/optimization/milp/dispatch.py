@@ -12,6 +12,7 @@ Per slot ``t`` (energies in Wh, prices per Wh)::
     chg_pv[t] <= pv[t] - load[t],  exp[t] <= pv[t]  (surplus charging; only PV is fed in)
     dis[t] <= load[t] + appliance[t]              (the battery serves the house only)
     appliance[t] = sum_k x[g,k] * profile_g[t - start_k],  sum_k x[g,k] = 1,  x binary
+    heat pumps (optional, ``thermal.py``): their electric energy joins the load
 
     minimise  sum_t price[t]*imp[t] - feed_in[t]*exp[t] + lcos*dis[t]
               - terminal_value(soc[T])
@@ -24,10 +25,17 @@ from __future__ import annotations
 
 import math
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Optional, Sequence
 
 import numpy as np
+
+from akkudoktoreos.optimization.milp.thermal import (
+    ThermalBlock,
+    ThermalTrajectory,
+    add_thermal,
+    trajectory,
+)
 
 
 @dataclass
@@ -79,6 +87,9 @@ class DispatchInput:
     """Slots whose battery decisions are the same in every scenario."""
     time_limit_s: float = 10.0
     mip_rel_gap: float = 1e-4
+    thermal: list[ThermalBlock] = field(default_factory=list)
+    """Heat pumps planned inside the model (``thermal.py``); their electric energy is part
+    of the house balance (or priced separately with their own meter)."""
 
 
 @dataclass
@@ -97,6 +108,7 @@ class DispatchResult:
     """Index into ``allowed_starts`` of each appliance run."""
     appliance_wh: list[float]
     solve_seconds: float
+    thermal: list[ThermalTrajectory] = field(default_factory=list)
 
     def grid_cost(self, price: Sequence[float], feed_in: Sequence[float]) -> float:
         return float(
@@ -297,6 +309,18 @@ def solve_dispatch(data: DispatchInput) -> DispatchResult:
                 if 0 <= slot < n and energy:
                     app_load[slot][xv] = app_load[slot].get(xv, 0.0) + float(energy)
 
+    # Heat pumps (decided before the outcome is known: shared by all scenarios).
+    thermal_vars = []
+    for block in data.thermal:
+        if block.n < n:
+            raise ValueError("thermal block shorter than the horizon")
+        block_n = replace(block, n=n) if block.n > n else block
+        tv = add_thermal(b, block_n)
+        thermal_vars.append(tv)
+        if block.separate_price_per_wh is None:
+            for t in range(n):
+                app_load[t][tv.hp_wh[t]] = app_load[t].get(tv.hp_wh[t], 0.0) + 1.0
+
     built: list[_ScenarioVars] = []
     for weight, pv_s, load_s in scenarios:
         pv = [max(float(v), 0.0) for v in list(pv_s)[:n]]
@@ -356,6 +380,7 @@ def solve_dispatch(data: DispatchInput) -> DispatchResult:
         appliance_starts=appliance_starts,
         appliance_wh=appliance_wh,
         solve_seconds=elapsed,
+        thermal=[trajectory(sol, tv) for tv in thermal_vars],
     )
 
 

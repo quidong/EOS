@@ -13,6 +13,7 @@ from akkudoktoreos.prediction.elecpriceenergycharts import (
 )
 from akkudoktoreos.prediction.elecpricefixed import ElecPriceFixedCommonSettings
 from akkudoktoreos.prediction.elecpriceimport import ElecPriceImportCommonSettings
+from akkudoktoreos.prediction.elecpriceml import ElecPriceMLSettings
 from akkudoktoreos.prediction.elecpricesmard import ElecPriceSMARDCommonSettings
 from akkudoktoreos.prediction.elecpricetibber import ElecPriceTibberCommonSettings
 
@@ -73,6 +74,16 @@ class ElecPriceCommonSettings(SettingsBaseModel):
     smard: ElecPriceSMARDCommonSettings = Field(
         default_factory=ElecPriceSMARDCommonSettings,
         json_schema_extra={"description": "SMARD electricity price provider settings."},
+    )
+
+    ml: ElecPriceMLSettings = Field(
+        default_factory=ElecPriceMLSettings,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: LightGBM forecast of the hours after the published day-ahead "
+                "prices (Energy-Charts provider)."
+            )
+        },
     )
 
     tibber: ElecPriceTibberCommonSettings = Field(

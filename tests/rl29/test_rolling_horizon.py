@@ -61,19 +61,29 @@ async def test_ems_manage_energy_runs_once_per_slot(monkeypatch):
         async def run(self):
             calls.append(1)
 
+        async def dispatch_current(self):
+            dispatched.append(now["ts"])
+            return True
+
+    dispatched: list[float] = []
     now = {"ts": BASE + 30}
     monkeypatch.setattr(ems_module, "EnergyManagement", FakeEMS)
     monkeypatch.setattr(
         ems_module, "to_datetime", lambda *a, **k: SimpleNamespace(timestamp=lambda: now["ts"])
     )
     monkeypatch.setattr(ems_module, "_aligned_last_slot", None)
+    monkeypatch.setattr(ems_module, "_dispatched_slot", None)
     await ems_module.ems_manage_energy()
     await ems_module.ems_manage_energy()  # same slot: skipped
+    assert dispatched == []
     now["ts"] = BASE + SLOT + 10  # next slot, before the offset
     await ems_module.ems_manage_energy()
+    # The new slot's values of the existing plan go out at once, the run follows.
+    assert dispatched == [BASE + SLOT + 10]
     now["ts"] = BASE + SLOT + 21
     await ems_module.ems_manage_energy()
     assert len(calls) == 2
+    assert len(dispatched) == 1
 
 
 @pytest.mark.asyncio
@@ -236,3 +246,29 @@ async def test_replan_due_respects_switch_and_min_interval(monkeypatch):
     ems.last_run_datetime = to_datetime("2026-10-26T10:17:00Z")  # 3 min ago
     assert await ems_module._replan_due(ems, now) is False
     assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_dispatch_current_pushes_existing_plan_only_when_idle(monkeypatch):
+    from unittest.mock import AsyncMock, Mock
+
+    from akkudoktoreos.core.ems import EnergyManagement, EnergyManagementStage
+
+    stages = []
+    adapter = Mock()
+
+    async def update(force):
+        stages.append(EnergyManagement._stage)
+
+    adapter.update_data = AsyncMock(side_effect=update)
+    monkeypatch.setattr(EnergyManagement, "adapter", adapter)
+    monkeypatch.setattr(EnergyManagement, "_optimization_solution", None)
+    ems = EnergyManagement()
+    assert await ems.dispatch_current() is False  # no plan yet
+    monkeypatch.setattr(EnergyManagement, "_optimization_solution", object())
+    assert await ems.dispatch_current() is True
+    assert stages == [EnergyManagementStage.CONTROL_DISPATCH]
+    assert EnergyManagement._stage == EnergyManagementStage.IDLE
+    async with EnergyManagement._run_lock:
+        assert await ems.dispatch_current() is False  # a run is in progress
+    assert len(stages) == 1

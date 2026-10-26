@@ -59,6 +59,7 @@
                "time_limit_s": 10.0,
                "mip_rel_gap": 0.0001,
                "hp_search_seconds": 20.0,
+               "thermal_model": true,
                "seeds": 3,
                "polish_generations": 30,
                "polish_individuals": 60,
@@ -119,6 +120,7 @@
                "time_limit_s": 10.0,
                "mip_rel_gap": 0.0001,
                "hp_search_seconds": 20.0,
+               "thermal_model": true,
                "seeds": 3,
                "polish_generations": 30,
                "polish_individuals": 60,
@@ -161,6 +163,7 @@
 | scenarios | `bool` | `rw` | `False` | Plan against three weighted scenarios (central 50 %, little PV + high load 25 %, much PV + low load 25 %) instead of one forecast; appliance starts and the first `shared_slots` battery decisions are common to all. |
 | seeds | `int` | `rw` | `3` | Best candidates handed to the polish step. |
 | shared_slots | `int` | `rw` | `4` | Slots decided jointly for all scenarios. |
+| thermal_model | `bool` | `rw` | `True` | Plan the heat pump inside the MILP (linear building and tank model, COP secants) and turn the heat schedule into mode candidates; off = mode candidates from heuristics and the coordinate search only. |
 | time_limit_s | `float` | `rw` | `10.0` | Time limit of one dispatch MILP [s]. |
 :::
 <!-- pyml enable line-length -->
@@ -177,6 +180,7 @@
                "time_limit_s": 10.0,
                "mip_rel_gap": 0.0001,
                "hp_search_seconds": 20.0,
+               "thermal_model": true,
                "seeds": 3,
                "polish_generations": 30,
                "polish_individuals": 60,

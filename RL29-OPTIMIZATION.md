@@ -10,6 +10,9 @@ standardmäßig aus; ohne Konfiguration verhält sich EOS wie vorher.
 | 3 | Grundlast-ML (LightGBM, Quantile, Feiertage, Urlaub), PV-Ensemble mit Selbstkalibrierung | `prediction/loadml.py`, `prediction/calendarfeatures.py`, `prediction/pvforecastensemble.py` | `tests/rl29/test_load_ml.py`, `tests/rl29/test_pv_ensemble.py` |
 | 4 | MILP-Optimierer, umschaltbar neben GENETIC; Szenarien, Netzgrenzen, A/B-Betrieb | `optimization/milp/`, `optimization/optimization.py` | `tests/rl29/test_milp_*.py`, `scripts/rl29/compare_milp_genetic.py` |
 | 5 | Neuplanung bei Abweichung, Kennzahlen-Endpunkte für HA | `core/replan.py`, `server/eos.py` (`/history/summary`, `/history/hours`) | `tests/rl29/test_rolling_horizon.py`, `tests/rl29/test_history.py` |
+| 6 | Wärmepumpe im MILP (lineares Gebäude-/Speichermodell) | `optimization/milp/thermal.py`, `milpoptimization.py` | `tests/rl29/test_milp_thermal.py` |
+| 7 | 15-Minuten-Raster, Plan-Werte sofort zum Slotbeginn an HA | `core/ems.py` (`dispatch_current`) | `tests/rl29/test_rolling_horizon.py` |
+| 8 | Preisprognose nach dem Day-ahead (LightGBM statt ETS) | `prediction/elecpriceml.py`, `elecpriceabc.py`, `elecpriceenergycharts.py` | `tests/rl29/test_price_ml.py` |
 
 ## Phase 2: rollierender Horizont
 
@@ -150,6 +153,87 @@ Nicht im MILP: E-Auto (dann reine GENETIC-Suche), Batterieexport bei Direktverma
 
 Ergebnis am 26.10.2026 (96 Slots, GENETIC 300×400): MILP −1,319 € gegen GENETIC −1,315 €
 bei 24 s statt 128 s Rechenzeit.
+
+## Phase 6: Wärmepumpe im MILP
+
+Bisher plante der MILP Akku, Netz und Waschmaschine exakt, die Wärmepumpen-Modi aber nur über
+Kandidaten (Status quo, Heuristiken) und eine Koordinatensuche. Jetzt plant ein gemeinsames
+MILP zuerst die **Wärme** (`optimization/milp/thermal.py`, `milp.thermal_model`, Standard an):
+
+- Gebäude (Estrich + Raum) und Warmwasserspeicher als lineare Zustandsgleichungen, exakt
+  diskretisiert wie in der Simulation; Lüften, Solargewinne, Zapfprofil je Slot.
+- Strom der Raumheizung über die COP-Kurve (Stützstellen, konvex), Warmwasser mit dem COP je
+  Slot, Heizstab 1:1; Verdichter teilt sich zwischen Heizung und Warmwasser; §14a-Grenze.
+- Komfortband (weich, mit den konfigurierten Strafen), Warmwasser-Untergrenze, Legionellen-Frist
+  (binär), Warmwasser fertig zur Urlaubsrückkehr, Wert der gespeicherten Wärme am Ende.
+- Eigener WP-Zähler (§14a Modul 2): eigener Preis, nicht in der Hausbilanz.
+
+Der optimale Wärmeplan wird in **Modi** übersetzt (das, was HA ausführen kann): Stunde für Stunde
+wird jeder erlaubte Modus exakt simuliert und der gewählt, der den MILP-Zuständen am nächsten
+kommt. Diese Kandidaten laufen dann wie alle anderen durch die exakte Bewertung; die
+Koordinatensuche startet vom besten Kandidaten jeder Familie (Modell und Heuristik) und behält
+das bessere Ergebnis. Nicht im Modell: Kühlen (dann wie bisher nur Kandidatensuche).
+
+Ergebnisse (synthetischer Wintertag mit Preistal, Akku, WP, 15 min):
+
+| | ohne WP-Modell | mit WP-Modell |
+| --- | --- | --- |
+| bester Startkandidat (24 h) | 12,46 € | 11,55 € |
+| nach Koordinatensuche (24 h) | 11,44 € | 11,44 € |
+| 48 h, 2 s Suchzeit | 25,00 € | 24,34 € |
+| GENETIC 300 Gen. × 150 danach | – | −0,002 € |
+
+Heißt: bei unserem 24-h-Horizont findet die Suche dasselbe Optimum, mit dem Modell aber in einem
+Bruchteil der Auswertungen; bei längeren Horizonten oder knapper Rechenzeit ist das Modell
+deutlich besser. Ein langer GENETIC-Lauf danach findet praktisch nichts mehr: der Plan ist am
+erreichbaren Optimum. Legionellenläufe mit Heizstab plant das Modell direkt in die günstigen
+Slots vor der Frist.
+
+## Phase 7: 15-Minuten-Raster
+
+`optimization.genetic.interval_sec: 900`. Die Preise kommen ohnehin viertelstündlich; Akku und
+Waschmaschine werden je Viertelstunde geplant, die WP-Modi weiter je Stunde (4 Slots je Gen).
+Mit `ems.run_on_slot_start` plant EOS alle 15 min neu. Neu: Zum Slotbeginn schickt EOS die Werte
+des **bestehenden** Plans für den neuen Slot sofort an HA (`dispatch_current`), der neue Lauf
+folgt ~20 s + Rechenzeit später; vorher kamen die Werte erst nach dem Lauf.
+
+Rechenzeit: MILP-Tage ~30 s je Lauf, GENETIC-Tage (300 × 400) deutlich länger als stündlich
+(Faktor 2–3); bei Bedarf `genetic.generations` senken. `milp.shared_slots` (4) sind bei 15 min
+eine Stunde.
+
+## Phase 8: Preisprognose nach dem Day-ahead
+
+Nach dem letzten veröffentlichten Preis (bis Mitternacht, ab ~13 Uhr bis Mitternacht des
+Folgetags) bis zum Ende des Prognosehorizonts (72 h) kam bisher eine ETS-Glättung der
+Preishistorie. `elecprice.ml.enabled: true` ersetzt sie durch LightGBM
+(`prediction/elecpriceml.py`):
+
+- Merkmale: Tageszeit, Wochentag, Tagtyp (Werktag/Samstag/Sonn- und Feiertag), Jahreszeit,
+  Vorlauf, Preis zur selben Zeit am letzten bekannten Tag und eine Woche vorher, Niveau und
+  Spanne des letzten Tages, Wochenmittel, Wetter am Standort (Einstrahlung, Wind, Temperatur,
+  Bewölkung) zur Zielzeit und am letzten bekannten Tag.
+- Trainiert wird wie im Betrieb: für jede vergangene Mitternacht werden die folgenden 72 h aus dem
+  damals Bekannten vorhergesagt.
+- Wird nur genutzt, wenn es auf den letzten `holdout_days` (7) besser ist als ETS; neu
+  trainiert alle 6 h. Bericht: `<data>/rl29/price_ml.json`. Beim ersten Mal holt EOS
+  `history_days` (180) Tage Preise nach.
+
+Rückblick auf echte Daten (Energy-Charts DE-LU, 15 min, Wetter am Standort, Stand 26.10.2026):
+
+| Training | Prüfzeitraum | MAE LightGBM | MAE ETS |
+| --- | --- | --- | --- |
+| 60 Tage | 14 Tage | 3,87 ct/kWh | 5,11 ct/kWh |
+| 120 Tage, ohne Wetter | 14 Tage | 4,50 ct/kWh | 5,11 ct/kWh |
+| 120 Tage | 14 Tage | 4,34 ct/kWh | 5,11 ct/kWh |
+| 175 Tage | 14 Tage | 4,04 ct/kWh | 5,11 ct/kWh |
+| 175 Tage | 28 Tage | 4,05 ct/kWh | 5,30 ct/kWh |
+
+Also 15–25 % weniger Fehler bei den Stunden, die über Akku-Restladung und Wärmevorrat für morgen
+entscheiden.
+
+```json
+{"elecprice": {"ml": {"enabled": true}}, "optimization": {"genetic": {"interval_sec": 900}}}
+```
 
 ## Einführung (Vorschlag)
 

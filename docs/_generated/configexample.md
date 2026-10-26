@@ -526,6 +526,19 @@
                "filter_id": 4169,
                "region": "DE"
            },
+           "ml": {
+               "enabled": false,
+               "history_days": 180,
+               "min_days": 28,
+               "holdout_days": 7,
+               "horizon_hours": 72,
+               "refit_hours": 6.0,
+               "state": "BW",
+               "num_leaves": 15,
+               "n_estimators": 300,
+               "learning_rate": 0.05,
+               "min_data_in_leaf": 40
+           },
            "tibber": {
                "access_token": null,
                "home_id": null
@@ -675,6 +688,7 @@
                "time_limit_s": 10.0,
                "mip_rel_gap": 0.0001,
                "hp_search_seconds": 20.0,
+               "thermal_model": true,
                "seeds": 3,
                "polish_generations": 30,
                "polish_individuals": 60,
