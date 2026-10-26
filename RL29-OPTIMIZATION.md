@@ -71,10 +71,10 @@ angepasste Standardprofil). Bericht: `<data>/rl29/load_ml.json`.
 Voraussetzungen:
 - `devices.heat_pumps.wbb12.optimization.load_forecast_includes_heat_pump` bleibt `false`
   (Grundlast ohne WP).
-- Hauszähler und WP-Messung müssen zueinander passen (RL29-HEATPUMP.md, 19.10.: Hausverbrauch
-  5,1 kWh, `sensor.energie_warmepumpe` 3,0 kWh, Weishaupt-Statistik 12 kWh - noch nicht
-  stimmig). Stunden mit negativer Grundlast werden verworfen; bleiben zu wenige gesunde Tage,
-  bleibt `LoadMeasured` aktiv. Der Bericht zeigt die Zahl der Tage.
+- Referenz für den WP-Verbrauch ist die KNX-Messung, nicht der Zähler der Weishaupt (der erfasst
+  nicht alle Verbräuche der WP, z. B. den Kühlstrom). Die Grundlast ist damit
+  KNX-Hausverbrauch − KNX-WP. Stunden mit negativer Grundlast (Messlücken) werden verworfen;
+  bleiben zu wenige gesunde Tage, bleibt `LoadMeasured` aktiv. Der Bericht zeigt die Zahl der Tage.
 - `wbb12-electric-power` (KNX `sensor.strom_warmepumpe`) muss mit Historie in EOS sein
   (steht schon in `device_measurement_history_keys`). Der Heizstab (AC THOR) ist kein
   EOS-Messwert; solange er läuft, gehört er in die Grundlast. Sobald er in EOS geplant wird,
