@@ -62,7 +62,7 @@ volumes:
 ```
 
 `EOS_HISTORY_PASSWORD` goes into the stack's environment variables in Portainer.
-No port is published: only EOS (and, if wanted, Grafana in the same stack) reach it.
+No port is published: only EOS reaches it.
 
 ## EOS configuration
 
@@ -104,37 +104,48 @@ No port is published: only EOS (and, if wanted, Grafana in the same stack) reach
   (e.g. the heat pump meter) need an entry in `adapter.homeassistant.device_measurement_entity_ids`
   or `measurement.*_emr_keys` first.
 
-## Grafana (optional)
+## Home Assistant
 
-Dashboard and provisioning live in `scripts/rl29/grafana/`. Add to the `eos` stack:
+EOS computes everything; the dashboard lives in Home Assistant (tab "EOS Steuerung" of
+"Energie & Kosten"). Two endpoints are made for HA REST sensors:
+
+- `GET /v1/energy-management/history/summary?days=30` — `kpi` (MAE/bias per series and lead
+  time, keys `<name>_mae_<lead>h`), `plan` (latest run: algorithm, duration, planned net costs,
+  baseline, saving), `days` (realised net grid costs per day with the planning algorithm),
+  `ab` (mean daily costs per algorithm).
+- `GET /v1/energy-management/history/hours?hours=72&forecast_lead_h=6&plan_lead_h=1` —
+  `data`: per hour `<name>_actual` / `<name>_predicted` for every `accuracy` pair.
+
+HA side (next to the existing `sensor.eos_plan` / `sensor.eos_prognose` REST sensors):
 
 ```yaml
-  eos-grafana:
-    image: grafana/grafana-oss:latest
-    restart: unless-stopped
-    environment:
-      EOS_HISTORY_PASSWORD: ${EOS_HISTORY_PASSWORD}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
-    volumes:
-      - eos-grafana:/var/lib/grafana
-      - /opt/eos/grafana/provisioning:/etc/grafana/provisioning:ro
-      - /opt/eos/grafana/dashboards:/var/lib/grafana/dashboards:ro
-    ports:
-      - "3000:3000"
-    depends_on:
-      - eos-history
+rest:
+  - resource: http://eos.local:8503/v1/energy-management/history/summary?days=30
+    scan_interval: 900
+    sensor:
+      - name: EOS Historie
+        unique_id: eos_historie
+        value_template: "{{ value_json.state }}"
+        device_class: timestamp
+        json_attributes: [enabled, last_error, kpi, plan, days, ab]
+  - resource: http://eos.local:8503/v1/energy-management/history/hours?hours=72&forecast_lead_h=6&plan_lead_h=1
+    scan_interval: 900
+    sensor:
+      - name: EOS Historie Stunden
+        unique_id: eos_historie_stunden
+        value_template: "{{ value_json.state }}"
+        device_class: timestamp
+        json_attributes: [data]
 ```
 
-(`eos-grafana` also goes under `volumes:`; copy `scripts/rl29/grafana/*` to `/opt/eos/grafana/`
-on the VM.) The dashboard "EOS – Prognosen, Pläne, Kosten" shows PV and load forecast vs.
-actual, MAE and bias per lead time, planned saving vs. baseline, run time, room temperature
-and grid import plan vs. actual, and the realised costs per day and algorithm (A/B).
-A reverse-proxy entry (e.g. `grafana.example.org` in NPM) can follow.
+The large attributes (`days`, `data`) are for the charts only; exclude both sensors from the
+recorder if the database grows (`recorder: exclude: entities:`).
 
 ## Reading the results
 
 - `GET /v1/energy-management/history?days=7` — status, latest accuracy, recent runs with
   baseline, realised net grid costs per day with the planning algorithm (`days`).
+- `GET /v1/energy-management/history/summary` and `/history/hours` — see Home Assistant above.
 - EOS log, once an hour: `History accuracy pv lead 6 h: n=... MAE=... bias=...`.
 - SQL, e.g. planned saving against the self-consumption baseline per day:
 

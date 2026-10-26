@@ -9,7 +9,7 @@ standardmäßig aus; ohne Konfiguration verhält sich EOS wie vorher.
 | 2 | Rollierender Horizont: Lauf zu Slotbeginn, SoC-Fallback aus dem letzten Plan | `core/ems.py`, `core/emsettings.py`, `configrequest.py` | `tests/rl29/test_rolling_horizon.py` |
 | 3 | Grundlast-ML (LightGBM, Quantile, Feiertage, Urlaub), PV-Ensemble mit Selbstkalibrierung | `prediction/loadml.py`, `prediction/calendarfeatures.py`, `prediction/pvforecastensemble.py` | `tests/rl29/test_load_ml.py`, `tests/rl29/test_pv_ensemble.py` |
 | 4 | MILP-Optimierer, umschaltbar neben GENETIC; Szenarien, Netzgrenzen, A/B-Betrieb | `optimization/milp/`, `optimization/optimization.py` | `tests/rl29/test_milp_*.py`, `scripts/rl29/compare_milp_genetic.py` |
-| 5 | Neuplanung bei Abweichung, Grafana-Dashboard | `core/replan.py`, `scripts/rl29/grafana/` | `tests/rl29/test_rolling_horizon.py`, `tests/rl29/test_history.py` |
+| 5 | Neuplanung bei Abweichung, Kennzahlen-Endpunkte für HA | `core/replan.py`, `server/eos.py` (`/history/summary`, `/history/hours`) | `tests/rl29/test_rolling_horizon.py`, `tests/rl29/test_history.py` |
 
 ## Phase 2: rollierender Horizont
 
@@ -129,8 +129,9 @@ Erweiterungen (alle optional):
   plant der MILP ohne sie und meldet das im Log. Negative Einspeisevergütung führt
   automatisch zum Abregeln statt Einspeisen.
 - **A/B-Betrieb**: `optimization.alternate_algorithms: ["GENETIC", "MILP"]` wechselt den
-  Algorithmus täglich (lokaler Tag). `GET /v1/energy-management/history?days=30` liefert unter
-  `days` die realisierten Netzkosten je Tag und Algorithmus, das Grafana-Dashboard ebenso.
+  Algorithmus täglich (lokaler Tag). `GET /v1/energy-management/history/summary` liefert unter
+  `days` die realisierten Netzkosten je Tag und Algorithmus und unter `ab` den Mittelwert je
+  Algorithmus; angezeigt im HA-Dashboard „Energie & Kosten“, Tab „EOS Steuerung“.
   Achtung: Tage sind nicht gleich (Wetter, Verbrauch); erst über mehrere Wochen aussagekräftig.
 
 Kühlen, §14a-Dimmen und der Heizstab stecken im Wärmepumpenmodell und damit in den
@@ -158,6 +159,6 @@ bei 24 s statt 128 s Rechenzeit.
 3. `load.provider: LoadML` und `pvforecast.provider: PVForecastEnsemble`; die Berichte in
    `<data>/rl29/` zeigen, ob ML und Kalibrierung greifen.
 4. `optimization.alternate_algorithms: ["GENETIC", "MILP"]` und `milp.scenarios: true`
-   für einige Wochen, dann im Dashboard die realisierten Kosten je Algorithmus vergleichen
+   für einige Wochen, dann im HA-Dashboard die realisierten Kosten je Algorithmus vergleichen
    und `alternate_algorithms` wieder leeren, `algorithm` auf den Sieger. Rückweg jederzeit
    über die Konfiguration.

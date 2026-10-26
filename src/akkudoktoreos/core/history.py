@@ -23,7 +23,7 @@ from __future__ import annotations
 import math
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterable, Optional, Sequence
 
 from loguru import logger
@@ -550,7 +550,7 @@ FROM priced p
 LEFT JOIN algo ON algo.day = (p.hour AT TIME ZONE %(tz)s)::date
 GROUP BY 1, 2 ORDER BY 1
 """
-"""Realised net grid costs per local day and algorithm (also used by the Grafana dashboard)."""
+"""Realised net grid costs per local day and algorithm."""
 
 
 class HistoryUnavailable(RuntimeError):
@@ -821,7 +821,8 @@ class HistoryStore:
         with self.connect() as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT run_id, issued_at, algorithm, duration_s, costs_amt, revenues_amt, "
-                "losses_wh, baseline_net_amt FROM eos_run WHERE issued_at >= %s AND issued_at < %s "
+                "losses_wh, baseline_net_amt, meta FROM eos_run "
+                "WHERE issued_at >= %s AND issued_at < %s "
                 "ORDER BY issued_at",
                 (_utc(start), _utc(end)),
             )
@@ -834,6 +835,7 @@ class HistoryStore:
                 "revenues_amt",
                 "losses_wh",
                 "baseline_net_amt",
+                "meta",
             )
             return [dict(zip(keys, row)) for row in cur.fetchall()]
 
@@ -857,6 +859,43 @@ class HistoryStore:
                 for row in cur.fetchall()
             ]
 
+    def hourly_comparison(
+        self,
+        pairs: Sequence[HistoryAccuracyPair],
+        start: datetime,
+        end: datetime,
+        forecast_lead_h: float,
+        plan_lead_h: float,
+    ) -> list[dict[str, Any]]:
+        """Predicted and actual value per hour for every pair (for charts).
+
+        Forecast pairs use the newest forecast issued at least ``forecast_lead_h``
+        before the hour, plan pairs the newest plan issued ``plan_lead_h`` before.
+        Rows: ``{"hour": ISO, "<name>_actual": v, "<name>_predicted": v, ...}``.
+        """
+        rows: dict[datetime, dict[str, Any]] = {}
+        for pair in pairs:
+            lead = forecast_lead_h if pair.source == "forecast" else plan_lead_h
+            predicted = pick_for_lead(
+                hourly_predicted(
+                    self.predicted_rows(
+                        pair.source, pair.predicted, start - timedelta(days=3), end
+                    ),
+                    pair.kind,
+                ),
+                lead,
+            )
+            actual = self.actual_series(pair.actual, start, end)
+            for hour in set(predicted) | set(actual):
+                if not (start <= hour < end):
+                    continue
+                row = rows.setdefault(hour, {"hour": hour.isoformat()})
+                if hour in actual:
+                    row[f"{pair.name}_actual"] = round(actual[hour], 3)
+                if hour in predicted:
+                    row[f"{pair.name}_predicted"] = round(predicted[hour], 3)
+        return [rows[h] for h in sorted(rows)]
+
     def evaluate(
         self,
         pairs: Sequence[HistoryAccuracyPair],
@@ -877,3 +916,55 @@ class HistoryStore:
                     accuracy(pair.name, float(lead), pick_for_lead(hourly, lead), actual)
                 )
         return results
+
+
+def _iso(value: Any) -> Any:
+    """ISO text of a date/datetime, anything else unchanged."""
+    return value.isoformat() if isinstance(value, (date, datetime)) else value
+
+
+def summary_from(
+    accuracy_rows: Sequence[dict[str, Any]],
+    runs: Sequence[dict[str, Any]],
+    days: Sequence[dict[str, Any]],
+) -> dict[str, Any]:
+    """Flat key figures for dashboards (Home Assistant REST sensor attributes).
+
+    - ``kpi``: ``<name>_mae_<lead>h`` and ``<name>_bias_<lead>h`` per accuracy row,
+    - ``plan``: the latest run (algorithm, duration, planned net costs, baseline, saving),
+    - ``days``: realised net grid costs per local day with the planning algorithm,
+    - ``ab``: number of days and mean daily net costs per algorithm (A/B comparison).
+    """
+    kpi: dict[str, Any] = {}
+    for row in accuracy_rows:
+        lead = float(row.get("lead_h") or 0)
+        label = f"{row['name']}_%s_{lead:g}h"
+        kpi[label % "mae"] = row.get("mae")
+        kpi[label % "bias"] = row.get("bias")
+    plan: dict[str, Any] = {}
+    if runs:
+        last = runs[-1]
+        meta = last.get("meta") or {}
+        issued = last.get("issued_at")
+        plan = {
+            "issued_at": _iso(issued),
+            "algorithm": last.get("algorithm"),
+            "duration_s": last.get("duration_s"),
+            "baseline_net_amt": last.get("baseline_net_amt"),
+            "plan_net_amt": meta.get("plan_net_amt"),
+            "saving_vs_baseline_amt": meta.get("saving_vs_baseline_amt"),
+        }
+    day_rows = []
+    ab: dict[str, dict[str, Any]] = {}
+    for row in days:
+        day = row.get("day")
+        day_rows.append({**row, "day": _iso(day)})
+        algorithm = row.get("algorithm")
+        net = row.get("net_amt")
+        if algorithm and net is not None and (row.get("hours") or 0) >= 20:
+            entry = ab.setdefault(str(algorithm), {"days": 0, "sum": 0.0})
+            entry["days"] += 1
+            entry["sum"] += float(net)
+    for entry in ab.values():
+        entry["mean_net_amt"] = round(entry.pop("sum") / entry["days"], 4)
+    return {"kpi": kpi, "plan": plan, "days": day_rows, "ab": ab}

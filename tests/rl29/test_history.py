@@ -462,31 +462,169 @@ def test_active_algorithm_alternates_by_day():
     assert active_algorithm(settings, monday) == OptimizationAlgorithm.GENETIC
 
 
+def test_summary_from_kpis_plan_days_and_ab():
+    from datetime import date
+
+    from akkudoktoreos.core.history import summary_from
+
+    accuracy_rows = [
+        {"name": "pv", "lead_h": 6.0, "mae": 120.0, "bias": -30.0},
+        {"name": "plan_room", "lead_h": 1.0, "mae": 0.3, "bias": 0.1},
+    ]
+    runs = [
+        {
+            "issued_at": T0,
+            "algorithm": "GENETIC",
+            "duration_s": 100.0,
+            "baseline_net_amt": 2.0,
+            "meta": {},
+        },
+        {
+            "issued_at": T0 + timedelta(minutes=15),
+            "algorithm": "MILP",
+            "duration_s": 20.0,
+            "baseline_net_amt": 2.0,
+            "meta": {"plan_net_amt": 1.5, "saving_vs_baseline_amt": 0.5},
+        },
+    ]
+    days = [
+        {"day": date(2026, 10, 20), "algorithm": "GENETIC", "hours": 24, "net_amt": 3.0},
+        {"day": date(2026, 10, 21), "algorithm": "MILP", "hours": 24, "net_amt": 2.0},
+        {"day": date(2026, 10, 22), "algorithm": "GENETIC", "hours": 24, "net_amt": 4.0},
+        {"day": date(2026, 10, 23), "algorithm": "MILP", "hours": 5, "net_amt": 0.1},  # incomplete
+    ]
+    summary = summary_from(accuracy_rows, runs, days)
+    assert summary["kpi"] == {
+        "pv_mae_6h": 120.0,
+        "pv_bias_6h": -30.0,
+        "plan_room_mae_1h": 0.3,
+        "plan_room_bias_1h": 0.1,
+    }
+    assert summary["plan"]["algorithm"] == "MILP"
+    assert summary["plan"]["saving_vs_baseline_amt"] == 0.5
+    assert summary["plan"]["issued_at"].startswith("2026-10-26T10:15")
+    assert summary["days"][0]["day"] == "2026-10-20"
+    assert summary["ab"] == {
+        "GENETIC": {"days": 2, "mean_net_amt": 3.5},
+        "MILP": {"days": 1, "mean_net_amt": 2.0},
+    }
+    assert summary_from([], [], []) == {"kpi": {}, "plan": {}, "days": [], "ab": {}}
+
+
 @needs_pg
-def test_grafana_dashboard_queries_run_on_the_schema(store):
-    import json
-    import re
-    from pathlib import Path
-
-    import psycopg
-
-    store.ensure_schema()
-    path = (
-        Path(__file__).parents[2]
-        / "scripts"
-        / "rl29"
-        / "grafana"
-        / "dashboards"
-        / "eos-history.json"
+def test_hourly_comparison(store):
+    target = datetime(2026, 10, 20, 12, tzinfo=UTC)
+    issued = target - timedelta(hours=7)
+    store.write_run(
+        issued,
+        "GENETIC",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        frame_rows(quarter_frame(target, 2, {"pvforecast_ac_energy_wh": 250.0}), issued, 48),
+        frame_rows(quarter_frame(target, 2, {"wbb12_room_temperature_c": 21.2}), issued, 48),
     )
-    dashboard = json.loads(path.read_text(encoding="utf-8"))
-    assert dashboard["uid"] == "eos-history" and len(dashboard["panels"]) >= 8
-    with psycopg.connect(store.dsn) as conn:
-        for panel in dashboard["panels"]:
-            sql = panel["targets"][0]["rawSql"]
-            sql = re.sub(r"\$__timeFilter\(([^)]+)\)", r"\1 > now() - interval '7 days'", sql)
-            sql = sql.replace("$__timeFrom()", "now() - interval '7 days'").replace(
-                "$__timeTo()", "now()"
-            )
-            conn.execute(sql).fetchall()
-            conn.rollback()
+    store.write_actuals([(target, "pv_wh", 900.0), (target, "room_c", 21.0)])
+    pairs = [
+        HistoryAccuracyPair(name="pv", predicted="pvforecast_ac_energy_wh", actual="pv_wh"),
+        HistoryAccuracyPair(
+            name="room",
+            predicted="wbb12_room_temperature_c",
+            source="plan",
+            actual="room_c",
+            kind="level",
+        ),
+    ]
+    rows = store.hourly_comparison(
+        pairs, target - timedelta(hours=1), target + timedelta(hours=3), 6.0, 1.0
+    )
+    first = {r["hour"]: r for r in rows}[target.isoformat()]
+    assert first["pv_actual"] == 900.0 and first["pv_predicted"] == 1000.0
+    assert first["room_actual"] == 21.0 and first["room_predicted"] == pytest.approx(21.2)
+    second = {r["hour"]: r for r in rows}[(target + timedelta(hours=1)).isoformat()]
+    assert "pv_actual" not in second and second["pv_predicted"] == 1000.0
+    # The first hour was forecast 7 h ahead only: nothing for an 8 h lead.
+    assert all(
+        "pv_predicted" not in r
+        for r in store.hourly_comparison(pairs, target, target + timedelta(hours=1), 8.0, 1.0)
+    )
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_history_endpoints_for_home_assistant(store, config_eos, monkeypatch):
+    import httpx
+
+    from akkudoktoreos.core.historyrecorder import HistoryRecorder
+    from akkudoktoreos.server import eos
+
+    config_eos.merge_settings_from_dict(
+        {
+            "database": {
+                "history": {
+                    "enabled": True,
+                    "dsn": store.dsn,
+                    "accuracy": [
+                        {"name": "pv", "predicted": "pvforecast_ac_energy_wh", "actual": "pv_wh"}
+                    ],
+                }
+            }
+        }
+    )
+    recorder = HistoryRecorder()
+    monkeypatch.setattr(HistoryRecorder, "_instance", recorder)
+    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    issued = now - timedelta(hours=10)
+    store.write_run(
+        issued,
+        "MILP",
+        12.0,
+        1.0,
+        0.2,
+        5.0,
+        1.3,
+        {"plan_net_amt": 0.8, "saving_vs_baseline_amt": 0.5},
+        frame_rows(
+            quarter_frame(now - timedelta(hours=3), 2, {"pvforecast_ac_energy_wh": 100.0}),
+            issued,
+            48,
+        ),
+        [],
+    )
+    store.write_actuals([(now - timedelta(hours=3), "pv_wh", 380.0)])
+    store.write_accuracy(
+        now, 14, store.evaluate(config_eos.database.history.accuracy, [6.0], now, 14)
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=eos.app), base_url="http://test"
+    ) as client:
+        summary = (await client.get("/v1/energy-management/history/summary?days=7")).json()
+        hours = (await client.get("/v1/energy-management/history/hours?hours=6")).json()
+    assert summary["enabled"] is True and summary["last_error"] is None
+    assert (
+        summary["plan"]["algorithm"] == "MILP" and summary["plan"]["saving_vs_baseline_amt"] == 0.5
+    )
+    assert summary["kpi"]["pv_bias_6h"] == pytest.approx(20.0)
+    row = [r for r in hours["data"] if r["hour"] == (now - timedelta(hours=3)).isoformat()][0]
+    assert row["pv_actual"] == 380.0 and row["pv_predicted"] == 400.0
+    assert "state" in summary and "state" in hours
+
+
+@pytest.mark.asyncio
+async def test_history_endpoints_without_database(config_eos, monkeypatch):
+    import httpx
+
+    from akkudoktoreos.core.historyrecorder import HistoryRecorder
+    from akkudoktoreos.server import eos
+
+    monkeypatch.setattr(HistoryRecorder, "_instance", HistoryRecorder())
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=eos.app), base_url="http://test"
+    ) as client:
+        summary = (await client.get("/v1/energy-management/history/summary")).json()
+        hours = (await client.get("/v1/energy-management/history/hours")).json()
+    assert summary["enabled"] is False and summary["kpi"] == {} and summary["days"] == []
+    assert hours["data"] == []

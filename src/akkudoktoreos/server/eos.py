@@ -1969,6 +1969,88 @@ async def fastapi_energy_management_history_get(days: int = 7) -> dict:
     return result
 
 
+@app.get("/v1/energy-management/history/summary", tags=["energy-management"])
+async def fastapi_energy_management_history_summary_get(days: int = 30) -> dict:
+    """Key figures of the history for dashboards (RL29 fork).
+
+    Made for a Home Assistant REST sensor: ``state`` is the time of the summary, the
+    rest are attributes - ``kpi`` (MAE and bias per forecast/plan series and lead time),
+    ``plan`` (latest run with its saving against the self-consumption baseline), ``days``
+    (realised net grid costs per day with the planning algorithm) and ``ab`` (mean daily
+    costs per algorithm).
+    """
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+
+    from akkudoktoreos.core.history import summary_from
+    from akkudoktoreos.core.historyrecorder import HistoryRecorder
+
+    recorder = HistoryRecorder.instance()
+    settings = get_config().database.history
+    now = datetime.now(timezone.utc)
+    result: dict = {
+        "state": now.isoformat(timespec="seconds"),
+        "enabled": bool(settings.enabled and settings.dsn),
+        "last_error": recorder.last_error,
+        "kpi": {},
+        "plan": {},
+        "days": [],
+        "ab": {},
+    }
+    store = recorder.store(settings)
+    if store is None:
+        return result
+    window = timedelta(days=max(1, min(days, 90)))
+    try:
+        accuracy = await asyncio.to_thread(store.latest_accuracy)
+        runs = await asyncio.to_thread(store.runs, now - timedelta(days=2), now)
+        daily = await asyncio.to_thread(
+            store.daily_costs, now - window, now, get_config().general.timezone or "UTC"
+        )
+        result.update(summary_from(accuracy, runs, daily))
+    except Exception as exc:
+        result["last_error"] = str(exc)
+    return result
+
+
+@app.get("/v1/energy-management/history/hours", tags=["energy-management"])
+async def fastapi_energy_management_history_hours_get(
+    hours: int = 72, forecast_lead_h: float = 6.0, plan_lead_h: float = 1.0
+) -> dict:
+    """Predicted and actual value per hour for the configured accuracy pairs (RL29 fork).
+
+    ``data`` is a list of ``{"hour": ISO, "<name>_actual": v, "<name>_predicted": v}``;
+    forecasts are taken as issued ``forecast_lead_h`` before the hour, plans
+    ``plan_lead_h`` before. For charts (e.g. apexcharts-card ``data_generator``).
+    """
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+
+    from akkudoktoreos.core.historyrecorder import HistoryRecorder
+
+    recorder = HistoryRecorder.instance()
+    settings = get_config().database.history
+    now = datetime.now(timezone.utc)
+    result: dict = {"state": now.isoformat(timespec="seconds"), "data": []}
+    store = recorder.store(settings)
+    if store is None:
+        return result
+    end = now.replace(minute=0, second=0, microsecond=0)
+    start = end - timedelta(hours=max(1, min(hours, 24 * 14)))
+    try:
+        result["data"] = await asyncio.to_thread(
+            store.hourly_comparison,
+            settings.accuracy,
+            start,
+            end,
+            forecast_lead_h,
+            plan_lead_h,
+        )
+    except Exception as exc:
+        result["last_error"] = str(exc)
+    return result
+
+
 @app.get("/strompreis", tags=["prediction"], deprecated=True)
 async def fastapi_strompreis() -> list[float]:
     """Deprecated: Electricity Market Price Prediction per Wh [amount/Wh].

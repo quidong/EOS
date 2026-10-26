@@ -226,6 +226,9 @@ async def test_ems_run_with_milp_publishes_solution_plan_and_history_hook(
         {"optimization": {"milp": {"polish_generations": 2, "polish_individuals": 10}}}
     )
     ems = EnergyManagement()
+    # Leave no published solution behind for later tests (adapter docs read it).
+    for name in ("_genetic_solution", "_optimization_solution", "_plan"):
+        monkeypatch.setattr(EnergyManagement, name, None)
     monkeypatch.setattr(configrequest, "get_ems", lambda: ems)
     monkeypatch.setattr(EnergyManagement, "prediction", Mock(update_data=AsyncMock()))
     monkeypatch.setattr(EnergyManagement, "adapter", Mock(update_data=AsyncMock()))

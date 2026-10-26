@@ -1,6 +1,6 @@
 # Akkudoktor-EOS
 
-**Version**: `v0.3.0.dev2610261646438532`
+**Version**: `v0.3.0.dev2610261877809611`
 
 <!-- pyml disable line-length -->
 **Description**: This project provides a comprehensive solution for simulating and optimizing an energy system based on renewable energy sources. With a focus on photovoltaic (PV) systems, battery storage (batteries), load management (consumer requirements), heat pumps, electric vehicles, and consideration of electricity price data, this system enables forecasting and optimization of energy flow and costs over a specified period.
@@ -744,6 +744,76 @@ Long-term history status, latest forecast accuracy and recent runs (RL29 fork).
 ``runs`` lists the runs of the last ``days`` days with planned net costs and the
 self-consumption baseline for the same forecasts; ``days`` the realised net grid
 costs per day with the algorithm that planned it (A/B comparison).
+"""
+```
+<!-- pyml enable line-length -->
+
+**Parameters**:
+
+- `days` (query, optional): No description provided.
+
+**Responses**:
+
+- **200**: Successful Response
+
+- **422**: Validation Error
+
+---
+
+## GET /v1/energy-management/history/hours
+
+<!-- pyml disable line-length -->
+**Links**: [local](http://localhost:8503/docs#/default/fastapi_energy_management_history_hours_get_v1_energy-management_history_hours_get), [eos](https://petstore3.swagger.io/?url=https://raw.githubusercontent.com/Akkudoktor-EOS/EOS/refs/heads/main/openapi.json#/default/fastapi_energy_management_history_hours_get_v1_energy-management_history_hours_get)
+<!-- pyml enable line-length -->
+
+Fastapi Energy Management History Hours Get
+
+<!-- pyml disable line-length -->
+```python
+"""
+Predicted and actual value per hour for the configured accuracy pairs (RL29 fork).
+
+``data`` is a list of ``{"hour": ISO, "<name>_actual": v, "<name>_predicted": v}``;
+forecasts are taken as issued ``forecast_lead_h`` before the hour, plans
+``plan_lead_h`` before. For charts (e.g. apexcharts-card ``data_generator``).
+"""
+```
+<!-- pyml enable line-length -->
+
+**Parameters**:
+
+- `hours` (query, optional): No description provided.
+
+- `forecast_lead_h` (query, optional): No description provided.
+
+- `plan_lead_h` (query, optional): No description provided.
+
+**Responses**:
+
+- **200**: Successful Response
+
+- **422**: Validation Error
+
+---
+
+## GET /v1/energy-management/history/summary
+
+<!-- pyml disable line-length -->
+**Links**: [local](http://localhost:8503/docs#/default/fastapi_energy_management_history_summary_get_v1_energy-management_history_summary_get), [eos](https://petstore3.swagger.io/?url=https://raw.githubusercontent.com/Akkudoktor-EOS/EOS/refs/heads/main/openapi.json#/default/fastapi_energy_management_history_summary_get_v1_energy-management_history_summary_get)
+<!-- pyml enable line-length -->
+
+Fastapi Energy Management History Summary Get
+
+<!-- pyml disable line-length -->
+```python
+"""
+Key figures of the history for dashboards (RL29 fork).
+
+Made for a Home Assistant REST sensor: ``state`` is the time of the summary, the
+rest are attributes - ``kpi`` (MAE and bias per forecast/plan series and lead time),
+``plan`` (latest run with its saving against the self-consumption baseline), ``days``
+(realised net grid costs per day with the planning algorithm) and ``ab`` (mean daily
+costs per algorithm).
 """
 ```
 <!-- pyml enable line-length -->
