@@ -5,7 +5,7 @@ import urllib.request
 from asyncio import Lock, get_running_loop
 from concurrent.futures import ThreadPoolExecutor
 from enum import StrEnum
-from typing import ClassVar, Optional, cast
+from typing import Any, ClassVar, Optional, cast
 
 from loguru import logger
 from pydantic import computed_field
@@ -33,6 +33,7 @@ from akkudoktoreos.optimization.genetic.geneticsolution import GeneticSolution
 from akkudoktoreos.optimization.optimization import (
     OptimizationAlgorithm,
     OptimizationSolution,
+    active_algorithm,
 )
 from akkudoktoreos.utils.datetimeutil import DateTime, to_datetime
 
@@ -81,22 +82,53 @@ async def ems_manage_energy() -> None:
     ems = EnergyManagement()
     settings = ems.config.ems
     if getattr(settings, "run_on_slot_start", False):
-        algorithm = ems.config.optimization.algorithm
+        algorithm = _automatic_algorithm(ems.config)
         slot_seconds = (
             3600.0
             if algorithm == OptimizationAlgorithm.GENETIC0
             else float(ems.config.optimization.genetic.interval_sec)
         )
+        now = to_datetime()
         due = slot_run_due(
-            to_datetime().timestamp(),
+            now.timestamp(),
             slot_seconds,
             settings.slot_start_offset_sec,
             _aligned_last_slot,
         )
         if due is None:
-            return
-        _aligned_last_slot = due
+            if not await _replan_due(ems, now):
+                return
+        else:
+            _aligned_last_slot = due
     await ems.run()
+
+
+def _automatic_algorithm(config: Any) -> OptimizationAlgorithm:
+    """Configured algorithm, or today's one in A/B operation (RL29 fork)."""
+    if not getattr(config.optimization, "alternate_algorithms", None):
+        return config.optimization.algorithm
+    return active_algorithm(config.optimization, to_datetime(in_timezone=config.general.timezone))
+
+
+async def _replan_due(ems: "EnergyManagement", now: DateTime) -> bool:
+    """Extra run between slot starts when the plan no longer matches (RL29 fork)."""
+    settings = ems.config.ems
+    if not getattr(settings, "replan_on_deviation", False):
+        return False
+    last = ems.last_run_datetime
+    if last is not None and now.timestamp() - last.timestamp() < settings.replan_min_interval_sec:
+        return False
+    from akkudoktoreos.core.replan import deviation_reasons
+
+    try:
+        reasons = await deviation_reasons(ems, now)
+    except Exception as exc:
+        logger.debug("Replan check failed: {}", exc)
+        return False
+    if reasons:
+        logger.info("Re-planning before the next slot: {}", "; ".join(reasons))
+        return True
+    return False
 
 
 NOTIFY_TIMEOUT_SECONDS = 5.0
@@ -359,7 +391,7 @@ class EnergyManagement(
             # Remember/ set the start datetime of this energy management run.
             # None leads to current time as start datetime
             if algorithm is None:
-                algorithm = self.config.optimization.algorithm
+                algorithm = _automatic_algorithm(self.config)
             genetic_like = algorithm in (OptimizationAlgorithm.GENETIC, OptimizationAlgorithm.MILP)
             if start_datetime is None and genetic_like:
                 # Consumer windows and midnight-based forecasts use the site clock,
@@ -412,7 +444,7 @@ class EnergyManagement(
             logger.info("Starting energy management optimization.")
 
             if algorithm is None:
-                algorithm = self.config.optimization.algorithm
+                algorithm = _automatic_algorithm(self.config)
 
             run_solution: GeneticSolution | Genetic0Solution
 

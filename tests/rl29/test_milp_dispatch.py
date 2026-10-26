@@ -196,3 +196,50 @@ def test_horizon_of_192_slots_is_fast():
     )
     assert result.success
     assert result.solve_seconds < 10
+
+
+def test_scenarios_keep_reserve_and_share_first_decisions():
+    # Slot 0 cheap, slot 1 expensive with uncertain load (500 or 3000 Wh).
+    common = dict(
+        pv_wh=[0, 0],
+        load_wh=[0, 500],
+        price_per_wh=[10 * CENT, 40 * CENT],
+        feed_in_per_wh=[0, 0],
+        battery=battery(),
+    )
+    single = solve_dispatch(DispatchInput(**common))
+    assert single.charge_grid_wh[0] == pytest.approx(500)
+    robust = solve_dispatch(
+        DispatchInput(
+            **common,
+            scenarios=[(0.5, [0, 0], [0, 500]), (0.5, [0, 0], [0, 3000])],
+            shared_slots=1,
+        )
+    )
+    assert robust.success
+    # Buying for the high-load case pays off on average (10 ct vs. 40 ct).
+    assert robust.charge_grid_wh[0] == pytest.approx(3000)
+    assert robust.objective == pytest.approx(3000 * 10 * CENT, rel=1e-4)
+
+
+def test_scenario_validation_and_export_limit():
+    with pytest.raises(ValueError):
+        solve_dispatch(
+            DispatchInput(
+                pv_wh=[0, 0],
+                load_wh=[0, 0],
+                price_per_wh=[0, 0],
+                feed_in_per_wh=[0, 0],
+                scenarios=[(1.0, [0], [0])],
+            )
+        )
+    result = solve_dispatch(
+        DispatchInput(
+            pv_wh=[5000],
+            load_wh=[0],
+            price_per_wh=[30 * CENT],
+            feed_in_per_wh=[8 * CENT],
+            max_grid_export_wh=3000,
+        )
+    )
+    assert result.grid_export_wh == pytest.approx([3000])

@@ -1,0 +1,16 @@
+# Grafana datasource for the EOS history (RL29 fork). Mounted into the Grafana
+# container of the eos stack, see RL29-HISTORY.md.
+apiVersion: 1
+datasources:
+  - name: EOS History
+    uid: eos-history
+    type: grafana-postgresql-datasource
+    url: eos-history:5432
+    user: eos
+    jsonData:
+      database: eos
+      sslmode: disable
+      timescaledb: true
+      postgresVersion: 1700
+    secureJsonData:
+      password: ${EOS_HISTORY_PASSWORD}

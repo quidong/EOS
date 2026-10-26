@@ -9,6 +9,7 @@
 | ---- | -------------------- | ---- | --------- | ------- | ----------- |
 | algorithm | `EOS_OPTIMIZATION__ALGORITHM` | `<enum 'OptimizationAlgorithm'>` | `rw` | `required` | Optimization algorithm [GENETIC | GENETIC0 | MILP]. Defaults to GENETIC. |
 | algorithms | | `list[str]` | `ro` | `N/A` | Available optimization algorithms. |
+| alternate_algorithms | `EOS_OPTIMIZATION__ALTERNATE_ALGORITHMS` | `list[akkudoktoreos.optimization.optimization.OptimizationAlgorithm]` | `rw` | `required` | RL29 fork: A/B operation - when set, the algorithm changes every local day in this order (day number modulo the list length) and `algorithm` is ignored for automatic runs. The history records which algorithm planned each run, so realised costs can be compared. |
 | genetic | `EOS_OPTIMIZATION__GENETIC` | `GeneticCommonSettings` | `rw` | `required` | GENETIC optimization algorithm configuration. |
 | genetic0 | `EOS_OPTIMIZATION__GENETIC0` | `Genetic0CommonSettings` | `rw` | `required` | GENETIC0 optimization algorithm configuration. |
 | keys | | `list[str]` | `ro` | `N/A` | The keys of the solution. |
@@ -53,13 +54,20 @@
                    "ev_soc_miss": 10
                }
            },
+           "alternate_algorithms": [],
            "milp": {
                "time_limit_s": 10.0,
                "mip_rel_gap": 0.0001,
                "hp_search_seconds": 20.0,
                "seeds": 3,
                "polish_generations": 30,
-               "polish_individuals": 60
+               "polish_individuals": 60,
+               "scenarios": false,
+               "shared_slots": 4,
+               "pv_scenario_spread": 0.25,
+               "load_scenario_spread": null,
+               "max_grid_import_w": null,
+               "max_grid_export_w": null
            },
            "self_consumption_interpolator": "scipy"
        }
@@ -106,13 +114,20 @@
                "interval_sec": 3600,
                "horizon": 24
            },
+           "alternate_algorithms": [],
            "milp": {
                "time_limit_s": 10.0,
                "mip_rel_gap": 0.0001,
                "hp_search_seconds": 20.0,
                "seeds": 3,
                "polish_generations": 30,
-               "polish_individuals": 60
+               "polish_individuals": 60,
+               "scenarios": false,
+               "shared_slots": 4,
+               "pv_scenario_spread": 0.25,
+               "load_scenario_spread": null,
+               "max_grid_import_w": null,
+               "max_grid_export_w": null
            },
            "self_consumption_interpolator": "scipy",
            "algorithms": [
@@ -136,10 +151,16 @@
 | Name | Type | Read-Only | Default | Description |
 | ---- | ---- | --------- | ------- | ----------- |
 | hp_search_seconds | `float` | `rw` | `20.0` | Time budget of the coordinate search over the heat pump modes [s]. |
+| load_scenario_spread | `Optional[float]` | `rw` | `None` | Load of the outer scenarios: forecast x (1 +/- spread). None = the quantile width published by LoadML, else 0.2. |
+| max_grid_export_w | `Optional[float]` | `rw` | `None` | Grid feed-in limit [W]; PV above it is curtailed. |
+| max_grid_import_w | `Optional[float]` | `rw` | `None` | Grid import limit [W] (e.g. main fuse); infeasible plans fall back to no limit. |
 | mip_rel_gap | `float` | `rw` | `0.0001` | Relative optimality gap of the MILP. |
 | polish_generations | `int` | `rw` | `30` | GENETIC generations on the exact simulation after the MILP (0 = MILP plan only). |
 | polish_individuals | `int` | `rw` | `60` | Population of the polish step. |
+| pv_scenario_spread | `float` | `rw` | `0.25` | PV of the outer scenarios: forecast x (1 -/+ spread). |
+| scenarios | `bool` | `rw` | `False` | Plan against three weighted scenarios (central 50 %, little PV + high load 25 %, much PV + low load 25 %) instead of one forecast; appliance starts and the first `shared_slots` battery decisions are common to all. |
 | seeds | `int` | `rw` | `3` | Best candidates handed to the polish step. |
+| shared_slots | `int` | `rw` | `4` | Slots decided jointly for all scenarios. |
 | time_limit_s | `float` | `rw` | `10.0` | Time limit of one dispatch MILP [s]. |
 :::
 <!-- pyml enable line-length -->
@@ -158,7 +179,13 @@
                "hp_search_seconds": 20.0,
                "seeds": 3,
                "polish_generations": 30,
-               "polish_individuals": 60
+               "polish_individuals": 60,
+               "scenarios": true,
+               "shared_slots": 4,
+               "pv_scenario_spread": 0.25,
+               "load_scenario_spread": null,
+               "max_grid_import_w": null,
+               "max_grid_export_w": null
            }
        }
    }

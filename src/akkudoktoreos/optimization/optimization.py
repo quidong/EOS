@@ -70,6 +70,19 @@ class OptimizationCommonSettings(SettingsBaseModel):
         },
     )
 
+    alternate_algorithms: list[OptimizationAlgorithm] = Field(
+        default_factory=list,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: A/B operation - when set, the algorithm changes every local day "
+                "in this order (day number modulo the list length) and `algorithm` is "
+                "ignored for automatic runs. The history records which algorithm planned "
+                "each run, so realised costs can be compared."
+            ),
+            "examples": [[], ["GENETIC", "MILP"]],
+        },
+    )
+
     milp: MilpCommonSettings = Field(
         default_factory=MilpCommonSettings,
         json_schema_extra={
@@ -192,3 +205,15 @@ class OptimizationSolution(PydanticBaseModel):
             )
         }
     )
+
+
+def active_algorithm(settings: Any, moment: Any = None) -> OptimizationAlgorithm:
+    """Algorithm for an automatic run at ``moment`` (RL29 fork: A/B by local day).
+
+    ``moment`` is a datetime in the site time zone; None = configured algorithm.
+    """
+    order = list(getattr(settings, "alternate_algorithms", None) or [])
+    if not order or moment is None:
+        return settings.algorithm
+    day = moment.date().toordinal()
+    return OptimizationAlgorithm(order[day % len(order)])

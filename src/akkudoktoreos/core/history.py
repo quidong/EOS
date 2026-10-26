@@ -506,6 +506,52 @@ HYPERTABLES = {
 
 SERIES_TABLES = {"forecast": "eos_forecast", "plan": "eos_plan"}
 
+DAILY_COSTS_SQL = """
+WITH hours AS (
+    SELECT a.hour,
+           sum(CASE WHEN a.series = 'grid_import_wh' THEN a.value END) AS imp,
+           sum(CASE WHEN a.series = 'grid_export_wh' THEN a.value END) AS exp
+    FROM eos_actual a
+    WHERE a.series IN ('grid_import_wh', 'grid_export_wh')
+      AND a.hour >= %(start)s AND a.hour < %(end)s
+    GROUP BY a.hour
+), priced AS (
+    SELECT h.hour, h.imp, h.exp,
+           (SELECT avg(f.value) FROM eos_forecast f
+             WHERE f.series = 'elec_price_amt_kwh'
+               AND f.target_time >= h.hour AND f.target_time < h.hour + interval '1 hour'
+               AND f.issued_at = (SELECT max(f2.issued_at) FROM eos_forecast f2
+                                  WHERE f2.series = 'elec_price_amt_kwh'
+                                    AND f2.target_time = f.target_time
+                                    AND f2.issued_at <= h.hour)) AS price,
+           (SELECT avg(f.value) FROM eos_forecast f
+             WHERE f.series = 'feed_in_tariff_amt_kwh'
+               AND f.target_time >= h.hour AND f.target_time < h.hour + interval '1 hour'
+               AND f.issued_at = (SELECT max(f2.issued_at) FROM eos_forecast f2
+                                  WHERE f2.series = 'feed_in_tariff_amt_kwh'
+                                    AND f2.target_time = f.target_time
+                                    AND f2.issued_at <= h.hour)) AS tariff
+    FROM hours h
+), algo AS (
+    SELECT DISTINCT ON (day) day, algorithm FROM (
+        SELECT (issued_at AT TIME ZONE %(tz)s)::date AS day, algorithm, count(*) AS n
+        FROM eos_run WHERE issued_at >= %(start)s AND issued_at < %(end)s
+        GROUP BY 1, 2) c
+    ORDER BY day, n DESC
+)
+SELECT (p.hour AT TIME ZONE %(tz)s)::date AS day,
+       algo.algorithm,
+       count(*) AS hours,
+       sum(coalesce(p.imp, 0)) AS import_wh,
+       sum(coalesce(p.exp, 0)) AS export_wh,
+       sum(coalesce(p.imp, 0) / 1000 * coalesce(p.price, 0)
+           - coalesce(p.exp, 0) / 1000 * coalesce(p.tariff, 0)) AS net_amt
+FROM priced p
+LEFT JOIN algo ON algo.day = (p.hour AT TIME ZONE %(tz)s)::date
+GROUP BY 1, 2 ORDER BY 1
+"""
+"""Realised net grid costs per local day and algorithm (also used by the Grafana dashboard)."""
+
 
 class HistoryUnavailable(RuntimeError):
     """The history database cannot be used (no driver, no dsn, connection failed)."""
@@ -790,6 +836,26 @@ class HistoryStore:
                 "baseline_net_amt",
             )
             return [dict(zip(keys, row)) for row in cur.fetchall()]
+
+    def daily_costs(
+        self, start: datetime, end: datetime, timezone_name: str = "UTC"
+    ) -> list[dict[str, Any]]:
+        """Realised net grid costs per local day and the algorithm that planned it.
+
+        Import and export energy come from the actuals ``grid_import_wh`` and
+        ``grid_export_wh``; each hour is priced with the latest price / feed-in
+        forecast issued before the hour (as the plan saw it). The algorithm of a day is
+        the one of most stored runs that day (A/B operation).
+        """
+        self.ensure_schema()
+        sql = DAILY_COSTS_SQL
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(sql, {"start": _utc(start), "end": _utc(end), "tz": timezone_name})
+            keys = ("day", "algorithm", "hours", "import_wh", "export_wh", "net_amt")
+            return [
+                {k: (round(float(v), 4) if isinstance(v, float) else v) for k, v in zip(keys, row)}
+                for row in cur.fetchall()
+            ]
 
     def evaluate(
         self,

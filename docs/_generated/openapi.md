@@ -1,6 +1,6 @@
 # Akkudoktor-EOS
 
-**Version**: `v0.3.0.dev2610261632814698`
+**Version**: `v0.3.0.dev2610261646438532`
 
 <!-- pyml disable line-length -->
 **Description**: This project provides a comprehensive solution for simulating and optimizing an energy system based on renewable energy sources. With a focus on photovoltaic (PV) systems, battery storage (batteries), load management (consumer requirements), heat pumps, electric vehicles, and consideration of electricity price data, this system enables forecasting and optimization of energy flow and costs over a specified period.
@@ -742,7 +742,8 @@ Fastapi Energy Management History Get
 Long-term history status, latest forecast accuracy and recent runs (RL29 fork).
 
 ``runs`` lists the runs of the last ``days`` days with planned net costs and the
-self-consumption baseline for the same forecasts.
+self-consumption baseline for the same forecasts; ``days`` the realised net grid
+costs per day with the algorithm that planned it (A/B comparison).
 """
 ```
 <!-- pyml enable line-length -->

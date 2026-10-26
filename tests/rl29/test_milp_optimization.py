@@ -243,3 +243,25 @@ async def test_ems_run_with_milp_publishes_solution_plan_and_history_hook(
     assert solution is ems.genetic_solution()
     assert ems.optimization_solution() is not None and ems.plan() is not None
     assert len(scheduled) == 1 and scheduled[0][3] == "MILP"
+
+
+def test_scenarios_and_import_limit_fallback(config_eos: ConfigEOS, tmp_path):
+    configure(
+        config_eos,
+        polish_generations=0,
+        scenarios=True,
+        load_scenario_spread=None,
+        max_grid_import_w=100,  # far below the 500 Wh load: infeasible
+    )
+    config_eos.merge_settings_from_dict({"general": {"data_folder_path": str(tmp_path)}})
+    (tmp_path / "rl29").mkdir()
+    (tmp_path / "rl29" / "load_ml.json").write_text(
+        '{"used": true, "spread_low": 0.3, "spread_high": 0.4}'
+    )
+    prices = [0.00010] * 4 + [0.00030] * 4 + [0.00060] * 4
+    optimizer = MilpOptimization(fixed_seed=1)
+    assert optimizer._load_spread() == pytest.approx(0.4)
+    solution = optimizer.optimize_ems(parameters(prices=prices), ngen=0, individuals=20)
+    assert optimizer._ignore_import_limit is True
+    assert optimizer.milp_summary["seeds"] >= 1
+    assert np.asarray(solution.ac_charge)[:4].sum() > 0

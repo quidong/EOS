@@ -409,3 +409,84 @@ async def test_recorder_end_to_end(store):
     load = [r for r in recorder.last_accuracy if r["name"] == "load"][0]
     assert load["n"] == 2
     assert load["bias"] == pytest.approx(800.0 - 1500.0)
+
+
+@needs_pg
+def test_daily_costs_per_algorithm(store):
+    day1 = datetime(2026, 10, 20, 8, tzinfo=UTC)
+    day2 = datetime(2026, 10, 21, 8, tzinfo=UTC)
+    for day, algorithm, price in ((day1, "GENETIC", 0.30), (day2, "MILP", 0.20)):
+        prices = quarter_frame(
+            day, 2, {"elec_price_amt_kwh": price, "feed_in_tariff_amt_kwh": 0.08}
+        )
+        store.write_run(
+            day - timedelta(hours=1),
+            algorithm,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            frame_rows(prices, day - timedelta(hours=1), 48),
+            [],
+        )
+        store.write_actuals(
+            [(day, "grid_import_wh", 1000.0), (day + timedelta(hours=1), "grid_export_wh", 2000.0)]
+        )
+    rows = store.daily_costs(day1 - timedelta(days=1), day2 + timedelta(days=1), "Europe/Berlin")
+    by_algorithm = {r["algorithm"]: r for r in rows}
+    assert by_algorithm["GENETIC"]["net_amt"] == pytest.approx(1.0 * 0.30 - 2.0 * 0.08)
+    assert by_algorithm["MILP"]["net_amt"] == pytest.approx(1.0 * 0.20 - 2.0 * 0.08)
+    assert by_algorithm["MILP"]["hours"] == 2
+
+
+def test_active_algorithm_alternates_by_day():
+    from types import SimpleNamespace
+
+    from akkudoktoreos.optimization.optimization import OptimizationAlgorithm, active_algorithm
+
+    settings = SimpleNamespace(
+        algorithm=OptimizationAlgorithm.GENETIC, alternate_algorithms=["GENETIC", "MILP"]
+    )
+    monday = datetime(2026, 10, 26, 12)
+    picked = {active_algorithm(settings, monday + timedelta(days=i)) for i in range(4)}
+    assert picked == {OptimizationAlgorithm.GENETIC, OptimizationAlgorithm.MILP}
+    assert active_algorithm(settings, monday) != active_algorithm(
+        settings, monday + timedelta(days=1)
+    )
+    assert active_algorithm(settings, monday) == active_algorithm(
+        settings, monday + timedelta(hours=8)
+    )
+    settings.alternate_algorithms = []
+    assert active_algorithm(settings, monday) == OptimizationAlgorithm.GENETIC
+
+
+@needs_pg
+def test_grafana_dashboard_queries_run_on_the_schema(store):
+    import json
+    import re
+    from pathlib import Path
+
+    import psycopg
+
+    store.ensure_schema()
+    path = (
+        Path(__file__).parents[2]
+        / "scripts"
+        / "rl29"
+        / "grafana"
+        / "dashboards"
+        / "eos-history.json"
+    )
+    dashboard = json.loads(path.read_text(encoding="utf-8"))
+    assert dashboard["uid"] == "eos-history" and len(dashboard["panels"]) >= 8
+    with psycopg.connect(store.dsn) as conn:
+        for panel in dashboard["panels"]:
+            sql = panel["targets"][0]["rawSql"]
+            sql = re.sub(r"\$__timeFilter\(([^)]+)\)", r"\1 > now() - interval '7 days'", sql)
+            sql = sql.replace("$__timeFrom()", "now() - interval '7 days'").replace(
+                "$__timeTo()", "now()"
+            )
+            conn.execute(sql).fetchall()
+            conn.rollback()

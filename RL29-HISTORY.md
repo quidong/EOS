@@ -103,10 +103,37 @@ No port is published: only EOS (and, if wanted, Grafana in the same stack) reach
   (e.g. the heat pump meter) need an entry in `adapter.homeassistant.device_measurement_entity_ids`
   or `measurement.*_emr_keys` first.
 
+## Grafana (optional)
+
+Dashboard and provisioning live in `scripts/rl29/grafana/`. Add to the `eos` stack:
+
+```yaml
+  eos-grafana:
+    image: grafana/grafana-oss:latest
+    restart: unless-stopped
+    environment:
+      EOS_HISTORY_PASSWORD: ${EOS_HISTORY_PASSWORD}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+    volumes:
+      - eos-grafana:/var/lib/grafana
+      - /opt/eos/grafana/provisioning:/etc/grafana/provisioning:ro
+      - /opt/eos/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - eos-history
+```
+
+(`eos-grafana` also goes under `volumes:`; copy `scripts/rl29/grafana/*` to `/opt/eos/grafana/`
+on the VM.) The dashboard "EOS – Prognosen, Pläne, Kosten" shows PV and load forecast vs.
+actual, MAE and bias per lead time, planned saving vs. baseline, run time, room temperature
+and grid import plan vs. actual, and the realised costs per day and algorithm (A/B).
+A reverse-proxy entry (e.g. `grafana.example.org` in NPM) can follow.
+
 ## Reading the results
 
 - `GET /v1/energy-management/history?days=7` — status, latest accuracy, recent runs with
-  baseline.
+  baseline, realised net grid costs per day with the planning algorithm (`days`).
 - EOS log, once an hour: `History accuracy pv lead 6 h: n=... MAE=... bias=...`.
 - SQL, e.g. planned saving against the self-consumption baseline per day:
 

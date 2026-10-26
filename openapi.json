@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610261632814698"
+    "version": "v0.3.0.dev2610261646438532"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -2880,7 +2880,7 @@
           "energy-management"
         ],
         "summary": "Fastapi Energy Management History Get",
-        "description": "Long-term history status, latest forecast accuracy and recent runs (RL29 fork).\n\n``runs`` lists the runs of the last ``days`` days with planned net costs and the\nself-consumption baseline for the same forecasts.",
+        "description": "Long-term history status, latest forecast accuracy and recent runs (RL29 fork).\n\n``runs`` lists the runs of the last ``days`` days with planned net costs and the\nself-consumption baseline for the same forecasts; ``days`` the realised net grid\ncosts per day with the algorithm that planned it (A/B comparison).",
         "operationId": "fastapi_energy_management_history_get_v1_energy_management_history_get",
         "parameters": [
           {
@@ -6108,6 +6108,45 @@
               20.0
             ]
           },
+          "replan_on_deviation": {
+            "type": "boolean",
+            "title": "Replan On Deviation",
+            "description": "RL29 fork: start an extra run between slot starts when the battery SoC or a heat pump temperature deviates from the plan (polled every `interval`).",
+            "default": false,
+            "examples": [
+              true
+            ]
+          },
+          "replan_soc_deviation_pct": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Replan Soc Deviation Pct",
+            "description": "SoC deviation that triggers a run [%-points].",
+            "default": 10.0,
+            "examples": [
+              10.0
+            ]
+          },
+          "replan_temperature_deviation_k": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Replan Temperature Deviation K",
+            "description": "Room temperature deviation that triggers a run [K]; hot water uses four times this value.",
+            "default": 0.8,
+            "examples": [
+              0.8
+            ]
+          },
+          "replan_min_interval_sec": {
+            "type": "number",
+            "minimum": 60.0,
+            "title": "Replan Min Interval Sec",
+            "description": "Minimum time between two runs [seconds].",
+            "default": 300.0,
+            "examples": [
+              300.0
+            ]
+          },
           "notify_url": {
             "anyOf": [
               {
@@ -6173,6 +6212,45 @@
             "default": 20.0,
             "examples": [
               20.0
+            ]
+          },
+          "replan_on_deviation": {
+            "type": "boolean",
+            "title": "Replan On Deviation",
+            "description": "RL29 fork: start an extra run between slot starts when the battery SoC or a heat pump temperature deviates from the plan (polled every `interval`).",
+            "default": false,
+            "examples": [
+              true
+            ]
+          },
+          "replan_soc_deviation_pct": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Replan Soc Deviation Pct",
+            "description": "SoC deviation that triggers a run [%-points].",
+            "default": 10.0,
+            "examples": [
+              10.0
+            ]
+          },
+          "replan_temperature_deviation_k": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Replan Temperature Deviation K",
+            "description": "Room temperature deviation that triggers a run [K]; hot water uses four times this value.",
+            "default": 0.8,
+            "examples": [
+              0.8
+            ]
+          },
+          "replan_min_interval_sec": {
+            "type": "number",
+            "minimum": 60.0,
+            "title": "Replan Min Interval Sec",
+            "description": "Minimum time between two runs [seconds].",
+            "default": 300.0,
+            "examples": [
+              300.0
             ]
           },
           "notify_url": {
@@ -16072,6 +16150,89 @@
             "examples": [
               60
             ]
+          },
+          "scenarios": {
+            "type": "boolean",
+            "title": "Scenarios",
+            "description": "Plan against three weighted scenarios (central 50 %, little PV + high load 25 %, much PV + low load 25 %) instead of one forecast; appliance starts and the first `shared_slots` battery decisions are common to all.",
+            "default": false,
+            "examples": [
+              true
+            ]
+          },
+          "shared_slots": {
+            "type": "integer",
+            "maximum": 96.0,
+            "minimum": 1.0,
+            "title": "Shared Slots",
+            "description": "Slots decided jointly for all scenarios.",
+            "default": 4,
+            "examples": [
+              4
+            ]
+          },
+          "pv_scenario_spread": {
+            "type": "number",
+            "maximum": 0.9,
+            "minimum": 0.0,
+            "title": "Pv Scenario Spread",
+            "description": "PV of the outer scenarios: forecast x (1 -/+ spread).",
+            "default": 0.25,
+            "examples": [
+              0.25
+            ]
+          },
+          "load_scenario_spread": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 0.9,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Load Scenario Spread",
+            "description": "Load of the outer scenarios: forecast x (1 +/- spread). None = the quantile width published by LoadML, else 0.2.",
+            "examples": [
+              null,
+              0.2
+            ]
+          },
+          "max_grid_import_w": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Grid Import W",
+            "description": "Grid import limit [W] (e.g. main fuse); infeasible plans fall back to no limit.",
+            "examples": [
+              null,
+              24000
+            ]
+          },
+          "max_grid_export_w": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Grid Export W",
+            "description": "Grid feed-in limit [W]; PV above it is curtailed.",
+            "examples": [
+              null,
+              12600
+            ]
           }
         },
         "type": "object",
@@ -16278,6 +16439,21 @@
               }
             ]
           },
+          "alternate_algorithms": {
+            "items": {
+              "$ref": "#/components/schemas/OptimizationAlgorithm"
+            },
+            "type": "array",
+            "title": "Alternate Algorithms",
+            "description": "RL29 fork: A/B operation - when set, the algorithm changes every local day in this order (day number modulo the list length) and `algorithm` is ignored for automatic runs. The history records which algorithm planned each run, so realised costs can be compared.",
+            "examples": [
+              [],
+              [
+                "GENETIC",
+                "MILP"
+              ]
+            ]
+          },
           "milp": {
             "$ref": "#/components/schemas/MilpCommonSettings",
             "description": "MILP optimization configuration (RL29 fork). MILP uses the GENETIC settings (slots, horizons, terminal value) and adds these.",
@@ -16335,6 +16511,21 @@
                   "ev_soc_miss": 10
                 }
               }
+            ]
+          },
+          "alternate_algorithms": {
+            "items": {
+              "$ref": "#/components/schemas/OptimizationAlgorithm"
+            },
+            "type": "array",
+            "title": "Alternate Algorithms",
+            "description": "RL29 fork: A/B operation - when set, the algorithm changes every local day in this order (day number modulo the list length) and `algorithm` is ignored for automatic runs. The history records which algorithm planned each run, so realised costs can be compared.",
+            "examples": [
+              [],
+              [
+                "GENETIC",
+                "MILP"
+              ]
             ]
           },
           "milp": {

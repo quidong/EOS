@@ -1931,7 +1931,8 @@ async def fastapi_energy_management_history_get(days: int = 7) -> dict:
     """Long-term history status, latest forecast accuracy and recent runs (RL29 fork).
 
     ``runs`` lists the runs of the last ``days`` days with planned net costs and the
-    self-consumption baseline for the same forecasts.
+    self-consumption baseline for the same forecasts; ``days`` the realised net grid
+    costs per day with the algorithm that planned it (A/B comparison).
     """
     import asyncio
     from datetime import datetime, timedelta, timezone
@@ -1945,6 +1946,7 @@ async def fastapi_energy_management_history_get(days: int = 7) -> dict:
         "last_error": recorder.last_error,
         "accuracy": [],
         "runs": [],
+        "days": [],
     }
     store = recorder.store(settings)
     if store is None:
@@ -1954,6 +1956,12 @@ async def fastapi_energy_management_history_get(days: int = 7) -> dict:
         result["accuracy"] = await asyncio.to_thread(store.latest_accuracy)
         result["runs"] = await asyncio.to_thread(
             store.runs, now - timedelta(days=max(1, min(days, 90))), now
+        )
+        result["days"] = await asyncio.to_thread(
+            store.daily_costs,
+            now - timedelta(days=max(1, min(days, 90))),
+            now,
+            get_config().general.timezone or "UTC",
         )
         result["timescale"] = store.timescale
     except Exception as exc:

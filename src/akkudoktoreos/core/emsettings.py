@@ -88,6 +88,47 @@ class EnergyManagementCommonSettings(SettingsBaseModel):
         },
     )
 
+    replan_on_deviation: bool = Field(
+        default=False,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: start an extra run between slot starts when the battery SoC or "
+                "a heat pump temperature deviates from the plan (polled every `interval`)."
+            ),
+            "examples": [True],
+        },
+    )
+
+    replan_soc_deviation_pct: float = Field(
+        default=10.0,
+        gt=0,
+        json_schema_extra={
+            "description": "SoC deviation that triggers a run [%-points].",
+            "examples": [10.0],
+        },
+    )
+
+    replan_temperature_deviation_k: float = Field(
+        default=0.8,
+        gt=0,
+        json_schema_extra={
+            "description": (
+                "Room temperature deviation that triggers a run [K]; hot water uses four times "
+                "this value."
+            ),
+            "examples": [0.8],
+        },
+    )
+
+    replan_min_interval_sec: float = Field(
+        default=300.0,
+        ge=60.0,
+        json_schema_extra={
+            "description": "Minimum time between two runs [seconds].",
+            "examples": [300.0],
+        },
+    )
+
     notify_url: Optional[str] = Field(
         default=None,
         json_schema_extra={

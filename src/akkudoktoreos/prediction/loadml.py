@@ -678,6 +678,7 @@ class LoadML(PredictionMixin, LoadMeasured):
             model, [_naive(h) for h in future_local], history, temperature, away, settings.state
         )
         plan_q = min(forecast, key=lambda q: abs(q - settings.plan_quantile))
+        self._write_spread(forecast)
         for i, date in enumerate(future):
             hourly_stats = data_year_energy[date.day_of_year - 1, :, date.hour]
             values: dict[str, Any] = {
@@ -700,6 +701,27 @@ class LoadML(PredictionMixin, LoadMeasured):
             float(np.sum(forecast[plan_q])) / max(len(future) / 24.0, 1e-9) / 1000.0,
         )
         self.update_datetime = to_datetime(in_timezone=tz)
+
+    def _write_spread(self, forecast: dict[float, list[float]]) -> None:
+        """Relative width of the outer quantiles for scenario planning (MILP)."""
+        qs = sorted(forecast)
+        if len(qs) < 3:
+            return
+        low, mid, high = (
+            sum(forecast[q]) for q in (qs[0], min(qs, key=lambda q: abs(q - 0.5)), qs[-1])
+        )
+        if mid <= 0:
+            return
+        try:
+            path = self._summary_path()
+            data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+            data["spread_low"] = round(max(0.0, 1.0 - low / mid), 3)
+            data["spread_high"] = round(max(0.0, high / mid - 1.0), 3)
+            data["spread_quantiles"] = [qs[0], qs[-1]]
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(data, indent=1), encoding="utf-8")
+        except Exception as exc:
+            logger.debug("LoadML: spread not written: {}", exc)
 
     def _write_summary(self, model: Optional[TrainedLoadModel]) -> None:
         try:

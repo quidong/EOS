@@ -537,6 +537,10 @@
            "mode": "OPTIMIZATION",
            "run_on_slot_start": true,
            "slot_start_offset_sec": 20.0,
+           "replan_on_deviation": true,
+           "replan_soc_deviation_pct": 10.0,
+           "replan_temperature_deviation_k": 0.8,
+           "replan_min_interval_sec": 300.0,
            "notify_url": null
        },
        "feedintariff": {
@@ -666,13 +670,20 @@
                    "ev_soc_miss": 10
                }
            },
+           "alternate_algorithms": [],
            "milp": {
                "time_limit_s": 10.0,
                "mip_rel_gap": 0.0001,
                "hp_search_seconds": 20.0,
                "seeds": 3,
                "polish_generations": 30,
-               "polish_individuals": 60
+               "polish_individuals": 60,
+               "scenarios": false,
+               "shared_slots": 4,
+               "pv_scenario_spread": 0.25,
+               "load_scenario_spread": null,
+               "max_grid_import_w": null,
+               "max_grid_export_w": null
            },
            "self_consumption_interpolator": "scipy"
        },

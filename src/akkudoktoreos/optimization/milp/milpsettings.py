@@ -1,5 +1,7 @@
 """Settings of the MILP optimization (RL29 fork); kept light for the config import."""
 
+from typing import Optional
+
 from pydantic import Field
 
 from akkudoktoreos.config.configabc import SettingsBaseModel
@@ -60,4 +62,62 @@ class MilpCommonSettings(SettingsBaseModel):
         ge=10,
         le=2000,
         json_schema_extra={"description": "Population of the polish step.", "examples": [60]},
+    )
+
+    scenarios: bool = Field(
+        default=False,
+        json_schema_extra={
+            "description": (
+                "Plan against three weighted scenarios (central 50 %, little PV + high load "
+                "25 %, much PV + low load 25 %) instead of one forecast; appliance starts "
+                "and the first `shared_slots` battery decisions are common to all."
+            ),
+            "examples": [True],
+        },
+    )
+    shared_slots: int = Field(
+        default=4,
+        ge=1,
+        le=96,
+        json_schema_extra={
+            "description": "Slots decided jointly for all scenarios.",
+            "examples": [4],
+        },
+    )
+    pv_scenario_spread: float = Field(
+        default=0.25,
+        ge=0,
+        le=0.9,
+        json_schema_extra={
+            "description": "PV of the outer scenarios: forecast x (1 -/+ spread).",
+            "examples": [0.25],
+        },
+    )
+    load_scenario_spread: Optional[float] = Field(
+        default=None,
+        ge=0,
+        le=0.9,
+        json_schema_extra={
+            "description": (
+                "Load of the outer scenarios: forecast x (1 +/- spread). None = the "
+                "quantile width published by LoadML, else 0.2."
+            ),
+            "examples": [None, 0.2],
+        },
+    )
+    max_grid_import_w: Optional[float] = Field(
+        default=None,
+        gt=0,
+        json_schema_extra={
+            "description": "Grid import limit [W] (e.g. main fuse); infeasible plans fall back to no limit.",
+            "examples": [None, 24000],
+        },
+    )
+    max_grid_export_w: Optional[float] = Field(
+        default=None,
+        gt=0,
+        json_schema_extra={
+            "description": "Grid feed-in limit [W]; PV above it is curtailed.",
+            "examples": [None, 12600],
+        },
     )

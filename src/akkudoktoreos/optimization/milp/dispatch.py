@@ -72,6 +72,11 @@ class DispatchInput:
     """Factor from DC battery content to the AC energy the terminal curve values."""
     max_grid_import_wh: Optional[float] = None
     max_grid_export_wh: Optional[float] = None
+    scenarios: list[tuple[float, Sequence[float], Sequence[float]]] = field(default_factory=list)
+    """(weight, pv_wh, load_wh) per scenario; empty = the single pv_wh/load_wh above.
+    Put the central scenario first: it is the one reported."""
+    shared_slots: int = 4
+    """Slots whose battery decisions are the same in every scenario."""
     time_limit_s: float = 10.0
     mip_rel_gap: float = 1e-4
 
@@ -161,35 +166,35 @@ class _Builder:
         )
 
 
-def solve_dispatch(data: DispatchInput) -> DispatchResult:
-    """Build and solve the dispatch model; see the module docstring."""
-    started = time.perf_counter()
-    n = min(len(data.pv_wh), len(data.load_wh), len(data.price_per_wh), len(data.feed_in_per_wh))
-    if n == 0:
-        raise ValueError("empty horizon")
-    pv = [max(float(v), 0.0) for v in data.pv_wh[:n]]
-    load = [max(float(v), 0.0) for v in data.load_wh[:n]]
-    price = [float(v) for v in data.price_per_wh[:n]]
-    feed = [float(v) for v in data.feed_in_per_wh[:n]]
-    b = _Builder()
-    inf = math.inf
+@dataclass
+class _ScenarioVars:
+    imp: list[int]
+    exp: list[int]
+    chg_pv: list[Optional[int]]
+    chg_grid: list[Optional[int]]
+    dis: list[Optional[int]]
+    soc: list[int]
 
-    imp = [
-        b.var(
-            0.0, data.max_grid_import_wh if data.max_grid_import_wh is not None else inf, price[t]
-        )
-        for t in range(n)
-    ]
+
+def _add_scenario(
+    b: "_Builder",
+    data: DispatchInput,
+    pv: list[float],
+    load: list[float],
+    price: list[float],
+    feed: list[float],
+    weight: float,
+    app_load: list[dict[int, float]],
+) -> _ScenarioVars:
+    """Variables and constraints of one scenario; costs scaled by ``weight``."""
+    n = len(pv)
+    inf = math.inf
+    imp_limit = data.max_grid_import_wh if data.max_grid_import_wh is not None else inf
+    exp_limit = data.max_grid_export_wh if data.max_grid_export_wh is not None else inf
+    imp = [b.var(0.0, imp_limit, weight * price[t]) for t in range(n)]
     # Negative feed-in tariff: exporting costs money; the model may curtail by not exporting
     # (PV that is neither used nor exported is curtailed).
-    exp = [
-        b.var(
-            0.0,
-            min(pv[t], data.max_grid_export_wh if data.max_grid_export_wh is not None else inf),
-            -feed[t],
-        )
-        for t in range(n)
-    ]
+    exp = [b.var(0.0, min(pv[t], exp_limit), -weight * feed[t]) for t in range(n)]
 
     bat = data.battery
     chg_pv: list[Optional[int]] = [None] * n
@@ -205,7 +210,7 @@ def solve_dispatch(data: DispatchInput) -> DispatchResult:
             # (idle and self-consumption states charge from surplus only).
             c_pv = b.var(0.0, min(max(pv[t] - load[t], 0.0), bat.max_charge_wh))
             c_grid = b.var(0.0, bat.max_charge_wh if bat.allow_grid_charge else 0.0, 1e-9)
-            d = b.var(0.0, bat.max_discharge_wh, bat.lcos_per_wh)
+            d = b.var(0.0, bat.max_discharge_wh, weight * bat.lcos_per_wh)
             chg_pv[t], chg_grid[t], dis[t] = c_pv, c_grid, d
             soc.append(b.var(low, max(bat.max_soc_wh, start_soc)))
             b.row({c_pv: 1.0, c_grid: 1.0}, -inf, bat.max_charge_wh)
@@ -225,26 +230,13 @@ def solve_dispatch(data: DispatchInput) -> DispatchResult:
         # Terminal credit: sum of segment energies equals the AC value of the end SoC.
         if data.terminal_segments:
             seg_vars = [
-                b.var(0.0, max(width, 0.0), -value) for width, value in data.terminal_segments
+                b.var(0.0, max(width, 0.0), -weight * value)
+                for width, value in data.terminal_segments
             ]
             terminal: dict[int, float] = {v: 1.0 for v in seg_vars}
             terminal[soc[n]] = -data.terminal_dc_to_ac
             # Segments may stay below the content (credit flat beyond the last breakpoint).
             b.row(terminal, -inf, 0.0)
-
-    # Appliances.
-    app_vars: list[list[int]] = []
-    app_load: list[dict[int, float]] = [dict() for _ in range(n)]
-    for run in data.appliances:
-        starts = [s for s in run.allowed_starts]
-        xs = [b.var(0.0, 1.0, 0.0, integer=True) for _ in starts]
-        app_vars.append(xs)
-        b.row({xv: 1.0 for xv in xs}, 1.0, 1.0)
-        for xv, start in zip(xs, starts):
-            for offset, energy in enumerate(run.profile_wh):
-                slot = start + offset
-                if 0 <= slot < n and energy:
-                    app_load[slot][xv] = app_load[slot].get(xv, 0.0) + float(energy)
 
     # Energy balance and battery-serves-house-only.
     for t in range(n):
@@ -270,6 +262,69 @@ def solve_dispatch(data: DispatchInput) -> DispatchResult:
         # Grid and battery do not supply more than is consumed or stored (no import that
         # is curtailed); keeps the solution physical when prices are negative.
         b.row(supply, -inf, load[t])
+    return _ScenarioVars(imp, exp, chg_pv, chg_grid, dis, soc)
+
+
+def solve_dispatch(data: DispatchInput) -> DispatchResult:
+    """Build and solve the dispatch model; see the module docstring.
+
+    With ``data.scenarios`` the expected cost over the weighted scenarios is minimised.
+    Appliance starts and the battery decisions of the first ``data.shared_slots`` slots
+    are the same in every scenario (they are executed before the outcome is known); the
+    rest adapts per scenario. The result reports the first scenario (the central one).
+    """
+    started = time.perf_counter()
+    n = min(len(data.pv_wh), len(data.load_wh), len(data.price_per_wh), len(data.feed_in_per_wh))
+    if n == 0:
+        raise ValueError("empty horizon")
+    price = [float(v) for v in data.price_per_wh[:n]]
+    feed = [float(v) for v in data.feed_in_per_wh[:n]]
+    scenarios = list(data.scenarios) or [(1.0, list(data.pv_wh), list(data.load_wh))]
+    total_weight = sum(max(w, 0.0) for w, _, _ in scenarios) or 1.0
+    b = _Builder()
+
+    # Appliances (shared by all scenarios).
+    app_vars: list[list[int]] = []
+    app_load: list[dict[int, float]] = [dict() for _ in range(n)]
+    for run in data.appliances:
+        starts = [s for s in run.allowed_starts]
+        xs = [b.var(0.0, 1.0, 0.0, integer=True) for _ in starts]
+        app_vars.append(xs)
+        b.row({xv: 1.0 for xv in xs}, 1.0, 1.0)
+        for xv, start in zip(xs, starts):
+            for offset, energy in enumerate(run.profile_wh):
+                slot = start + offset
+                if 0 <= slot < n and energy:
+                    app_load[slot][xv] = app_load[slot].get(xv, 0.0) + float(energy)
+
+    built: list[_ScenarioVars] = []
+    for weight, pv_s, load_s in scenarios:
+        pv = [max(float(v), 0.0) for v in list(pv_s)[:n]]
+        load = [max(float(v), 0.0) for v in list(load_s)[:n]]
+        if len(pv) < n or len(load) < n:
+            raise ValueError("scenario shorter than the horizon")
+        built.append(
+            _add_scenario(b, data, pv, load, price, feed, max(weight, 0.0) / total_weight, app_load)
+        )
+
+    # Non-anticipativity: the first slots' battery decisions are common.
+    first = built[0]
+    for other in built[1:]:
+        for t in range(min(data.shared_slots, n)):
+            for a_var, b_var in (
+                (first.chg_grid[t], other.chg_grid[t]),
+                (first.dis[t], other.dis[t]),
+            ):
+                if a_var is not None and b_var is not None:
+                    b.row({a_var: 1.0, b_var: -1.0}, 0.0, 0.0)
+    imp, exp, chg_pv, chg_grid, dis, soc = (
+        first.imp,
+        first.exp,
+        first.chg_pv,
+        first.chg_grid,
+        first.dis,
+        first.soc,
+    )
 
     status, ok, solution, objective = b.solve(data.time_limit_s, data.mip_rel_gap)
     elapsed = time.perf_counter() - started

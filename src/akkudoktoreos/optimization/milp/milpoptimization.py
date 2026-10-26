@@ -132,9 +132,34 @@ class MilpOptimization(GeneticOptimization):
                     profile_wh=[float(v) for v in appliance.run_energy_wh],
                 )
             )
+        pv = [float(v) for v in sim.pv_prediction_wh[:n]]
+        settings = self._milp
+        scenarios: list[tuple[float, Any, Any]] = []
+        if settings.scenarios:
+            # Only the base load is uncertain; heat pump load (extra_load) is planned.
+            base_only = [float(v) for v in sim.load_energy_array[:n]]
+            fixed = [b - o for b, o in zip(base, base_only)]
+            pv_spread = settings.pv_scenario_spread
+            load_spread = self._load_spread()
+            low_pv = [v * (1 - pv_spread) for v in pv]
+            high_pv = [v * (1 + pv_spread) for v in pv]
+            high_load = [o * (1 + load_spread) + f for o, f in zip(base_only, fixed)]
+            low_load = [o * (1 - load_spread) + f for o, f in zip(base_only, fixed)]
+            scenarios = [(0.5, pv, base), (0.25, low_pv, high_load), (0.25, high_pv, low_load)]
+        slot_h = self.slot_duration_h
         return DispatchInput(
-            pv_wh=[float(v) for v in sim.pv_prediction_wh[:n]],
+            pv_wh=pv,
             load_wh=base,
+            scenarios=scenarios,
+            shared_slots=settings.shared_slots,
+            max_grid_import_wh=(
+                settings.max_grid_import_w * slot_h
+                if settings.max_grid_import_w and not self._ignore_import_limit
+                else None
+            ),
+            max_grid_export_wh=(
+                settings.max_grid_export_w * slot_h if settings.max_grid_export_w else None
+            ),
             price_per_wh=[float(v) for v in sim.elect_price_hourly[:n]],
             feed_in_per_wh=[float(v) for v in sim.elect_revenue_per_hour_arr[:n]],
             battery=battery_model,
@@ -144,6 +169,29 @@ class MilpOptimization(GeneticOptimization):
             time_limit_s=self._milp.time_limit_s,
             mip_rel_gap=self._milp.mip_rel_gap,
         )
+
+    _ignore_import_limit: bool = False
+
+    def _load_spread(self) -> float:
+        """Relative load spread of the outer scenarios (setting, LoadML quantiles, 0.2)."""
+        configured = self._milp.load_scenario_spread
+        if configured is not None:
+            return float(configured)
+        try:
+            import json
+            from pathlib import Path
+
+            path = Path(self.config.general.data_folder_path) / "rl29" / "load_ml.json"
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if data.get("used"):
+                spread = max(
+                    float(data.get("spread_low", 0.0)), float(data.get("spread_high", 0.0))
+                )
+                if 0.0 < spread < 0.9:
+                    return spread
+        except Exception:  # noqa: S110 - no LoadML report: default spread
+            pass
+        return 0.2
 
     def _score(self, hp_genes: Optional[list[int]]) -> tuple[float, Optional[DispatchResult]]:
         """Dispatch cost plus heat pump extra cost for a heat pump schedule."""
@@ -158,6 +206,14 @@ class MilpOptimization(GeneticOptimization):
             return cached
         result = solve_dispatch(self._dispatch_input(hp_load))
         self._milp_solves += 1
+        if not result.success and self._milp.max_grid_import_w and not self._ignore_import_limit:
+            # The fixed load alone exceeds the import limit: plan without it.
+            logger.warning(
+                "MILP: grid import limit not feasible ({}); planning without it.", result.status
+            )
+            self._ignore_import_limit = True
+            result = solve_dispatch(self._dispatch_input(hp_load))
+            self._milp_solves += 1
         score = (
             (result.objective + extra_cost)
             if result.success and result.objective is not None
@@ -272,6 +328,7 @@ class MilpOptimization(GeneticOptimization):
         started = time.monotonic()
         self._run_parameters = parameters
         self._milp_cache: dict[tuple[int, ...], tuple[float, Optional[DispatchResult]]] = {}
+        self._ignore_import_limit = False
         self._milp_solves = 0
         warm = parameters.start_solution
         self._warm_hp_genes = None
