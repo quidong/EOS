@@ -576,6 +576,10 @@ Raumtemperaturen gegen das Komfortband, Dauer aktiver Modi, Anhebung ohne PV-Üb
 lange Absenkung und Anzahl der Warmwasserladungen. Unplausibel sind > 6 h Vorheizen/Forciert am Stück
 (`--max-active-h`); Angehoben (+1 K, keine Zwangsstellung) gibt erst ab > 8 h aktiv am Stück eine Warnung
 (`--max-raised-h`), Absenkung ab > 6 h (`--max-reduced-h`, wie `input_number.eos_wp_max_absenkdauer`).
+Urlaub (ab 26.10.2026): In Slots mit `<id>_away` = 1 gilt als Untergrenze min(Urlaubs-Untergrenze,
+Urlaubstemperatur) − 1 K (Messwerte `wbb12-away-min-temperature` / `-away-room-temperature`, sonst
+`away.standby_min_c` / `away.room_c`; überschreibbar mit `--away-min-c` / `--away-room-c`); lange Absenkung im
+Urlaub warnt nicht.
 
 ### Kühlen (Fork, ab 22.10.2026)
 
