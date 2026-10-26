@@ -76,7 +76,7 @@ No port is published: only EOS (and, if wanted, Grafana in the same stack) reach
         {"name": "load_wh",        "keys": ["sensor.energie_hausverbrauch_gesamt"]},
         {"name": "grid_import_wh", "keys": ["sensor.energie_netzbezug_gesamt"]},
         {"name": "grid_export_wh", "keys": ["sensor.energie_einspeisung_gesamt"]},
-        {"name": "heatpump_wh",    "keys": ["sensor.energie_warmepumpe"]},
+        {"name": "heatpump_wh",    "keys": ["wbb12-electric-power"], "kind": "mean", "scale": 1.0},
         {"name": "base_load_wh",   "keys": ["sensor.energie_hausverbrauch_gesamt"], "subtract": ["heatpump_wh"]},
         {"name": "room_c",         "keys": ["wbb12-room-temperature"], "kind": "mean", "scale": 1.0}
       ],
@@ -97,8 +97,9 @@ No port is published: only EOS (and, if wanted, Grafana in the same stack) reach
   A negative difference (meter replaced) leaves the hour out.
 - `kind: mean` averages any measurement per hour (temperatures, SoC factor).
 - `subtract` removes other actual series hour by hour (base load = house − heat pump).
-  The heat pump meter is the KNX meter (`sensor.energie_warmepumpe`), not the Weishaupt
-  counter, which misses the cooling energy.
+  The heat pump energy comes from the KNX power measurement (`wbb12-electric-power` =
+  `sensor.strom_warmepumpe`, mean W over an hour = Wh), not from the Weishaupt counter,
+  which misses the cooling energy.
 - Every meter key must reach EOS as a measurement; keys that are not yet imported
   (e.g. the heat pump meter) need an entry in `adapter.homeassistant.device_measurement_entity_ids`
   or `measurement.*_emr_keys` first.
