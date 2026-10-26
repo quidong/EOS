@@ -48,6 +48,7 @@ dependencies = [
     "lmdb==3.0.0",
     "psycopg[binary]==3.3.6",
     "lightgbm==4.6.0",
+    "mcp==1.27.0",
 ]
 
 [project.optional-dependencies]
