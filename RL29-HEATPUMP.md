@@ -537,7 +537,9 @@ plant, entscheidet **EOS allein** über Zeitpunkt und Art des Aufheizens und der
 Strompreis, Wärme- und Speicherverlust; Ziel: Komfortband und Warmwasser ≥ Minimum zur Rückkehr): Standby bei Reduziert ohne
 Ladung, sonst WP zurück in die vorherige Betriebsart. Plant EOS in den nächsten 3 h eine Warmwasserladung (aktueller Slot oder
 `sensor.eos_plan`-Daten), stellt `script.urlaub_warmwasser_zuruck` vorher die Warmwasser-Sollwerte zurück – eine frühe
-PV-Ladung lädt also wirklich auf 45 °C. `automation.eos_warmepumpe_warmwasser_laden` lädt im Urlaub nur mit einem Plan, der
+PV-Ladung lädt also wirklich auf 45 °C. Plant EOS keine Ladung (mehr), zieht der 5-min-Takt „WW Absenk“/„WW Normal“
+wieder auf 20 °C (ab 27.10.2026; am 26.10. war „WW Normal“ beim Start auf 45 °C geblieben, die WP lud dadurch beim
+Verlassen des Standby selbst). `automation.eos_warmepumpe_warmwasser_laden` lädt im Urlaub nur mit einem Plan, der
 den Urlaub kennt. Der Wiederanlauf (`input_number.urlaub_wiederanlauf_vor_ruckkehr`) schaltet WLAN, Innenstationen, Kalender,
 Absenk- und Warmwasser-Sollwerte zurück; die WP holt er nur aus dem Standby, wenn EOS fehlt/veraltet ist (Notreserve). Die
 Raum-Untergrenze gilt immer. Geht die WP nach dem Urlaub zurück auf Automatik, setzt das Rückmelden den Betriebsmodus Haus von
@@ -602,6 +604,9 @@ Urlaub (ab 26.10.2026): In Slots mit `<id>_away` = 1 gilt als Untergrenze min(Ur
 Urlaubstemperatur) − 1 K (Messwerte `wbb12-away-min-temperature` / `-away-room-temperature`, sonst
 `away.standby_min_c` / `away.room_c`; überschreibbar mit `--away-min-c` / `--away-room-c`); lange Absenkung im
 Urlaub warnt nicht.
+Ab 27.10.2026 rechnet die Prüfung alle Dauern in Stunden aus der Slot-Länge der Zeitstempel (EOS plant seit dem
+MILP-Update in 15-min-Schritten; 8 Slots Vorheizen = 2 h, nicht 8 h). Die Modi-Zeile zeigt nur die Wechsel, die
+Preiswarnung kommt höchstens einmal pro Stunde.
 
 ### Kühlen (Fork, ab 22.10.2026)
 
