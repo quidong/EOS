@@ -214,3 +214,15 @@ def test_milp_keeps_the_heat_pump_in_standby_while_away(config_eos):
     heating, dhw = plan.modes(optimizer._heat_pump_genes(list(solution.start_solution)))
     assert all(mode == HeatingMode.REDUCED for mode in heating)
     assert all(option.mode == DhwMode.HOLD for option in dhw)
+
+
+def test_without_restart_charge_heating_out_of_standby_costs_only_ready_power():
+    """HA lowers the hot water setpoints while away: leaving standby charges nothing."""
+    run = holiday_plan(standby_exit_dhw_c=None)
+    assert run.inputs[0].standby_possible and run.inputs[0].standby_exit_dhw_c is None
+    n = run.n_periods
+    reduced = run.evaluate(run.genes_for_modes([HeatingMode.REDUCED] * n, [DhwMode.HOLD] * n))
+    normal = run.evaluate(run.genes_for_modes([HeatingMode.NORMAL] * n, [DhwMode.HOLD] * n))
+    # No hot water: NORMAL above its target only idles at the ready power (32 W)
+    assert sum(normal.electric_wh[:5]) == pytest.approx(5 * 32.0, abs=1.0)
+    assert sum(reduced.electric_wh[:5]) == pytest.approx(5 * 10.0, abs=1.0)

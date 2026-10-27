@@ -653,9 +653,10 @@ class HeatPumpAwaySettings(SettingsBaseModel):
         default=None,
         json_schema_extra={
             "description": (
-                "With standby (standby_min_c set): every restart of the heat pump from "
-                "standby charges the tank to this temperature, the heat pump does that on "
-                "its own [degC]. None = the hot water setpoint."
+                "With standby (standby_min_c set): a restart of the heat pump from standby "
+                "charges the tank to this temperature on its own [degC]. None = no charge "
+                "on restart (e.g. the controller lowers the hot water setpoints while away, "
+                "so heating out of standby produces no hot water)."
             ),
             "examples": [41.0, None],
         },

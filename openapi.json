@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610270651638912"
+    "version": "v0.3.0.dev2610272087950431"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -11179,7 +11179,7 @@
               }
             ],
             "title": "Standby Exit Dhw C",
-            "description": "With standby (standby_min_c set): every restart of the heat pump from standby charges the tank to this temperature, the heat pump does that on its own [degC]. None = the hot water setpoint.",
+            "description": "With standby (standby_min_c set): a restart of the heat pump from standby charges the tank to this temperature on its own [degC]. None = no charge on restart (e.g. the controller lowers the hot water setpoints while away, so heating out of standby produces no hot water).",
             "examples": [
               41.0,
               null

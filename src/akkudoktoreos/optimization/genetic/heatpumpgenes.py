@@ -932,13 +932,9 @@ def build_run_plan(
             if away.dhw_off:
                 slot_input.dhw_off = True
                 if floor is not None and not slot_input.cooling_season:
-                    # The controller's standby for REDUCED; every restart charges hot water.
+                    # The controller's standby for REDUCED; a restart may charge hot water.
                     slot_input.standby_possible = True
-                    slot_input.standby_exit_dhw_c = (
-                        away.standby_exit_dhw_c
-                        if away.standby_exit_dhw_c is not None
-                        else settings.dhw.setpoint_c
-                    )
+                    slot_input.standby_exit_dhw_c = away.standby_exit_dhw_c
         logger.info(
             "Heat pump {}: holiday mode, {} of {} slots away (return {}), room {} degC, hot water {}.",
             parameters.device_id,

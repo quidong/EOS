@@ -355,21 +355,23 @@ EOS-Konfiguration (eingespielt 23.10.2026, zusammen mit `away.dhw_off: true`):
 ### Standby, Neustart-Ladung, Wärme der Bewohner (Fork, ab 27.10.2026)
 
 Gemessen am KNX-Zähler (`sensor.strom_warmepumpe`): **10 W** in der Betriebsart Standby,
-**30–35 W** bereit zwischen den Läufen (Regelung, Außeneinheit, Umwälzpumpe). Jeder Neustart aus
-dem Standby lädt das Warmwasser (am 26.10. von 28,5 auf 41 °C, ~1 kWh), das lässt sich an der WP
-nicht abschalten.
+**30–35 W** bereit zwischen den Läufen (Regelung, Außeneinheit, Umwälzpumpe). Ein Neustart aus
+dem Standby lädt das Warmwasser auf den WW-Sollwert der WP (am 26.10. von 28,5 auf 41 °C,
+~1 kWh). Da HA im Urlaub die WW-Sollwerte auf 10/11 °C zieht, heizt EOS seit 27.10. aus dem
+Standby, ohne dass Warmwasser entsteht → `standby_exit_dhw_c` bleibt leer.
 
 | Einstellung | Bedeutung | unsere Anlage |
 | --- | --- | --- |
 | `unit.standby_w` | Leistung bereit, ohne Lauf | 32 W |
 | `unit.off_w` | Leistung in der Betriebsart Standby (Urlaub) | 10 W |
-| `away.standby_exit_dhw_c` | Ziel der Warmwasserladung bei jedem Neustart aus dem Standby | 41 °C |
+| `away.standby_exit_dhw_c` | Ziel der Warmwasserladung beim Neustart aus dem Standby; leer = keine | leer (HA senkt WW auf 10/11 °C) |
 | `away.internal_gains_share` | Anteil der inneren Gewinne bei Abwesenheit (Menschen, Kochen, Geräte fehlen) | 0,4 |
 
 Das Modell bildet die HA-Regel nach: Standby, solange EOS REDUCED ohne Warmwasserladung plant und der
-Raum über der Untergrenze liegt. Jeder andere Modus (oder die Untergrenze) beendet den Standby und
-löst die Ladung aus. Im Urlaub ist REDUCED damit deutlich billiger als NORMAL (vorher waren beide
-gleich teuer und EOS blieb beim Status quo NORMAL – die WP verließ den Standby und lud Warmwasser).
+Raum über der Untergrenze liegt. Jeder andere Modus (oder die Untergrenze) beendet den Standby (und
+löst, falls konfiguriert, die Ladung aus). Im Urlaub ist REDUCED damit billiger als NORMAL, wenn
+nicht geheizt werden muss (10 statt 32 W; vorher waren beide gleich teuer und EOS blieb beim Status
+quo NORMAL – die WP verließ unnötig den Standby).
 Warmwasser im Speicher hat am Horizontende keinen Wert, solange dann noch Urlaub ist.
 Urlaubstage fließen nicht mehr in die Gebäude-Kalibrierung ein (Messwert `wbb12-away`).
 Tests: `tests/rl29/test_heatpump_standby.py`.
