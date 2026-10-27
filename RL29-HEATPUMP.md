@@ -537,9 +537,10 @@ plant, entscheidet **EOS allein** über Zeitpunkt und Art des Aufheizens und der
 Strompreis, Wärme- und Speicherverlust; Ziel: Komfortband und Warmwasser ≥ Minimum zur Rückkehr): Standby bei Reduziert ohne
 Ladung, sonst WP zurück in die vorherige Betriebsart. Plant EOS in den nächsten 3 h eine Warmwasserladung (aktueller Slot oder
 `sensor.eos_plan`-Daten), stellt `script.urlaub_warmwasser_zuruck` vorher die Warmwasser-Sollwerte zurück – eine frühe
-PV-Ladung lädt also wirklich auf 45 °C. Plant EOS keine Ladung (mehr), zieht der 5-min-Takt „WW Absenk“/„WW Normal“
-wieder auf 20 °C (ab 27.10.2026; am 26.10. war „WW Normal“ beim Start auf 45 °C geblieben, die WP lud dadurch beim
-Verlassen des Standby selbst). `automation.eos_warmepumpe_warmwasser_laden` lädt im Urlaub nur mit einem Plan, der
+PV-Ladung lädt also wirklich auf 45 °C. Offen (27.10.2026): Die WP nimmt „WW Normal“ = 20 °C nicht an – der Wert
+springt nach ca. 30 s auf 45 °C zurück (Absenk 20 °C bleibt). Die WP lädt deshalb beim Verlassen des Standby selbst
+auf 45 °C. Ein Nachzieh-Schritt im 5-min-Takt ist in der Automation vorhanden, aber deaktiviert (hätte alle 5 min
+geschrieben). `automation.eos_warmepumpe_warmwasser_laden` lädt im Urlaub nur mit einem Plan, der
 den Urlaub kennt. Der Wiederanlauf (`input_number.urlaub_wiederanlauf_vor_ruckkehr`) schaltet WLAN, Innenstationen, Kalender,
 Absenk- und Warmwasser-Sollwerte zurück; die WP holt er nur aus dem Standby, wenn EOS fehlt/veraltet ist (Notreserve). Die
 Raum-Untergrenze gilt immer. Geht die WP nach dem Urlaub zurück auf Automatik, setzt das Rückmelden den Betriebsmodus Haus von
