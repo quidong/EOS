@@ -7,7 +7,7 @@ Documentation: `docs/akkudoktoreos/fork/` (start with `overview.md` and `quickst
 
 ## Unreleased
 
-## plus-2026.10.0 (2026-10-28)
+## plus-2026.10.0 (2026-10-27)
 
 First release of the fork.
 
