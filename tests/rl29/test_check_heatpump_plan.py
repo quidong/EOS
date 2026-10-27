@@ -45,6 +45,7 @@ def solution(
     dhw: list[int] | None = None,
     generated: datetime = START,
     away: list[int] | None = None,
+    step: timedelta = timedelta(hours=1),
 ) -> dict[str, Any]:
     n = len(modes)
     rooms = rooms or [21.0] * n
@@ -53,7 +54,7 @@ def solution(
     dhw = dhw or [0] * n
     data, pred = {}, {}
     for i in range(n):
-        t = (START + timedelta(hours=i)).isoformat()
+        t = (START + i * step).isoformat()
         data[t] = {
             "wbb12_heating_mode": float(modes[i]),
             "wbb12_dhw_mode": float(dhw[i]),
@@ -296,3 +297,77 @@ def test_cli_holiday_overrides(tmp_path: Path, capsys: pytest.CaptureFixture[str
     assert script.main(base) == 2  # fallback room_c 20 -> lower bound 19
     assert script.main(base + ["--away-room-c", "18", "--away-min-c", "16"]) == 0
     assert "Untergrenze 16.0" in capsys.readouterr().out
+
+
+# --- 15 min plans (EOS MILP) ------------------------------------------------
+
+Q = timedelta(minutes=15)
+
+
+def quarters(hourly: list[int]) -> list[int]:
+    """Expand an hourly list to 15 min slots."""
+    return [v for v in hourly for _ in range(4)]
+
+
+def test_slot_length_from_timestamps():
+    assert script.slot_hours([(START + i * Q).isoformat() for i in range(8)]) == 0.25
+    assert script.slot_hours([(START + timedelta(hours=i)).isoformat() for i in range(3)]) == 1.0
+    assert script.slot_hours([START.isoformat()]) == 1.0
+
+
+def test_two_hours_preheat_in_quarters_is_plausible():
+    """2 h PREHEAT = 8 slots must not count as 8 h."""
+    modes = quarters([1] * 4 + [3] * 2 + [1] * 18)
+    report = run(solution(modes, step=Q))
+    assert report.exit_code == 0, report.lines()
+    assert any("Raster 15 min" in m for m in report.info)
+
+
+def test_long_preheat_in_quarters_fails_with_hours():
+    modes = quarters([1] * 4 + [3] * 4 + [4] * 3 + [1] * 13)
+    report = run(solution(modes, step=Q))
+    assert report.exit_code == 2
+    assert "7 h am Stück Vorheizen/Forciert" in report.failures[0]
+
+
+def test_partial_hours_are_reported():
+    modes = [1] * 8 + [2] * 37 + [1] * 51  # 9.25 h RAISED
+    report = run(solution(modes, step=Q))
+    assert report.exit_code == 1
+    assert "9.25 h am Stück aktiv geheizt" in report.warnings[0]
+
+
+def test_reduction_and_hot_water_in_quarters():
+    assert run(solution(quarters([0] * 6 + [1] * 18), step=Q)).exit_code == 0
+    report = run(solution(quarters([0] * 7 + [1] * 17), step=Q))
+    assert "7 h am Stück Reduziert" in report.warnings[0]
+    # 4 h hot water = 16 slots: no warning; 5 h: warning
+    assert (
+        run(solution(quarters([1] * 24), dhw=quarters([1] * 4 + [0] * 20), step=Q)).exit_code == 0
+    )
+    report = run(solution(quarters([1] * 24), dhw=quarters([1] * 5 + [0] * 19), step=Q))
+    assert "Warmwasser-Ladung in 5 Stunden" in report.warnings[0]
+
+
+def test_peak_price_warning_once_per_hour():
+    prices = quarters([0.25] * 18 + [0.48] * 6)
+    modes = quarters([1] * 18 + [2] + [1] * 5)
+    report = run(solution(modes, prices=prices, step=Q))
+    assert len([m for m in report.warnings if "ohne PV-Überschuss" in m]) == 1
+
+
+def test_holiday_hours_in_quarters():
+    report = script.check(
+        solution(quarters([0] * 24), rooms=[18.0] * 96, away=[1] * 96, step=Q),
+        CONFIG_AWAY,
+        "wbb12",
+        NOW,
+        away_min_c=16.0,
+    )
+    assert report.exit_code == 0, report.lines()
+    assert any("Urlaub in 24 von 24 Stunden" in m for m in report.info)
+
+
+def test_mode_overview_lists_changes_only():
+    times = [(START + i * Q).isoformat() for i in range(6)]
+    assert script._mode_changes(times, [1, 1, 3, 3, 1, 1]) == "10:00:1 10:30:3 11:00:1"

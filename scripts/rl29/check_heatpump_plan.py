@@ -24,6 +24,9 @@ Rules (thresholds from the heat pump configuration, overridable):
   not count (HA does not limit the reduction while away)
 - WARN  hot water HEAT_PUMP in more than 4 hours of the horizon
 
+All durations are in hours; the slot length is taken from the plan timestamps
+(EOS plans hourly or, since the MILP update, in 15 min steps).
+
 Input: ``--url http://eos.local:8503`` (reads the solution and the
 configuration) or ``--solution file.json --config file.json``.
 
@@ -99,6 +102,29 @@ def _runs(flags: list[bool]) -> int:
         current = current + 1 if flag else 0
         best = max(best, current)
     return best
+
+
+def slot_hours(times: list[str]) -> float:
+    """Length of one plan slot in hours (EOS plans hourly or in 15 min steps)."""
+    stamps = [datetime.fromisoformat(t) for t in times]
+    diffs = sorted((b - a).total_seconds() / 3600.0 for a, b in zip(stamps, stamps[1:]) if b > a)
+    return diffs[len(diffs) // 2] if diffs else 1.0
+
+
+def _h(value: float) -> str:
+    """Hours for messages: 7 -> '7', 1.75 -> '1.75'."""
+    return f"{value:g}"
+
+
+def _mode_changes(times: list[str], modes: list[int]) -> str:
+    """Compact mode overview: only the slots where the mode changes."""
+    parts = []
+    previous = None
+    for t, m in zip(times, modes):
+        if m != previous:
+            parts.append(f"{datetime.fromisoformat(t).strftime('%H:%M')}:{m}")
+            previous = m
+    return " ".join(parts)
 
 
 def _percentile(values: list[float], q: float) -> float:
@@ -187,9 +213,9 @@ def check(
     feedin = [float(rows[t].get("grid_feedin_energy_wh", 0.0)) for t in upcoming]
 
     low, high = comfort_limits(config, device)
+    slot_h = slot_hours(upcoming)
     report.info.append(
-        "Modi: "
-        + " ".join(f"{datetime.fromisoformat(t).hour:02d}:{m}" for t, m in zip(upcoming, modes))
+        f"Modi (Wechsel, Raster {slot_h * 60:.0f} min): {_mode_changes(upcoming, modes)}"
     )
     low_away = away_floor(config, device, away_room_c, away_min_c)
     report.info.append(
@@ -197,7 +223,8 @@ def check(
     )
     if any(away):
         report.info.append(
-            f"Urlaub in {sum(away)} von {len(away)} Stunden, Untergrenze {low_away:.1f} °C"
+            f"Urlaub in {_h(sum(away) * slot_h)} von {_h(len(away) * slot_h)} Stunden, "
+            f"Untergrenze {low_away:.1f} °C"
         )
 
     if max(rooms) > high + 0.5:
@@ -210,33 +237,42 @@ def check(
             f"Geplante Raumtemperatur {r:.1f} °C < {lim:.1f} °C" + (" (Urlaub)" if a else "")
         )
 
-    strong_run = _runs([m in STRONG for m in modes])
+    # Durations in hours, independent of the plan resolution (1 h or 15 min).
+    strong_run = _runs([m in STRONG for m in modes]) * slot_h
     if strong_run > max_active_h:
-        report.failures.append(f"{strong_run} h am Stück Vorheizen/Forciert (> {max_active_h} h)")
-    active_run = _runs([m in ACTIVE for m in modes])
+        report.failures.append(
+            f"{_h(strong_run)} h am Stück Vorheizen/Forciert (> {max_active_h} h)"
+        )
+    active_run = _runs([m in ACTIVE for m in modes]) * slot_h
     if active_run > max_raised_h:
         report.warnings.append(
-            f"{active_run} h am Stück aktiv geheizt inkl. Angehoben (> {max_raised_h} h)"
+            f"{_h(active_run)} h am Stück aktiv geheizt inkl. Angehoben (> {max_raised_h} h)"
         )
 
+    # Surplus per slot (energies are per slot, so the comparison stays valid);
+    # one warning per hour, also for 15 min plans.
     expensive = _percentile(prices, 0.75)
+    feedin_min = 100.0 * slot_h
+    warned_hours: set[str] = set()
     for t, m, p, gen, ld, fi in zip(upcoming, modes, prices, pv, load, feedin):
-        surplus = gen > ld or fi > 100.0
-        if m in ACTIVE and not surplus and p > expensive:
+        surplus = gen > ld or fi > feedin_min
+        hour = datetime.fromisoformat(t).strftime("%H:00")
+        if m in ACTIVE and not surplus and p > expensive and hour not in warned_hours:
+            warned_hours.add(hour)
             report.warnings.append(
                 f"{datetime.fromisoformat(t).strftime('%H:%M')} {NAMES[m]} ohne PV-Überschuss "
                 f"bei {p * 100:.1f} ct/kWh"
             )
 
-    reduced_run = _runs([m == 0 and not a for m, a in zip(modes, away)])
+    reduced_run = _runs([m == 0 and not a for m, a in zip(modes, away)]) * slot_h
     if reduced_run > max_reduced_h:
         report.warnings.append(
-            f"{reduced_run} h am Stück Reduziert (> {max_reduced_h} h, HA begrenzt die Absenkung)"
+            f"{_h(reduced_run)} h am Stück Reduziert (> {max_reduced_h} h, "
+            "HA begrenzt die Absenkung)"
         )
-    if sum(1 for d in dhw if d == 1) > 4:
-        report.warnings.append(
-            f"Warmwasser-Ladung in {sum(1 for d in dhw if d == 1)} Stunden geplant"
-        )
+    dhw_h = sum(1 for d in dhw if d == 1) * slot_h
+    if dhw_h > 4:
+        report.warnings.append(f"Warmwasser-Ladung in {_h(dhw_h)} Stunden geplant")
     return report
 
 
