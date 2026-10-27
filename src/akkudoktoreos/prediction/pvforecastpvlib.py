@@ -370,7 +370,7 @@ class PVForecastPVLib(PredictionMixin, PVForecastProvider):
             # `loss` is the PVGIS-style lump of soiling, mismatch, wiring and ageing
             # in percent. Apply it to the DC power before the inverter model through
             # pvlib's PVWatts loss model with all other components set to zero, so
-            # the configured value is the total loss. (RL29 fork, issue #1233.)
+            # the configured value is the total loss. (eos-plus fork, issue #1233.)
             loss = float(plane.loss) if plane.loss is not None else 0.0
             if not 0.0 <= loss < 100.0:
                 raise ValueError(f"Plane {plane_idx}: loss must be in [0, 100), got {loss}.")
@@ -436,7 +436,7 @@ class PVForecastPVLib(PredictionMixin, PVForecastProvider):
         for plane_idx in range(len(self.config.pvforecast.planes)):
             result = run_single_config(plane_idx)
             plane_ac = result.ac.fillna(0.0)
-            # Per-plane inverter rating (RL29 fork, issue #1233). The CEC model of
+            # Per-plane inverter rating (eos-plus fork, issue #1233). The CEC model of
             # `inverter_model` may be larger than the real device.
             paco = self.config.pvforecast.planes[plane_idx].inverter_paco
             if paco is not None and paco > 0:

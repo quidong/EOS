@@ -1,9 +1,9 @@
 % SPDX-License-Identifier: Apache-2.0
 (fork-overview-page)=
 
-# RL29 fork: overview
+# eos-plus fork: overview
 
-The RL29 fork of [Akkudoktor-EOS](https://github.com/Akkudoktor-EOS/EOS) adds a heat pump model,
+The eos-plus fork of [Akkudoktor-EOS](https://github.com/Akkudoktor-EOS/EOS) adds a heat pump model,
 a mathematical optimizer, learning forecasts, long-term history and an MCP interface. Everything is
 optional: without the corresponding configuration the fork behaves like upstream EOS.
 
@@ -16,31 +16,19 @@ optional: without the corresponding configuration the fork behaves like upstream
 | History | Forecasts, plans and actuals in PostgreSQL/TimescaleDB; accuracy and cost endpoints | {doc}`history` |
 | Access | Secrets never leave the REST API; MCP server with token and write allow-list | {doc}`mcp` |
 | Grid fees | §14a EnWG modules 1, 2 and 1+3 (time-variable grid fee) | {doc}`heatpump` |
+| Start | Compose file, minimal configuration, first plan | {doc}`quickstart` |
 
-## Container image
+## Container image and versions
 
-Every push to the branch `rl29/main` runs the full test suite and publishes
-`ghcr.io/quidong/eos:rl29-<commit>` (and `:rl29-latest`). The image is a drop-in replacement for the
-upstream image; the same environment variables apply. A minimal stack:
+| Tag | Meaning |
+| --- | --- |
+| `ghcr.io/quidong/eos:plus-stable` | latest release (recommended) |
+| `ghcr.io/quidong/eos:plus-YYYY.MM.N` | a fixed release, see `CHANGELOG-PLUS.md` |
+| `ghcr.io/quidong/eos:plus-latest` | latest build of the branch `plus/main` |
+| `ghcr.io/quidong/eos:plus-<commit>` | the build of one commit |
 
-```yaml
-services:
-  eos:
-    image: ghcr.io/quidong/eos:rl29-<commit>
-    restart: unless-stopped
-    ports: ["8503:8503", "8504:8504"]
-    environment:
-      - EOS_DIR=/data
-      - EOS_SERVER__HOST=0.0.0.0
-      - EOS_SERVER__EOSDASH_HOST=0.0.0.0
-      - EOS_ADAPTER__HOMEASSISTANT__BASE_URL=http://<home-assistant>:8123
-      - EOS_ADAPTER__HOMEASSISTANT__TOKEN=${HA_TOKEN}
-    volumes: ["eos_data:/data"]
-volumes:
-  eos_data:
-```
-
-Optional services (history database, MCP server) are described on their pages.
+The image is a drop-in replacement for the upstream image; the same environment variables apply.
+Images are built for `linux/amd64`. The quick start ({doc}`quickstart`) has a complete compose file.
 
 ## Principles
 
@@ -58,19 +46,21 @@ Optional services (history database, MCP server) are described on their pages.
 
 ```bash
 uv sync --extra dev
-uv run pytest -q tests/rl29                             # fork tests
+uv run pytest -q tests/plus                             # fork tests
 uv run pytest --finalize --check-config-side-effect -q  # full suite
-bash scripts/rl29/smoke_test_image.sh ghcr.io/quidong/eos:rl29-latest
+bash scripts/plus/smoke_test_image.sh ghcr.io/quidong/eos:plus-latest
 ```
 
 Before an update, save the configuration (`GET /v1/config/backup` or a copy of `EOS.config.json`).
+Releases and their changes are listed in `CHANGELOG-PLUS.md`.
 Fork-only settings (e.g. `devices.heat_pumps`) make the configuration unusable for upstream images,
-so a rollback needs the configuration that matches the image. `scripts/rl29/eos_snapshot.py` records
+so a rollback needs the configuration that matches the image. `scripts/plus/eos_snapshot.py` records
 and compares the state of a running EOS before and after an update.
 
 ```{toctree}
 :maxdepth: 1
 
+quickstart
 heatpump
 appliances
 optimization

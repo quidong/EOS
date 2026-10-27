@@ -125,7 +125,7 @@ WBB12_RATING_POINTS: tuple[CopPoint, ...] = (
 
 
 class EerModel:
-    """Cooling efficiency (EER) by outdoor and flow temperature (RL29 fork).
+    """Cooling efficiency (EER) by outdoor and flow temperature (eos-plus fork).
 
     A single rated point (EN 14511 cooling, e.g. A35/W18) is scaled with the
     Carnot efficiency of a chiller, ``T_cold / (T_hot - T_cold)``: the exergy

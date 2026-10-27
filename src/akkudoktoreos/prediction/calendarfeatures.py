@@ -1,8 +1,11 @@
-"""Calendar features for forecast models (RL29 fork).
+"""Calendar features for forecast models (eos-plus fork).
 
-German public holidays per federal state, computed (no external data or package):
-fixed dates, the Easter based ones (Gauss/Meeus Gregorian algorithm) and the state
-specific ones. Christmas Eve and New Year's Eve are no public holidays but behave like
+Public holidays come from the ``holidays`` package for any supported country and
+subdivision. A *holiday region* is written as an ISO 3166 code: ``"DE"`` (national
+holidays only), ``"DE-BW"`` (country and subdivision), ``"AT-9"``, ``"CH-ZH"``,
+``"NL"``. ``None`` or an empty string means no public holidays (weekends only).
+
+Christmas Eve and New Year's Eve are no public holidays in most countries but behave like
 them in a household, so they are reported as ``special`` days.
 """
 
@@ -10,8 +13,12 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from functools import lru_cache
+from typing import Optional
 
-STATES = (
+import holidays as _holidays
+
+# Codes of the German federal states; the former ``state`` settings held one of them.
+GERMAN_STATES = (
     "BW",
     "BY",
     "BE",
@@ -31,72 +38,61 @@ STATES = (
 )
 
 
-def easter_sunday(year: int) -> date:
-    """Gregorian Easter Sunday (anonymous Gregorian algorithm)."""
-    a = year % 19
-    b, c = divmod(year, 100)
-    d, e = divmod(b, 4)
-    f = (b + 8) // 25
-    g = (b - f + 1) // 3
-    h = (19 * a + b - d - g + 15) % 30
-    i, k = divmod(c, 4)
-    l = (32 + 2 * e + 2 * i - h - k) % 7  # noqa: E741
-    m = (a + 11 * h + 22 * l) // 451
-    month = (h + l - 7 * m + 114) // 31
-    day = ((h + l - 7 * m + 114) % 31) + 1
-    return date(year, month, day)
+def split_region(region: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """``"DE-BW"`` -> ``("DE", "BW")``, ``"NL"`` -> ``("NL", None)``, empty -> ``(None, None)``."""
+    if region is None:
+        return None, None
+    text = str(region).strip()
+    if not text or text.lower() == "none":
+        return None, None
+    country, _, subdivision = text.partition("-")
+    return country.upper(), (subdivision.upper() or None)
 
 
-def _repentance_day(year: int) -> date:
-    """Buß- und Bettag: the Wednesday before 23 November (Saxony)."""
-    day = date(year, 11, 22)
-    while day.weekday() != 2:
-        day -= timedelta(days=1)
-    return day
+def validate_region(region: Optional[str]) -> Optional[str]:
+    """Normalised holiday region, or ``ValueError`` for an unknown country or subdivision."""
+    country, subdivision = split_region(region)
+    if country is None:
+        return None
+    supported = _holidays.list_supported_countries()
+    if country not in supported:
+        raise ValueError(
+            f"Unknown holiday country '{country}' (ISO 3166-1 alpha-2, "
+            "supported by the 'holidays' package)"
+        )
+    if subdivision is not None:
+        subdivisions = {str(code).upper() for code in supported[country]}
+        if subdivision not in subdivisions:
+            raise ValueError(
+                f"Unknown subdivision '{subdivision}' of {country}; one of "
+                f"{', '.join(sorted(subdivisions))}"
+            )
+        return f"{country}-{subdivision}"
+    return country
 
 
-@lru_cache(maxsize=64)
-def public_holidays(year: int, state: str = "BW") -> frozenset[date]:
-    """Public holidays of ``year`` in the German federal ``state`` (ISO 3166-2:DE code)."""
-    state = state.upper()
-    if state not in STATES:
-        raise ValueError(f"Unknown federal state '{state}'; one of {', '.join(STATES)}")
-    easter = easter_sunday(year)
-    days = {
-        date(year, 1, 1),
-        easter - timedelta(days=2),  # Good Friday
-        easter + timedelta(days=1),  # Easter Monday
-        date(year, 5, 1),
-        easter + timedelta(days=39),  # Ascension
-        easter + timedelta(days=50),  # Whit Monday
-        date(year, 10, 3),
-        date(year, 12, 25),
-        date(year, 12, 26),
-    }
-    if state in ("BW", "BY", "ST"):
-        days.add(date(year, 1, 6))
-    if state in ("BW", "BY", "HE", "NW", "RP", "SL"):
-        days.add(easter + timedelta(days=60))  # Corpus Christi
-    if state in ("BW", "BY", "NW", "RP", "SL"):
-        days.add(date(year, 11, 1))
-    if state == "SL":
-        days.add(date(year, 8, 15))
-    if state in ("BB", "HB", "HH", "MV", "NI", "SN", "ST", "SH", "TH"):
-        days.add(date(year, 10, 31))
-    if state in ("BE", "MV") and year >= 2019:
-        days.add(date(year, 3, 8))
-    if state == "TH" and year >= 2019:
-        days.add(date(year, 9, 20))
-    if state == "SN":
-        days.add(_repentance_day(year))
-    if state == "BB":
-        days.add(easter)
-        days.add(easter + timedelta(days=49))
-    return frozenset(days)
+def resolve_region(region: Optional[str], legacy_state: Optional[str] = None) -> Optional[str]:
+    """Holiday region from the current setting, else from a former German ``state`` setting."""
+    if region:
+        return validate_region(region)
+    if legacy_state:
+        return validate_region(f"DE-{legacy_state}")
+    return None
 
 
-def is_public_holiday(day: date, state: str = "BW") -> bool:
-    return day in public_holidays(day.year, state)
+@lru_cache(maxsize=128)
+def public_holidays(year: int, region: Optional[str] = None) -> frozenset[date]:
+    """Public holidays of ``year`` in the holiday ``region`` (empty set without region)."""
+    country, subdivision = split_region(validate_region(region))
+    if country is None:
+        return frozenset()
+    calendar = _holidays.country_holidays(country, subdiv=subdivision, years=year)
+    return frozenset(day for day in calendar if day.year == year)
+
+
+def is_public_holiday(day: date, region: Optional[str] = None) -> bool:
+    """True when ``day`` is a public holiday in ``region``."""
+    return day in public_holidays(day.year, region)
 
 
 def is_special_day(day: date) -> bool:
@@ -104,21 +100,21 @@ def is_special_day(day: date) -> bool:
     return (day.month, day.day) in ((12, 24), (12, 31))
 
 
-def day_type(day: date, state: str = "BW") -> int:
+def day_type(day: date, region: Optional[str] = None) -> int:
     """0 = working day, 1 = Saturday, 2 = Sunday / public holiday / special day."""
-    if day.weekday() == 6 or is_public_holiday(day, state) or is_special_day(day):
+    if day.weekday() == 6 or is_public_holiday(day, region) or is_special_day(day):
         return 2
     if day.weekday() == 5:
         return 1
     return 0
 
 
-def is_bridge_day(day: date, state: str = "BW") -> bool:
+def is_bridge_day(day: date, region: Optional[str] = None) -> bool:
     """A working day between a public holiday and the weekend (often taken off)."""
-    if day_type(day, state) != 0:
+    if day_type(day, region) != 0:
         return False
     before = day - timedelta(days=1)
     after = day + timedelta(days=1)
-    return (day.weekday() == 4 and is_public_holiday(before, state)) or (
-        day.weekday() == 0 and is_public_holiday(after, state)
+    return (day.weekday() == 4 and is_public_holiday(before, region)) or (
+        day.weekday() == 0 and is_public_holiday(after, region)
     )

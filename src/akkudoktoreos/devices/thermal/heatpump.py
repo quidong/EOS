@@ -69,7 +69,7 @@ class HeatingMode(IntEnum):
     PREHEAT = 3
     FORCED = 4
     COOL = 5
-    """Cooling season only: active cooling towards the cooling setpoint (RL29 fork)."""
+    """Cooling season only: active cooling towards the cooling setpoint (eos-plus fork)."""
 
 
 class DhwMode(IntEnum):
@@ -96,7 +96,7 @@ class HeatPumpParameters:
 
     off_w: Optional[float] = None
     """Electric power in the heat pump's own standby operating mode (frost protection,
-    pumps off) [W]; None = ``standby_w`` (RL29 fork)."""
+    pumps off) [W]; None = ``standby_w`` (eos-plus fork)."""
 
     max_flow_c: float = 55.0
     """Highest flow temperature the optimizer may request for space heating [degC]."""
@@ -125,7 +125,7 @@ class HeatPumpParameters:
 
 @dataclass(frozen=True)
 class CoolingParameters:
-    """Space cooling through the floor (RL29 fork)."""
+    """Space cooling through the floor (eos-plus fork)."""
 
     max_cool_w: float = 6000.0
     """Maximum cooling capacity [W]."""
@@ -196,9 +196,9 @@ class ThermalState:
     hp_dhw_forced: bool = False
     """The active charge was started by the heat pump controller, not by the plan."""
     standby: bool = False
-    """The heat pump is in its standby operating mode (RL29 fork)."""
+    """The heat pump is in its standby operating mode (eos-plus fork)."""
     charge_target_c: Optional[float] = None
-    """Target of an active restart charge (RL29 fork); None = the normal setpoint."""
+    """Target of an active restart charge (eos-plus fork); None = the normal setpoint."""
 
     def copy(self) -> "ThermalState":
         return ThermalState(
@@ -229,7 +229,7 @@ class SlotInputs:
     max_electric_w: Optional[float] = None
     """Electric limit for heat pump plus rod in this slot (§14a dimming), None = no limit."""
     cooling_season: bool = False
-    """Cooling season (RL29 fork): no space heating; HeatingMode.COOL cools."""
+    """Cooling season (eos-plus fork): no space heating; HeatingMode.COOL cools."""
     cooling_budget_w: Optional[float] = None
     """Electric power available for cooling in this slot, e.g. PV surplus; None = no limit."""
     dewpoint_c: Optional[float] = None
@@ -238,22 +238,22 @@ class SlotInputs:
     """Room target of RAISED in this slot; None = setpoint + raised_offset_k. Holiday mode
     sets the normal setpoint so that RAISED heats the house back up before the return."""
     ventilation_w_per_k: float = 0.0
-    """Extra heat loss from window ventilation in this slot (RL29 fork) [W/K], applied
+    """Extra heat loss from window ventilation in this slot (eos-plus fork) [W/K], applied
     to the room node with the room temperature at the slot start."""
     dhw_off: bool = False
-    """Hot water switched off (RL29 fork, holiday mode): the heat pump controller does
+    """Hot water switched off (eos-plus fork, holiday mode): the heat pump controller does
     not reheat on its own and the tank comfort minimum does not apply; only a planned
     HEAT_PUMP or ROD charge heats the tank."""
     internal_gains_factor: float = 1.0
-    """Share of the internal gains present in this slot (RL29 fork): nobody at home
+    """Share of the internal gains present in this slot (eos-plus fork): nobody at home
     means less heat from people, cooking and devices."""
     standby_possible: bool = False
     """The controller puts the heat pump into its standby operating mode in this slot
     when REDUCED is planned, no hot water charge is planned and the room is above its
-    floor (RL29 fork, holiday mode). Standby draws ``off_w``."""
+    floor (eos-plus fork, holiday mode). Standby draws ``off_w``."""
     standby_exit_dhw_c: Optional[float] = None
     """Leaving standby starts a hot water charge to this temperature, which the heat
-    pump does on every restart and which cannot be switched off (RL29 fork); None =
+    pump does on every restart and which cannot be switched off (eos-plus fork); None =
     no charge on restart."""
 
 
@@ -312,7 +312,7 @@ class HeatPumpSystem:
         self.dt = float(slot_hours)
 
     def cooling_eer(self, outdoor_c: float, flow_c: float) -> float:
-        """EER of floor cooling in a slot (RL29 fork)."""
+        """EER of floor cooling in a slot (eos-plus fork)."""
         if self.cooling.eer_constant:
             return self.cooling.eer
         return self.eer_model.eer(outdoor_c, flow_c)
@@ -407,7 +407,7 @@ class HeatPumpSystem:
     def _space_cool_demand_w(
         self, state: ThermalState, outdoor_c: float, gains_w: float, room_target_c: float
     ) -> float:
-        """Heat [W] to extract to bring the room down to ``room_target_c`` (RL29 fork).
+        """Heat [W] to extract to bring the room down to ``room_target_c`` (eos-plus fork).
 
         Mirror image of ``_space_heat_demand_w``: steady extraction plus a screed
         correction towards the screed temperature that holds the target.
@@ -464,7 +464,7 @@ class HeatPumpSystem:
             # Airing: an extra loss of the room node, linearised at the slot start.
             gains -= inputs.ventilation_w_per_k * (state.room_c - inputs.outdoor_c)
 
-        # --- Standby operating mode (RL29 fork) ---------------------------
+        # --- Standby operating mode (eos-plus fork) ---------------------------
         # The controller keeps (or puts) the heat pump in standby while REDUCED is
         # planned without a hot water charge and the room is above its floor.
         stays_standby = (
@@ -566,7 +566,7 @@ class HeatPumpSystem:
         cool_w = 0.0
         eer = self.cooling.eer
         if inputs.cooling_season:
-            # RL29 fork: no space heating; COOL extracts heat within the dew point
+            # eos-plus fork: no space heating; COOL extracts heat within the dew point
             # limit and the electric budget (e.g. PV surplus only).
             wanted = minimum = capacity = 0.0
             if heating_mode == HeatingMode.COOL:

@@ -1,6 +1,8 @@
-> **RL29 fork:** this repository is a fork of Akkudoktor-EOS with additional features (heat pump model,
-> MILP optimizer, learning forecasts, history, MCP server). See [RL29.md](RL29.md) and
-> [docs/akkudoktoreos/fork](docs/akkudoktoreos/fork/overview.md).
+> **eos-plus fork:** this repository is a fork of Akkudoktor-EOS with additional features (heat pump model,
+> MILP optimizer, learning forecasts, history, MCP server). Quick start:
+> [docs/akkudoktoreos/fork/quickstart.md](docs/akkudoktoreos/fork/quickstart.md), image
+> `ghcr.io/quidong/eos:plus-stable`, changes: [CHANGELOG-PLUS.md](CHANGELOG-PLUS.md), details:
+> [EOS-PLUS.md](EOS-PLUS.md).
 
 ![AkkudoktorEOS](./docs/_static/logo.png#gh-light-mode-only)
 ![AkkudoktorEOS](./docs/_static/logo_dark.png#gh-dark-mode-only)

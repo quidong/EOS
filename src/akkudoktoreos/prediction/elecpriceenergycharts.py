@@ -172,6 +172,12 @@ class ElecPriceEnergyCharts(ElecPriceProvider):
             return bidding_zone.value
         return str(bidding_zone)
 
+    def _market_country(self) -> Optional[str]:
+        """Country of the bidding zone for the holidays of the price model (DE-LU -> DE)."""
+        zone = self._bidding_zone().upper()
+        country = "".join(ch for ch in zone.split("-")[0] if ch.isalpha())
+        return country[:2] or None
+
     @cache_in_file(with_ttl="1 hour")
     def _request_forecast(self, start_date: Optional[str] = None) -> EnergyChartsElecPrice:
         """Fetch electricity price forecast data from Energy-Charts API.
@@ -301,7 +307,7 @@ class ElecPriceEnergyCharts(ElecPriceProvider):
                 and not self._ml_backfilled
                 and raw_history.index.min() > pd.Timestamp(start_datetime) + pd.Timedelta(days=2)
             ):
-                # RL29 fork: the price ML wants a longer history; fetch it once.
+                # eos-plus fork: the price ML wants a longer history; fetch it once.
                 self._ml_backfilled = True
                 needs_update = True
             else:

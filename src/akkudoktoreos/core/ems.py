@@ -58,7 +58,7 @@ _dispatched_slot: Optional[int] = None
 def slot_run_due(
     now_ts: float, slot_seconds: float, offset_seconds: float, last_slot: Optional[int]
 ) -> Optional[int]:
-    """Slot number to run now in slot-aligned mode, None when nothing is due (RL29 fork).
+    """Slot number to run now in slot-aligned mode, None when nothing is due (eos-plus fork).
 
     A slot is due once ``offset_seconds`` of it have passed and it has not run yet.
     A run that is late (EOS was busy or just started) still happens within the slot.
@@ -90,7 +90,7 @@ async def ems_manage_energy() -> None:
             else float(ems.config.optimization.genetic.interval_sec)
         )
         now = to_datetime()
-        # RL29 fork: a new slot starts - hand its values of the current plan to the
+        # eos-plus fork: a new slot starts - hand its values of the current plan to the
         # adapters right away; the new run (offset, duration) follows later.
         slot_now = int(now.timestamp() // slot_seconds) if slot_seconds > 0 else None
         if slot_now is not None and _dispatched_slot is not None and slot_now > _dispatched_slot:
@@ -111,14 +111,14 @@ async def ems_manage_energy() -> None:
 
 
 def _automatic_algorithm(config: Any) -> OptimizationAlgorithm:
-    """Configured algorithm, or today's one in A/B operation (RL29 fork)."""
+    """Configured algorithm, or today's one in A/B operation (eos-plus fork)."""
     if not getattr(config.optimization, "alternate_algorithms", None):
         return config.optimization.algorithm
     return active_algorithm(config.optimization, to_datetime(in_timezone=config.general.timezone))
 
 
 async def _replan_due(ems: "EnergyManagement", now: DateTime) -> bool:
-    """Extra run between slot starts when the plan no longer matches (RL29 fork)."""
+    """Extra run between slot starts when the plan no longer matches (eos-plus fork)."""
     settings = ems.config.ems
     if not getattr(settings, "replan_on_deviation", False):
         return False
@@ -316,7 +316,7 @@ class EnergyManagement(
         return cls._genetic0_solution
 
     async def dispatch_current(self) -> bool:
-        """Push the current slot of the existing plan to the adapters (RL29 fork).
+        """Push the current slot of the existing plan to the adapters (eos-plus fork).
 
         Used at slot starts with 15-minute slots: the values of the new slot reach Home
         Assistant at once instead of after the next optimization. Skipped while a run is
@@ -474,7 +474,7 @@ class EnergyManagement(
 
             run_solution: GeneticSolution | Genetic0Solution
 
-            # --- GENETIC algorithm (and RL29 MILP, which runs on the GENETIC machinery) ---
+            # --- GENETIC algorithm (and eos-plus MILP, which runs on the GENETIC machinery) ---
             if algorithm in (OptimizationAlgorithm.GENETIC, OptimizationAlgorithm.MILP):
                 # Prepare optimization parameters
                 # This also creates default configurations for missing values and updates the predictions
@@ -657,7 +657,7 @@ class EnergyManagement(
                 },
             )
 
-            # RL29 fork: long-term history (background task, never blocks the run).
+            # eos-plus fork: long-term history (background task, never blocks the run).
             if EnergyManagement._optimization_solution is not None:
                 from akkudoktoreos.core.coreabc import get_measurement
                 from akkudoktoreos.core.historyrecorder import HistoryRecorder

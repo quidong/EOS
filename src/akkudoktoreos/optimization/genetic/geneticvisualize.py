@@ -13,6 +13,7 @@ import pendulum
 from matplotlib.backends.backend_pdf import PdfPages
 
 from akkudoktoreos.core.coreabc import ConfigMixin, get_ems
+from akkudoktoreos.core.forkpaths import fork_data_dir
 from akkudoktoreos.optimization.genetic.geneticsolution import GeneticSolution
 from akkudoktoreos.utils.datetimeutil import DateTime, to_datetime
 
@@ -698,7 +699,7 @@ def genetic_prepare_visualize(
             report.finalize_group()
 
     _add_solution_diagnostics(report, solution, start_datetime)
-    _add_rl29_pages(report, solution, start_datetime)
+    _add_fork_pages(report, solution, start_datetime)
 
     # Generate the PDF report
     pdf = report.generate_pdf()
@@ -951,25 +952,25 @@ if __name__ == "__main__":
 
 
 # ---------------------------------------------------------------------------
-# RL29 fork: heat pumps, learned appliance profiles, plan vs actual, calibration
+# eos-plus fork: heat pumps, learned appliance profiles, plan vs actual, calibration
 # ---------------------------------------------------------------------------
 
 
-def _rl29_data_folder() -> Optional[Path]:
+def _fork_data_folder() -> Optional[Path]:
     try:
         from akkudoktoreos.core.coreabc import get_config
 
-        return Path(get_config().general.data_folder_path) / "rl29"
+        return fork_data_dir(get_config().general.data_folder_path)
     except Exception:  # the report never fails because of the data folder
         return None
 
 
-def _add_rl29_pages(report: GeneticVisualizationReport, solution: Any, start: DateTime) -> None:
+def _add_fork_pages(report: GeneticVisualizationReport, solution: Any, start: DateTime) -> None:
     """Fork pages: one block per heat pump, learned profiles, plan vs actual, calibration."""
     heat_pumps: dict[str, dict[str, Any]] = getattr(solution, "heat_pumps", None) or {}
     for device_id, schedule in sorted(heat_pumps.items()):
         _add_heat_pump_pages(report, device_id, schedule, start)
-    folder = _rl29_data_folder()
+    folder = _fork_data_folder()
     if folder is None:
         return
     for device_id in sorted(heat_pumps):

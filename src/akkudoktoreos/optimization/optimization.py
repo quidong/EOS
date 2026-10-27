@@ -25,7 +25,7 @@ class OptimizationAlgorithm(StrEnum):
     GENETIC = "GENETIC"
     GENETIC0 = "GENETIC0"
     MILP = "MILP"
-    """RL29 fork: MILP dispatch + heat pump search, checked and polished by GENETIC."""
+    """eos-plus fork: MILP dispatch + heat pump search, checked and polished by GENETIC."""
 
 
 def optimization_default_algorithm() -> OptimizationAlgorithm:
@@ -74,7 +74,7 @@ class OptimizationCommonSettings(SettingsBaseModel):
         default_factory=list,
         json_schema_extra={
             "description": (
-                "RL29 fork: A/B operation - when set, the algorithm changes every local day "
+                "eos-plus fork: A/B operation - when set, the algorithm changes every local day "
                 "in this order (day number modulo the list length) and `algorithm` is "
                 "ignored for automatic runs. The history records which algorithm planned "
                 "each run, so realised costs can be compared."
@@ -87,7 +87,7 @@ class OptimizationCommonSettings(SettingsBaseModel):
         default_factory=MilpCommonSettings,
         json_schema_extra={
             "description": (
-                "MILP optimization configuration (RL29 fork). MILP uses the GENETIC "
+                "MILP optimization configuration (eos-plus fork). MILP uses the GENETIC "
                 "settings (slots, horizons, terminal value) and adds these."
             ),
             "examples": [{"hp_search_seconds": 20, "polish_generations": 30}],
@@ -208,7 +208,7 @@ class OptimizationSolution(PydanticBaseModel):
 
 
 def active_algorithm(settings: Any, moment: Any = None) -> OptimizationAlgorithm:
-    """Algorithm for an automatic run at ``moment`` (RL29 fork: A/B by local day).
+    """Algorithm for an automatic run at ``moment`` (eos-plus fork: A/B by local day).
 
     ``moment`` is a datetime in the site time zone; None = configured algorithm.
     """

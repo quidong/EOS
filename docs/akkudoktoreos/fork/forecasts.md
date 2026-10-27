@@ -16,13 +16,13 @@ when those devices are planned separately; otherwise they are counted twice.
 
 `load.provider: "LoadML"` trains one LightGBM quantile model per quantile (`load.loadml.quantiles`,
 default 10/50/90 %) on: hour, weekday, day type (working day / Saturday / Sunday or public holiday of
-`state`), bridge days, season, outdoor temperature (`temperature_key`), away mode (`away_key`,
+`holiday_region`), bridge days, season, outdoor temperature (`temperature_key`), away mode (`away_key`,
 `away_return_key`), the load of the same hour a week before and the level of the last week.
 
 - `subtract_power_keys`: power measurements removed from the load meter (empty if the meter already
   measures the base load).
 - Used only if it beats the `LoadMeasured` profile on the last `holdout_days`; otherwise `LoadMeasured`
-  stays in charge. Needs `min_days` (21) healthy days. Report: `<data>/rl29/load_ml.json`.
+  stays in charge. Needs `min_days` (21) healthy days. Report: `<data>/plus/load_ml.json`.
 - `plan_quantile` > 0.5 plans with more load than expected (reserve). The quantile spread is used by
   the MILP scenarios.
 
@@ -31,7 +31,7 @@ default 10/50/90 %) on: hour, weekday, day type (working day / Saturday / Sunday
 `pvforecast.provider: "PVForecastEnsemble"` combines PVLib with another forecast (e.g. one delivered by
 Home Assistant, `pvforecast.homeassistant`). Weights ∝ 1/MAE² of the last `ensemble.days` days against
 the PV meter, then a calibration factor = quantile of the daily ratio measured/forecast (bounded
-0.6–1.3; `scale_quantile` < 0.5 plans more cautiously). Report: `<data>/rl29/pv_ensemble.json`.
+0.6–1.3; `scale_quantile` < 0.5 plans more cautiously). Report: `<data>/plus/pv_ensemble.json`.
 
 ## Prices after the published day-ahead (`elecprice.ml`)
 
@@ -47,7 +47,13 @@ after that used to come from an exponential smoothing (ETS) of the price history
 
 Training samples mimic the real situation: for every past midnight the following `horizon_hours` (72) are
 forecast from what was known then. The model is used only if it beats the provider's own forecast on the last
-`holdout_days` (7); it is retrained every `refit_hours` (6). Report: `<data>/rl29/price_ml.json`.
+`holdout_days` (7); it is retrained every `refit_hours` (6). Report: `<data>/plus/price_ml.json`.
+
+The model works for every market a provider delivers: with `ElecPriceEnergyCharts` the bidding zone is
+`elecprice.energycharts.bidding_zone` (`DE-LU`, `AT`, `NL`, `FR`, `DK1`, ...), with `ElecPriceSMARD`
+`elecprice.smard.region`. Public holidays of the model are `elecprice.ml.holiday_region`; without it the country
+of the bidding zone is used (`DE-LU` → national German holidays, `AT` → Austrian). Weather features come from the
+configured weather provider at the configured site.
 
 | Provider | History | Notes |
 | --- | --- | --- |
@@ -57,3 +63,11 @@ forecast from what was known then. The model is used only if it beats the provid
 
 Backtest on real German day-ahead prices (15 minutes, site weather, 14 holdout days): mean absolute error
 4.0–4.3 ct/kWh instead of 5.1 ct/kWh with ETS (−15 to −25 %).
+
+## Public holidays (`holiday_region`)
+
+`load.loadml.holiday_region` and `elecprice.ml.holiday_region` select the public holidays of the calendar
+features: an ISO 3166 code of a country (`NL`, `AT`) or of a country and subdivision (`DE-BW`, `AT-9`, `CH-ZH`),
+as supported by the [holidays](https://pypi.org/project/holidays/) package. Without a region only weekends
+count (plus 24 and 31 December, which behave like holidays in most households). The former `state` settings
+(German federal state, e.g. `BW`) still work and mean `DE-<state>`; `holiday_region` takes precedence.

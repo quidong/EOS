@@ -1,4 +1,4 @@
-"""Linear heat pump model for the dispatch MILP (RL29 fork).
+"""Linear heat pump model for the dispatch MILP (eos-plus fork).
 
 The exact heat pump simulation (``devices/thermal/heatpump.py``) works with operating
 modes and controller logic; the MILP instead plans the *physics*: how much heat goes

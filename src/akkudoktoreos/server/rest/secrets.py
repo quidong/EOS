@@ -1,4 +1,4 @@
-"""Secrets in REST responses (RL29 fork).
+"""Secrets in REST responses (eos-plus fork).
 
 The configuration holds credentials: the Home Assistant long-lived token, API keys of
 forecast services, the history database DSN with its password. The REST API has no

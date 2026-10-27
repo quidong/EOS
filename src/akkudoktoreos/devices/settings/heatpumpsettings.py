@@ -1,4 +1,4 @@
-"""Heat pump device settings (RL29 fork).
+"""Heat pump device settings (eos-plus fork).
 
 A heat pump device bundles the building it heats, the domestic hot water tank
 with an optional heating rod and the heat pump unit itself. The physical models
@@ -132,7 +132,7 @@ class HeatPumpUnitSettings(SettingsBaseModel):
         gt=0,
         json_schema_extra={
             "description": "Calibration factor on the rated COP (pumps, defrost, controller). "
-            "Determined by scripts/rl29/calibrate_heatpump.py."
+            "Determined by scripts/plus/calibrate_heatpump.py."
         },
     )
     cop_max: float = Field(
@@ -169,7 +169,7 @@ class HeatPumpUnitSettings(SettingsBaseModel):
         ge=0,
         json_schema_extra={
             "description": (
-                "RL29 fork: power in the heat pump's own standby operating mode (frost "
+                "eos-plus fork: power in the heat pump's own standby operating mode (frost "
                 "protection, pumps off), used in holiday mode [W]; None = standby_w."
             ),
             "examples": [10.0, None],
@@ -385,7 +385,7 @@ class HeatPumpComfortSettings(SettingsBaseModel):
 
 
 class HeatPumpCoolingSettings(SettingsBaseModel):
-    """Space cooling through the floor heating (RL29 fork).
+    """Space cooling through the floor heating (eos-plus fork).
 
     In the cooling season (measurement '<device_id>-cooling-season' = 1) the
     optimizer chooses per hour between NORMAL (no active cooling) and COOL. With
@@ -602,7 +602,7 @@ class HeatPumpOptimizationSettings(SettingsBaseModel):
 
 
 class HeatPumpAwaySettings(SettingsBaseModel):
-    """Holiday mode (RL29 fork): reduced comfort until the return, then back on time.
+    """Holiday mode (eos-plus fork): reduced comfort until the return, then back on time.
 
     The controller reports ``<device_id>-away`` (1 = away) and optionally
     ``<device_id>-return-ts`` (Unix time of the return, 0 = unknown) and
@@ -703,7 +703,7 @@ def _default_setback_windows() -> ValueTimeWindowSequence:
 
 
 class HeatPumpZoneSetbackSettings(SettingsBaseModel):
-    """Setback of one zone of the building (RL29 fork), e.g. the bedrooms upstairs.
+    """Setback of one zone of the building (eos-plus fork), e.g. the bedrooms upstairs.
 
     EOS models the building as one zone; the measured room temperature is the
     mean of all rooms. While the zone is set back, its rooms only need the setback
@@ -772,7 +772,7 @@ def _default_ventilation_profile() -> list[float]:
 
 
 class HeatPumpVentilationSettings(SettingsBaseModel):
-    """Window ventilation (RL29 fork).
+    """Window ventilation (eos-plus fork).
 
     The controller reports ``<device_id>-window-open``: the share of the monitored
     windows that are open (0..1). Airing removes heat with ``loss_w_per_k`` times
@@ -867,7 +867,7 @@ class HeatPumpVentilationSettings(SettingsBaseModel):
 
 
 class HeatPumpCalibrationSettings(SettingsBaseModel):
-    """Automatic calibration of the model from measured operation (RL29 fork).
+    """Automatic calibration of the model from measured operation (eos-plus fork).
 
     Same approach as the PV calibration: the configured parameters stay the
     prior, the measurements of a rolling window correct them, and every result
@@ -890,7 +890,7 @@ class HeatPumpCalibrationSettings(SettingsBaseModel):
                 "Fit building losses, solar aperture, internal gains, COP scale and tank "
                 "loss from the measurements and plan with the fitted values. The "
                 "configured values stay the prior; see the result in the log and in "
-                "'<data folder>/rl29/heatpump_calibration.json'."
+                "'<data folder>/plus/heatpump_calibration.json'."
             ),
             "examples": [False, True],
         },
@@ -1076,7 +1076,7 @@ class HeatPumpCalibrationSettings(SettingsBaseModel):
 
 
 class HeatPumpCommonSettings(DevicesBaseSettings):
-    """Heat pump with building, hot water tank and heating rod (RL29 fork)."""
+    """Heat pump with building, hot water tank and heating rod (eos-plus fork)."""
 
     building: HeatPumpBuildingSettings = Field(default_factory=HeatPumpBuildingSettings)
     unit: HeatPumpUnitSettings = Field(default_factory=HeatPumpUnitSettings)
@@ -1157,7 +1157,7 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
             keys += [k for k in self.calibration_measurement_keys.values() if k not in keys]
         return keys
 
-    # Calibration measurements (RL29 fork): sample field -> measurement key.
+    # Calibration measurements (eos-plus fork): sample field -> measurement key.
     @computed_field  # type: ignore[prop-decorator]
     @property
     def calibration_measurement_keys(self) -> dict[str, str]:
@@ -1232,7 +1232,7 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
         return CopModel(points, scale=self.unit.cop_scale, cop_max=self.unit.cop_max)
 
     def calibration_priors(self) -> CalibrationPriors:
-        """The configured values as prior of the calibration (RL29 fork)."""
+        """The configured values as prior of the calibration (eos-plus fork)."""
         return CalibrationPriors(
             loss_w_per_k=self.building.loss_w_per_k,
             internal_gains_w=self.building.internal_gains_w,
@@ -1255,7 +1255,7 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
         )
 
     def calibrated(self, result: Optional[CalibrationResult]) -> "HeatPumpCommonSettings":
-        """A copy of these settings with the fitted parameters applied (RL29 fork).
+        """A copy of these settings with the fitted parameters applied (eos-plus fork).
 
         The configuration itself is never changed: it stays the prior of the
         next fit. Missing fits keep the configured value.

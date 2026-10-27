@@ -1,4 +1,4 @@
-"""Settings of the MILP optimization (RL29 fork); kept light for the config import."""
+"""Settings of the MILP optimization (eos-plus fork); kept light for the config import."""
 
 from typing import Optional
 
@@ -8,7 +8,7 @@ from akkudoktoreos.config.configabc import SettingsBaseModel
 
 
 class MilpCommonSettings(SettingsBaseModel):
-    """MILP optimization settings (RL29 fork)."""
+    """MILP optimization settings (eos-plus fork)."""
 
     time_limit_s: float = Field(
         default=10.0,

@@ -1,4 +1,4 @@
-"""Calibration of the heat pump model from measured operation (RL29 fork).
+"""Calibration of the heat pump model from measured operation (eos-plus fork).
 
 Same idea as the PV calibration: the physical model keeps its structure, the
 measurements correct its systematic errors, and the correction is refitted
@@ -33,7 +33,7 @@ Every fit reports what it used and how much it changed, and every result is
 clipped to a plausible band around the configured value. The module has no
 EOS dependencies; the EOS integration lives in
 ``akkudoktoreos.devices.heatpumpcalibration`` and the manual tool in
-``scripts/rl29/calibrate_heatpump.py``.
+``scripts/plus/calibrate_heatpump.py``.
 """
 
 from __future__ import annotations
@@ -83,7 +83,7 @@ class HourlySample:
     window_open: Optional[float] = None
     """Mean share of the monitored windows open in the hour (0..1), if measured."""
     away: Optional[float] = None
-    """Share of the hour in holiday mode (0..1), if measured (RL29 fork)."""
+    """Share of the hour in holiday mode (0..1), if measured (eos-plus fork)."""
 
     def get(self, key: str) -> Optional[float]:
         value = getattr(self, key, None)
@@ -476,7 +476,7 @@ def _daily_aggregates(
         aways = [v for v in (s.get("away") for s in day_samples) if v is not None]
         if aways and statistics.fmean(aways) >= 0.5:
             # Holiday: other internal gains and the heat pump in standby; such days
-            # would read as a better insulated house (RL29 fork).
+            # would read as a better insulated house (eos-plus fork).
             continue
         usable.sort(key=lambda s: s.timestamp)
         delta = statistics.fmean(s.get("room_c") - s.get("outdoor_c") for s in usable)  # type: ignore[operator]

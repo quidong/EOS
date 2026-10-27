@@ -43,7 +43,7 @@ def test_energy_parameter_aliases_preserve_wh_prices(model, tariff):
 
 
 @pytest.mark.asyncio
-# RL29 fork: MILP returns the GENETIC solution (tests/rl29/test_milp_optimization.py).
+# eos-plus fork: MILP returns the GENETIC solution (tests/plus/test_milp_optimization.py).
 @pytest.mark.parametrize(
     "algorithm", [OptimizationAlgorithm.GENETIC, OptimizationAlgorithm.GENETIC0]
 )

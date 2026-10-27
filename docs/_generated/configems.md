@@ -12,7 +12,7 @@
 | modes | | `list[str]` | `ro` | `N/A` | Available energy management modes. |
 | notify_url | `EOS_EMS__NOTIFY_URL` | `Optional[str]` | `rw` | `None` | URL that receives an HTTP POST with a small JSON event after every completed optimization, so a client can fetch the new solution right away instead of polling for it. None = off. |
 | replan_min_interval_sec | `EOS_EMS__REPLAN_MIN_INTERVAL_SEC` | `float` | `rw` | `300.0` | Minimum time between two runs [seconds]. |
-| replan_on_deviation | `EOS_EMS__REPLAN_ON_DEVIATION` | `bool` | `rw` | `False` | RL29 fork: start an extra run between slot starts when the battery SoC or a heat pump temperature deviates from the plan (polled every `interval`). |
+| replan_on_deviation | `EOS_EMS__REPLAN_ON_DEVIATION` | `bool` | `rw` | `False` | eos-plus fork: start an extra run between slot starts when the battery SoC or a heat pump temperature deviates from the plan (polled every `interval`). |
 | replan_soc_deviation_pct | `EOS_EMS__REPLAN_SOC_DEVIATION_PCT` | `float` | `rw` | `10.0` | SoC deviation that triggers a run [%-points]. |
 | replan_temperature_deviation_k | `EOS_EMS__REPLAN_TEMPERATURE_DEVIATION_K` | `float` | `rw` | `0.8` | Room temperature deviation that triggers a run [K]; hot water uses four times this value. |
 | run_on_slot_start | `EOS_EMS__RUN_ON_SLOT_START` | `bool` | `rw` | `False` | Run the energy management right after every optimization slot starts (plus slot_start_offset_sec) instead of every `interval` seconds since start-up. `interval` then is only the polling period (60 s recommended), so the first slot of every plan is (almost) complete instead of partly elapsed. |

@@ -25,12 +25,12 @@ from akkudoktoreos.prediction.loadimport import LoadImport
 from akkudoktoreos.prediction.loadmeasured import LoadMeasured
 from akkudoktoreos.prediction.loadml import LoadML
 from akkudoktoreos.prediction.loadvrm import LoadVrm
-from akkudoktoreos.prediction.pvforecastensemble import PVForecastEnsemble
 from akkudoktoreos.prediction.prediction import (
     Prediction,
     PredictionCommonSettings,
 )
 from akkudoktoreos.prediction.pvforecastakkudoktor import PVForecastAkkudoktor
+from akkudoktoreos.prediction.pvforecastensemble import PVForecastEnsemble
 from akkudoktoreos.prediction.pvforecastforecastsolar import PVForecastForecastSolar
 from akkudoktoreos.prediction.pvforecasthomeassistant import PVForecastHomeAssistant
 from akkudoktoreos.prediction.pvforecastimport import PVForecastImport
@@ -85,9 +85,9 @@ def forecast_providers():
         PVForecastPVNode(),
         PVForecastSolcast(),
         PVForecastVrm(),
-        LoadMeasured(),  # RL29 fork
-        LoadML(),  # RL29 fork
-        PVForecastEnsemble(),  # RL29 fork
+        LoadMeasured(),  # eos-plus fork
+        LoadML(),  # eos-plus fork
+        PVForecastEnsemble(),  # eos-plus fork
     ]
 
 
@@ -151,15 +151,18 @@ def test_provider_sequence(prediction):
     assert isinstance(prediction.providers[28], PVForecastPVNode)
     assert isinstance(prediction.providers[29], PVForecastSolcast)
     assert isinstance(prediction.providers[30], PVForecastVrm)
-    assert isinstance(prediction.providers[31], LoadMeasured)  # RL29 fork
-    assert isinstance(prediction.providers[32], LoadML)  # RL29 fork
-    assert isinstance(prediction.providers[33], PVForecastEnsemble)  # RL29 fork
+    assert isinstance(prediction.providers[31], LoadMeasured)  # eos-plus fork
+    assert isinstance(prediction.providers[32], LoadML)  # eos-plus fork
+    assert isinstance(prediction.providers[33], PVForecastEnsemble)  # eos-plus fork
 
 
 def test_provider_by_id(prediction, forecast_providers):
     """Test that provider_by_id method returns the correct provider."""
     for provider in forecast_providers:
-        assert prediction.provider_by_id(provider.provider_id()).provider_id() == provider.provider_id()
+        assert (
+            prediction.provider_by_id(provider.provider_id()).provider_id()
+            == provider.provider_id()
+        )
 
 
 def test_prediction_repr(prediction):

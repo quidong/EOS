@@ -240,9 +240,9 @@ def prediction_providers() -> list[PredictionProviderType]:
         pvforecast_pvnode,
         pvforecast_solcast,
         pvforecast_vrm,
-        loadforecast_measured,  # RL29 fork, appended to keep the upstream sequence
-        loadforecast_ml,  # RL29 fork
-        pvforecast_ensemble,  # RL29 fork (after weather, like PVLib)
+        loadforecast_measured,  # eos-plus fork, appended to keep the upstream sequence
+        loadforecast_ml,  # eos-plus fork
+        pvforecast_ensemble,  # eos-plus fork (after weather, like PVLib)
     ]
 
 

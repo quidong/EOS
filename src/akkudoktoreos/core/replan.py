@@ -1,4 +1,4 @@
-"""Event-driven re-planning (RL29 fork).
+"""Event-driven re-planning (eos-plus fork).
 
 With ``ems.run_on_slot_start`` EOS plans at every slot start. In between, the plan can
 become wrong long before the next slot: the battery is emptier than planned (an

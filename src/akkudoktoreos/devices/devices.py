@@ -17,10 +17,10 @@ from akkudoktoreos.devices.settings.batterysettings import (
 from akkudoktoreos.devices.settings.batterysettings import (
     BatteriesCommonSettings,
 )
+from akkudoktoreos.devices.settings.heatpumpsettings import HeatPumpCommonSettings
 from akkudoktoreos.devices.settings.homeappliancesettings import (
     HomeApplianceCommonSettings,
 )
-from akkudoktoreos.devices.settings.heatpumpsettings import HeatPumpCommonSettings
 from akkudoktoreos.devices.settings.invertersettings import InverterCommonSettings
 from akkudoktoreos.utils.datetimeutil import DateTime, to_datetime
 
@@ -119,13 +119,13 @@ class DevicesCommonSettings(SettingsBaseModel):
         },
     )
 
-    # ---- Heat pumps (RL29 fork) ----
+    # ---- Heat pumps (eos-plus fork) ----
     heat_pumps: dict[str, HeatPumpCommonSettings] = Field(
         default_factory=dict,
         json_schema_extra={
             "description": (
                 "Heat pumps with building, hot water tank and heating rod, keyed by device_id. "
-                "Optimized by GENETIC (RL29 fork)."
+                "Optimized by GENETIC (eos-plus fork)."
             ),
             "examples": [{"wbb12": {"device_id": "wbb12", "dhw": {"rod_power_w": 3000}}}],
             "x-scope": [str(ConfigScope.GENETIC)],

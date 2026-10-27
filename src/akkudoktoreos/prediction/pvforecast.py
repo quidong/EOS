@@ -232,7 +232,7 @@ class PVForecastCommonSettings(SettingsBaseModel):
 
     ensemble: PVForecastEnsembleCommonSettings = Field(
         default_factory=PVForecastEnsembleCommonSettings,
-        json_schema_extra={"description": "PV ensemble provider settings (RL29 fork)"},
+        json_schema_extra={"description": "PV ensemble provider settings (eos-plus fork)"},
     )
 
     pvlib: PVForecastPVLibCommonSettings = Field(

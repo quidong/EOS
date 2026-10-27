@@ -521,7 +521,7 @@ def fastapi_health_get():  # type: ignore
 
 
 def _config_response() -> JSONResponse:
-    """Current configuration without secrets (RL29 fork, see rest/secrets.py)."""
+    """Current configuration without secrets (eos-plus fork, see rest/secrets.py)."""
     return JSONResponse(redact(jsonable_encoder(get_config())))
 
 
@@ -602,7 +602,7 @@ def fastapi_config_put(settings: SettingsEOS) -> JSONResponse:
         configuration (ConfigEOS): The current configuration after the write.
     """
     try:
-        # RL29 fork: masked secrets (exported config) keep the stored values.
+        # eos-plus fork: masked secrets (exported config) keep the stored values.
         cleaned = strip_masked(settings.model_dump(exclude_unset=True))
         get_config().merge_settings(SettingsEOS.model_validate(cleaned))
         return _config_response()
@@ -634,7 +634,7 @@ def fastapi_config_put_key(
         configuration (ConfigEOS): The current configuration after the update.
     """
     if path_is_secret(path) and is_masked(value):
-        # RL29 fork: a masked secret read back from the API leaves the stored one as is.
+        # eos-plus fork: a masked secret read back from the API leaves the stored one as is.
         return _config_response()
     try:
         get_config().set_nested_value(path, value)
@@ -1880,7 +1880,7 @@ async def fastapi_energy_management_optimization_solution_algorithm_get(
         )
 
     if algorithm in (OptimizationAlgorithm.GENETIC, OptimizationAlgorithm.MILP):
-        # RL29 fork: MILP produces a GENETIC solution (same format, same report).
+        # eos-plus fork: MILP produces a GENETIC solution (same format, same report).
         solution = get_ems().genetic_solution()
     elif algorithm == OptimizationAlgorithm.GENETIC0:
         solution = get_ems().genetic0_solution()
@@ -1953,7 +1953,7 @@ def fastapi_energy_management_plan_get() -> EnergyManagementPlan:
 
 @app.get("/v1/energy-management/history", tags=["energy-management"])
 async def fastapi_energy_management_history_get(days: int = 7) -> dict:
-    """Long-term history status, latest forecast accuracy and recent runs (RL29 fork).
+    """Long-term history status, latest forecast accuracy and recent runs (eos-plus fork).
 
     ``runs`` lists the runs of the last ``days`` days with planned net costs and the
     self-consumption baseline for the same forecasts; ``days`` the realised net grid
@@ -1996,7 +1996,7 @@ async def fastapi_energy_management_history_get(days: int = 7) -> dict:
 
 @app.get("/v1/energy-management/history/summary", tags=["energy-management"])
 async def fastapi_energy_management_history_summary_get(days: int = 30) -> dict:
-    """Key figures of the history for dashboards (RL29 fork).
+    """Key figures of the history for dashboards (eos-plus fork).
 
     Made for a Home Assistant REST sensor: ``state`` is the time of the summary, the
     rest are attributes - ``kpi`` (MAE and bias per forecast/plan series and lead time),
@@ -2042,7 +2042,7 @@ async def fastapi_energy_management_history_summary_get(days: int = 30) -> dict:
 async def fastapi_energy_management_history_hours_get(
     hours: int = 72, forecast_lead_h: float = 6.0, plan_lead_h: float = 1.0
 ) -> dict:
-    """Predicted and actual value per hour for the configured accuracy pairs (RL29 fork).
+    """Predicted and actual value per hour for the configured accuracy pairs (eos-plus fork).
 
     ``data`` is a list of ``{"hour": ISO, "<name>_actual": v, "<name>_predicted": v}``;
     forecasts are taken as issued ``forecast_lead_h`` before the hour, plans

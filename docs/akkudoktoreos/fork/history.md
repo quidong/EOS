@@ -124,7 +124,7 @@ what the battery/grid strategy earns; load shifting of the heat pump is judged b
 ## Tests
 
 ```bash
-RL29_TEST_PG_DSN=postgresql://eos@127.0.0.1:5432/eos_test uv run pytest -q tests/rl29/test_history.py
+PLUS_TEST_PG_DSN=postgresql://eos@127.0.0.1:5432/eos_test uv run pytest -q tests/plus/test_history.py
 ```
 
-Without `RL29_TEST_PG_DSN` the database tests are skipped; CI runs them against a TimescaleDB service.
+Without `PLUS_TEST_PG_DSN` the database tests are skipped; CI runs them against a TimescaleDB service.

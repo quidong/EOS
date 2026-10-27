@@ -1,4 +1,4 @@
-"""§14a EnWG grid fee modules for controllable consumers (RL29 fork).
+"""§14a EnWG grid fee modules for controllable consumers (eos-plus fork).
 
 Controllable consumers (heat pumps, wallboxes, batteries) in Germany choose
 one of these grid fee modules:

@@ -1,0 +1,69 @@
+# eos-plus quick start: EOS with EOSdash, optional history database and MCP server.
+#
+#   cp env.example .env            # then edit .env
+#   docker compose up -d                                   # EOS + EOSdash
+#   docker compose --profile history --profile mcp up -d   # with history database and MCP
+#
+# Load the example configuration once (see docs/akkudoktoreos/fork/quickstart.md):
+#   curl -X PUT http://localhost:8503/v1/config -H 'Content-Type: application/json' -d @EOS.config.json
+#   curl -X PUT http://localhost:8503/v1/config/file
+
+name: eos
+
+services:
+  eos:
+    image: ghcr.io/quidong/eos:${EOS_PLUS_TAG:-plus-stable}
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      EOS_SERVER__HOST: 0.0.0.0
+      EOS_SERVER__PORT: "8503"
+      EOS_SERVER__EOSDASH_HOST: 0.0.0.0
+      EOS_SERVER__EOSDASH_PORT: "8504"
+      EOS_SERVER__EOSDASH_SESSKEY: ${EOSDASH_SESSKEY:?set EOSDASH_SESSKEY in .env}
+      # Used only when the history profile is active and database.history.enabled is true.
+      EOS_DATABASE__HISTORY__DSN: postgresql://eos:${EOS_HISTORY_PASSWORD:-unused}@eos-history:5432/eos
+    volumes:
+      - eos_data:/data
+    ports:
+      # The REST API has no authentication: keep these ports inside your home network.
+      - "8503:8503"
+      - "8504:8504"
+
+  eos-history:
+    profiles: ["history"]
+    image: timescale/timescaledb:latest-pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: eos
+      POSTGRES_PASSWORD: ${EOS_HISTORY_PASSWORD:?set EOS_HISTORY_PASSWORD in .env}
+      POSTGRES_DB: eos
+    volumes:
+      - eos_history:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eos -d eos"]
+      interval: 10s
+      retries: 10
+
+  eos-mcp:
+    profiles: ["mcp"]
+    image: ghcr.io/quidong/eos:${EOS_PLUS_TAG:-plus-stable}
+    restart: unless-stopped
+    user: "100:101"
+    command: ["python", "-m", "akkudoktoreos.mcp"]
+    environment:
+      EOS_MCP_TOKEN: ${EOS_MCP_TOKEN:?set EOS_MCP_TOKEN in .env (openssl rand -hex 32)}
+      EOS_MCP_EOS_URL: http://eos:8503
+      EOS_MCP_PORT: "8505"
+      EOS_MCP_ALLOWED_HOSTS: ${EOS_MCP_ALLOWED_HOSTS:-localhost:8505}
+      EOS_MCP_ALLOW_WRITE: "false"
+      EOS_MCP_REPORT_DIR: /data/plus
+    volumes:
+      - eos_data:/data:ro
+    ports:
+      - "8505:8505"
+    depends_on: [eos]
+
+volumes:
+  eos_data:
+  eos_history:

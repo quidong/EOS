@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610272087950431"
+    "version": "v0.3.0.dev2610272128185744"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -2880,7 +2880,7 @@
           "energy-management"
         ],
         "summary": "Fastapi Energy Management History Get",
-        "description": "Long-term history status, latest forecast accuracy and recent runs (RL29 fork).\n\n``runs`` lists the runs of the last ``days`` days with planned net costs and the\nself-consumption baseline for the same forecasts; ``days`` the realised net grid\ncosts per day with the algorithm that planned it (A/B comparison).",
+        "description": "Long-term history status, latest forecast accuracy and recent runs (eos-plus fork).\n\n``runs`` lists the runs of the last ``days`` days with planned net costs and the\nself-consumption baseline for the same forecasts; ``days`` the realised net grid\ncosts per day with the algorithm that planned it (A/B comparison).",
         "operationId": "fastapi_energy_management_history_get_v1_energy_management_history_get",
         "parameters": [
           {
@@ -2926,7 +2926,7 @@
           "energy-management"
         ],
         "summary": "Fastapi Energy Management History Summary Get",
-        "description": "Key figures of the history for dashboards (RL29 fork).\n\nMade for a Home Assistant REST sensor: ``state`` is the time of the summary, the\nrest are attributes - ``kpi`` (MAE and bias per forecast/plan series and lead time),\n``plan`` (latest run with its saving against the self-consumption baseline), ``days``\n(realised net grid costs per day with the planning algorithm) and ``ab`` (mean daily\ncosts per algorithm).",
+        "description": "Key figures of the history for dashboards (eos-plus fork).\n\nMade for a Home Assistant REST sensor: ``state`` is the time of the summary, the\nrest are attributes - ``kpi`` (MAE and bias per forecast/plan series and lead time),\n``plan`` (latest run with its saving against the self-consumption baseline), ``days``\n(realised net grid costs per day with the planning algorithm) and ``ab`` (mean daily\ncosts per algorithm).",
         "operationId": "fastapi_energy_management_history_summary_get_v1_energy_management_history_summary_get",
         "parameters": [
           {
@@ -2972,7 +2972,7 @@
           "energy-management"
         ],
         "summary": "Fastapi Energy Management History Hours Get",
-        "description": "Predicted and actual value per hour for the configured accuracy pairs (RL29 fork).\n\n``data`` is a list of ``{\"hour\": ISO, \"<name>_actual\": v, \"<name>_predicted\": v}``;\nforecasts are taken as issued ``forecast_lead_h`` before the hour, plans\n``plan_lead_h`` before. For charts (e.g. apexcharts-card ``data_generator``).",
+        "description": "Predicted and actual value per hour for the configured accuracy pairs (eos-plus fork).\n\n``data`` is a list of ``{\"hour\": ISO, \"<name>_actual\": v, \"<name>_predicted\": v}``;\nforecasts are taken as issued ``forecast_lead_h`` before the hour, plans\n``plan_lead_h`` before. For charts (e.g. apexcharts-card ``data_generator``).",
         "operationId": "fastapi_energy_management_history_hours_get_v1_energy_management_history_hours_get",
         "parameters": [
           {
@@ -4935,7 +4935,7 @@
             },
             "type": "object",
             "title": "Heat Pumps",
-            "description": "Heat pumps with building, hot water tank and heating rod, keyed by device_id. Optimized by GENETIC (RL29 fork).",
+            "description": "Heat pumps with building, hot water tank and heating rod, keyed by device_id. Optimized by GENETIC (eos-plus fork).",
             "examples": [
               {
                 "wbb12": {
@@ -5168,7 +5168,7 @@
             },
             "type": "object",
             "title": "Heat Pumps",
-            "description": "Heat pumps with building, hot water tank and heating rod, keyed by device_id. Optimized by GENETIC (RL29 fork).",
+            "description": "Heat pumps with building, hot water tank and heating rod, keyed by device_id. Optimized by GENETIC (eos-plus fork).",
             "examples": [
               {
                 "wbb12": {
@@ -5246,7 +5246,7 @@
           },
           "grid_control_14a": {
             "$ref": "#/components/schemas/GridControl14aSettings-Input",
-            "description": "\u00a714a EnWG grid fee module (none, module1, module2, module1_3) and dimming of controllable consumers (RL29 fork). Module 3 prices are applied to the fixed fee provider."
+            "description": "\u00a714a EnWG grid fee module (none, module1, module2, module1_3) and dimming of controllable consumers (eos-plus fork). Module 3 prices are applied to the fixed fee provider."
           }
         },
         "type": "object",
@@ -5280,7 +5280,7 @@
           },
           "grid_control_14a": {
             "$ref": "#/components/schemas/GridControl14aSettings-Output",
-            "description": "\u00a714a EnWG grid fee module (none, module1, module2, module1_3) and dimming of controllable consumers (RL29 fork). Module 3 prices are applied to the fixed fee provider."
+            "description": "\u00a714a EnWG grid fee module (none, module1, module2, module1_3) and dimming of controllable consumers (eos-plus fork). Module 3 prices are applied to the fixed fee provider."
           },
           "providers": {
             "items": {
@@ -5540,7 +5540,7 @@
           },
           "ml": {
             "$ref": "#/components/schemas/ElecPriceMLSettings",
-            "description": "RL29 fork: LightGBM forecast of the hours after the published day-ahead prices (Energy-Charts provider)."
+            "description": "eos-plus fork: LightGBM forecast of the hours after the published day-ahead prices (Energy-Charts provider)."
           },
           "tibber": {
             "$ref": "#/components/schemas/ElecPriceTibberCommonSettings",
@@ -5590,7 +5590,7 @@
           },
           "ml": {
             "$ref": "#/components/schemas/ElecPriceMLSettings",
-            "description": "RL29 fork: LightGBM forecast of the hours after the published day-ahead prices (Energy-Charts provider)."
+            "description": "eos-plus fork: LightGBM forecast of the hours after the published day-ahead prices (Energy-Charts provider)."
           },
           "tibber": {
             "$ref": "#/components/schemas/ElecPriceTibberCommonSettings",
@@ -5788,13 +5788,36 @@
               6
             ]
           },
-          "state": {
-            "type": "string",
-            "title": "State",
-            "description": "Federal state for public holidays.",
-            "default": "BW",
+          "holiday_region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holiday Region",
+            "description": "Public holidays as ISO 3166 code: country ('NL') or country-subdivision ('DE-BW', 'AT-9', 'CH-ZH'). Empty: no public holidays, weekends only.",
             "examples": [
-              "BW"
+              "DE-BW",
+              "AT",
+              "NL"
+            ]
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State",
+            "description": "Deprecated: German federal state, use holiday_region, e.g. 'DE-BW' for 'BW'.",
+            "examples": [
+              null
             ]
           },
           "num_leaves": {
@@ -5827,7 +5850,7 @@
         },
         "type": "object",
         "title": "ElecPriceMLSettings",
-        "description": "Machine-learning forecast of the prices after the published day-ahead (RL29 fork)."
+        "description": "Price forecast after the published day-ahead with LightGBM (eos-plus fork)."
       },
       "ElecPriceSMARDCommonSettings": {
         "properties": {
@@ -6336,7 +6359,7 @@
           "replan_on_deviation": {
             "type": "boolean",
             "title": "Replan On Deviation",
-            "description": "RL29 fork: start an extra run between slot starts when the battery SoC or a heat pump temperature deviates from the plan (polled every `interval`).",
+            "description": "eos-plus fork: start an extra run between slot starts when the battery SoC or a heat pump temperature deviates from the plan (polled every `interval`).",
             "default": false,
             "examples": [
               true
@@ -6442,7 +6465,7 @@
           "replan_on_deviation": {
             "type": "boolean",
             "title": "Replan On Deviation",
-            "description": "RL29 fork: start an extra run between slot starts when the battery SoC or a heat pump temperature deviates from the plan (polled every `interval`).",
+            "description": "eos-plus fork: start an extra run between slot starts when the battery SoC or a heat pump temperature deviates from the plan (polled every `interval`).",
             "default": false,
             "examples": [
               true
@@ -9861,7 +9884,7 @@
           "cooling_season": {
             "type": "boolean",
             "title": "Cooling Season",
-            "description": "RL29 fork: the system is in cooling operation; the optimizer chooses between NORMAL (no active cooling) and COOL instead of heating modes.",
+            "description": "eos-plus fork: the system is in cooling operation; the optimizer chooses between NORMAL (no active cooling) and COOL instead of heating modes.",
             "default": false
           },
           "dewpoint_c": {
@@ -9879,7 +9902,7 @@
           "away": {
             "type": "boolean",
             "title": "Away",
-            "description": "RL29 fork: holiday mode is active (reduced comfort until away_until).",
+            "description": "eos-plus fork: holiday mode is active (reduced comfort until away_until).",
             "default": false
           },
           "away_until": {
@@ -9917,7 +9940,7 @@
               }
             ],
             "title": "Away Min C",
-            "description": "RL29 fork: room floor while away with the heat pump in standby [degC]; None = away.standby_min_c."
+            "description": "eos-plus fork: room floor while away with the heat pump in standby [degC]; None = away.standby_min_c."
           },
           "setback_room_c": {
             "anyOf": [
@@ -9929,7 +9952,7 @@
               }
             ],
             "title": "Setback Room C",
-            "description": "RL29 fork: temperature of the set-back zone [degC]; None = zone_setback.room_c."
+            "description": "eos-plus fork: temperature of the set-back zone [degC]; None = zone_setback.room_c."
           },
           "window_open_share": {
             "anyOf": [
@@ -9943,7 +9966,7 @@
               }
             ],
             "title": "Window Open Share",
-            "description": "RL29 fork: share of the monitored windows open now (0..1)."
+            "description": "eos-plus fork: share of the monitored windows open now (0..1)."
           }
         },
         "additionalProperties": false,
@@ -10044,7 +10067,7 @@
               }
             ],
             "title": "Ghi Forecast",
-            "description": "Global horizontal irradiance forecast [W/m\u00b2] per interval, for the solar gains of heat pump buildings (RL29 fork)."
+            "description": "Global horizontal irradiance forecast [W/m\u00b2] per interval, for the solar gains of heat pump buildings (eos-plus fork)."
           },
           "heat_pumps": {
             "anyOf": [
@@ -10059,7 +10082,7 @@
               }
             ],
             "title": "Heat Pumps",
-            "description": "Heat pumps optimized together with battery, EV and appliances (RL29 fork)."
+            "description": "Heat pumps optimized together with battery, EV and appliances (eos-plus fork)."
           },
           "start_solution": {
             "anyOf": [
@@ -10318,7 +10341,7 @@
               }
             ],
             "title": "Heat Pump Wh Per Hour",
-            "description": "Electric energy of all heat pumps and heating rods per slot [Wh] (RL29 fork); included in load_wh_per_hour."
+            "description": "Electric energy of all heat pumps and heating rods per slot [Wh] (eos-plus fork); included in load_wh_per_hour."
           },
           "Last_Wh_pro_Stunde": {
             "items": {
@@ -10722,7 +10745,7 @@
             },
             "type": "object",
             "title": "Heat Pumps",
-            "description": "Per heat pump device_id (RL29 fork): schedule and predicted states per slot - heating_mode, dhw_mode, rod_target_c, electric_wh, hp_electric_wh, rod_electric_wh, room_c, slab_c, dhw_c, flow_c, cop_space - and a summary."
+            "description": "Per heat pump device_id (eos-plus fork): schedule and predicted states per slot - heating_mode, dhw_mode, rod_target_c, electric_wh, hp_electric_wh, rod_electric_wh, room_c, slab_c, dhw_c, flow_c, cop_space - and a summary."
           },
           "appliance_deadline_missed": {
             "additionalProperties": {
@@ -11213,7 +11236,7 @@
         },
         "type": "object",
         "title": "HeatPumpAwaySettings",
-        "description": "Holiday mode (RL29 fork): reduced comfort until the return, then back on time.\n\nThe controller reports ``<device_id>-away`` (1 = away) and optionally\n``<device_id>-return-ts`` (Unix time of the return, 0 = unknown) and\n``<device_id>-away-room-temperature`` (room temperature to hold while away,\ne.g. the reduced setpoint of the heating circuit). Until the return the\ncomfort minimum and the NORMAL setpoint are the away temperature and hot water\ncan be switched off; from the return on the normal comfort band and hot water\nminimum apply again. The optimizer therefore heats the building and the tank\nup before the return in the cheapest hours (PREHEAT/FORCED, HEAT_PUMP), as\nsoon as the return lies within the horizon. With an unknown return the whole\nhorizon counts as away."
+        "description": "Holiday mode (eos-plus fork): reduced comfort until the return, then back on time.\n\nThe controller reports ``<device_id>-away`` (1 = away) and optionally\n``<device_id>-return-ts`` (Unix time of the return, 0 = unknown) and\n``<device_id>-away-room-temperature`` (room temperature to hold while away,\ne.g. the reduced setpoint of the heating circuit). Until the return the\ncomfort minimum and the NORMAL setpoint are the away temperature and hot water\ncan be switched off; from the return on the normal comfort band and hot water\nminimum apply again. The optimizer therefore heats the building and the tank\nup before the return in the cheapest hours (PREHEAT/FORCED, HEAT_PUMP), as\nsoon as the return lies within the horizon. With an unknown return the whole\nhorizon counts as away."
       },
       "HeatPumpBuildingSettings": {
         "properties": {
@@ -11276,7 +11299,7 @@
           "enabled": {
             "type": "boolean",
             "title": "Enabled",
-            "description": "Fit building losses, solar aperture, internal gains, COP scale and tank loss from the measurements and plan with the fitted values. The configured values stay the prior; see the result in the log and in '<data folder>/rl29/heatpump_calibration.json'.",
+            "description": "Fit building losses, solar aperture, internal gains, COP scale and tank loss from the measurements and plan with the fitted values. The configured values stay the prior; see the result in the log and in '<data folder>/plus/heatpump_calibration.json'.",
             "default": false,
             "examples": [
               false,
@@ -11464,7 +11487,7 @@
         },
         "type": "object",
         "title": "HeatPumpCalibrationSettings",
-        "description": "Automatic calibration of the model from measured operation (RL29 fork).\n\nSame approach as the PV calibration: the configured parameters stay the\nprior, the measurements of a rolling window correct them, and every result\nis clipped to a band around the configuration. The fits need the\nmeasurements ``<id>-outdoor-temperature``, ``<id>-room-temperature``,\n``<id>-heat-power`` (thermal output [W]), ``<id>-electric-power`` [W],\n``<id>-flow-temperature``, ``<id>-dhw-temperature`` and optionally\n``<id>-dhw-heat-power`` and ``<id>-ghi`` [W/m\u00b2]. Hours without an outdoor\ntemperature or irradiance measurement are filled from the weather forecast\nprovider (``weather_from_prediction``), so the solar term needs no extra\nsensor. Power and temperature keys should be imported with their history\n(``adapter.homeassistant.device_measurement_history_keys``) so the hourly\nmeans are exact."
+        "description": "Automatic calibration of the model from measured operation (eos-plus fork).\n\nSame approach as the PV calibration: the configured parameters stay the\nprior, the measurements of a rolling window correct them, and every result\nis clipped to a band around the configuration. The fits need the\nmeasurements ``<id>-outdoor-temperature``, ``<id>-room-temperature``,\n``<id>-heat-power`` (thermal output [W]), ``<id>-electric-power`` [W],\n``<id>-flow-temperature``, ``<id>-dhw-temperature`` and optionally\n``<id>-dhw-heat-power`` and ``<id>-ghi`` [W/m\u00b2]. Hours without an outdoor\ntemperature or irradiance measurement are filled from the weather forecast\nprovider (``weather_from_prediction``), so the solar term needs no extra\nsensor. Power and temperature keys should be imported with their history\n(``adapter.homeassistant.device_measurement_history_keys``) so the hourly\nmeans are exact."
       },
       "HeatPumpComfortSettings-Input": {
         "properties": {
@@ -11595,7 +11618,7 @@
         },
         "type": "object",
         "title": "HeatPumpCommonSettings",
-        "description": "Heat pump with building, hot water tank and heating rod (RL29 fork)."
+        "description": "Heat pump with building, hot water tank and heating rod (eos-plus fork)."
       },
       "HeatPumpCommonSettings-Output": {
         "properties": {
@@ -11773,7 +11796,7 @@
           "measurement_key_dewpoint"
         ],
         "title": "HeatPumpCommonSettings",
-        "description": "Heat pump with building, hot water tank and heating rod (RL29 fork)."
+        "description": "Heat pump with building, hot water tank and heating rod (eos-plus fork)."
       },
       "HeatPumpCoolingSettings": {
         "properties": {
@@ -11859,7 +11882,7 @@
         },
         "type": "object",
         "title": "HeatPumpCoolingSettings",
-        "description": "Space cooling through the floor heating (RL29 fork).\n\nIn the cooling season (measurement '<device_id>-cooling-season' = 1) the\noptimizer chooses per hour between NORMAL (no active cooling) and COOL. With\n``pv_only`` cooling may only use the forecast PV surplus of the hour."
+        "description": "Space cooling through the floor heating (eos-plus fork).\n\nIn the cooling season (measurement '<device_id>-cooling-season' = 1) the\noptimizer chooses per hour between NORMAL (no active cooling) and COOL. With\n``pv_only`` cooling may only use the forecast PV surplus of the hour."
       },
       "HeatPumpCopPointSettings": {
         "properties": {
@@ -12167,7 +12190,7 @@
             "type": "number",
             "exclusiveMinimum": 0.0,
             "title": "Cop Scale",
-            "description": "Calibration factor on the rated COP (pumps, defrost, controller). Determined by scripts/rl29/calibrate_heatpump.py.",
+            "description": "Calibration factor on the rated COP (pumps, defrost, controller). Determined by scripts/plus/calibrate_heatpump.py.",
             "default": 1.0
           },
           "cop_max": {
@@ -12213,7 +12236,7 @@
               }
             ],
             "title": "Off W",
-            "description": "RL29 fork: power in the heat pump's own standby operating mode (frost protection, pumps off), used in holiday mode [W]; None = standby_w.",
+            "description": "eos-plus fork: power in the heat pump's own standby operating mode (frost protection, pumps off), used in holiday mode [W]; None = standby_w.",
             "examples": [
               10.0,
               null
@@ -12340,7 +12363,7 @@
         },
         "type": "object",
         "title": "HeatPumpVentilationSettings",
-        "description": "Window ventilation (RL29 fork).\n\nThe controller reports ``<device_id>-window-open``: the share of the monitored\nwindows that are open (0..1). Airing removes heat with ``loss_w_per_k`` times\nthe open share times (room - outdoor temperature). The expected airing per\nhour of day is the profile (open share x hours); the calibration learns it\nfrom the window measurement and takes the measured airing out of the building\nbalance, so ``building.loss_w_per_k`` stays the closed-window loss. Slots with\nopen windows are left out of the plan-versus-actual room comparison.\n\nWith ``recommend`` EOS picks one slot per day in the midday window\n(warmest outdoor temperature, ties by PV surplus) and plans the airing there;\nthe solution column ``<device_id>_ventilate`` is 1 in that slot, for a\nnotification."
+        "description": "Window ventilation (eos-plus fork).\n\nThe controller reports ``<device_id>-window-open``: the share of the monitored\nwindows that are open (0..1). Airing removes heat with ``loss_w_per_k`` times\nthe open share times (room - outdoor temperature). The expected airing per\nhour of day is the profile (open share x hours); the calibration learns it\nfrom the window measurement and takes the measured airing out of the building\nbalance, so ``building.loss_w_per_k`` stays the closed-window loss. Slots with\nopen windows are left out of the plan-versus-actual room comparison.\n\nWith ``recommend`` EOS picks one slot per day in the midday window\n(warmest outdoor temperature, ties by PV surplus) and plans the airing there;\nthe solution column ``<device_id>_ventilate`` is 1 in that slot, for a\nnotification."
       },
       "HeatPumpZoneSetbackSettings-Input": {
         "properties": {
@@ -12384,7 +12407,7 @@
         },
         "type": "object",
         "title": "HeatPumpZoneSetbackSettings",
-        "description": "Setback of one zone of the building (RL29 fork), e.g. the bedrooms upstairs.\n\nEOS models the building as one zone; the measured room temperature is the\nmean of all rooms. While the zone is set back, its rooms only need the setback\ntemperature (``<device_id>-setback-room-temperature``, e.g. the reduced\nsetpoint of the heating circuit, fallback ``room_c``). The comfort minimum and\nthe NORMAL setpoint of the whole house drop by the zone's ``share`` of the\ndifference, so EOS neither plans to heat the zone up against the controller\nnor counts the cooler zone as a comfort violation. The solution column\n``<device_id>_zone_setback`` (1 = set back) tells the controller when to lower\nthe zone's room setpoints."
+        "description": "Setback of one zone of the building (eos-plus fork), e.g. the bedrooms upstairs.\n\nEOS models the building as one zone; the measured room temperature is the\nmean of all rooms. While the zone is set back, its rooms only need the setback\ntemperature (``<device_id>-setback-room-temperature``, e.g. the reduced\nsetpoint of the heating circuit, fallback ``room_c``). The comfort minimum and\nthe NORMAL setpoint of the whole house drop by the zone's ``share`` of the\ndifference, so EOS neither plans to heat the zone up against the controller\nnor counts the cooler zone as a comfort violation. The solution column\n``<device_id>_zone_setback`` (1 = set back) tells the controller when to lower\nthe zone's room setpoints."
       },
       "HeatPumpZoneSetbackSettings-Output": {
         "properties": {
@@ -12428,7 +12451,7 @@
         },
         "type": "object",
         "title": "HeatPumpZoneSetbackSettings",
-        "description": "Setback of one zone of the building (RL29 fork), e.g. the bedrooms upstairs.\n\nEOS models the building as one zone; the measured room temperature is the\nmean of all rooms. While the zone is set back, its rooms only need the setback\ntemperature (``<device_id>-setback-room-temperature``, e.g. the reduced\nsetpoint of the heating circuit, fallback ``room_c``). The comfort minimum and\nthe NORMAL setpoint of the whole house drop by the zone's ``share`` of the\ndifference, so EOS neither plans to heat the zone up against the controller\nnor counts the cooler zone as a comfort violation. The solution column\n``<device_id>_zone_setback`` (1 = set back) tells the controller when to lower\nthe zone's room setpoints."
+        "description": "Setback of one zone of the building (eos-plus fork), e.g. the bedrooms upstairs.\n\nEOS models the building as one zone; the measured room temperature is the\nmean of all rooms. While the zone is set back, its rooms only need the setback\ntemperature (``<device_id>-setback-room-temperature``, e.g. the reduced\nsetpoint of the heating circuit, fallback ``room_c``). The comfort minimum and\nthe NORMAL setpoint of the whole house drop by the zone's ``share`` of the\ndifference, so EOS neither plans to heat the zone up against the controller\nnor counts the cooler zone as a comfort violation. The solution column\n``<device_id>_zone_setback`` (1 = set back) tells the controller when to lower\nthe zone's room setpoints."
       },
       "HistoryAccuracyPair": {
         "properties": {
@@ -12652,7 +12675,7 @@
         },
         "type": "object",
         "title": "HistorySettings",
-        "description": "Long-term history in PostgreSQL / TimescaleDB (RL29 fork)."
+        "description": "Long-term history in PostgreSQL / TimescaleDB (eos-plus fork)."
       },
       "HomeApplianceCommonSettings-Input": {
         "properties": {
@@ -12925,7 +12948,7 @@
           "request_driven": {
             "type": "boolean",
             "title": "Request Driven",
-            "description": "RL29 fork: plan the appliance only on request. The controller reports the measurements '<device_id>-requested' (1 = a run is waiting, e.g. remote start enabled), '<device_id>-deadline' (Unix time the run has to be finished, 0 = none) and optionally '<device_id>-duration' (program duration [h], 0 = configured duration). Without a fresh request (see 'request_max_age_seconds') the appliance is not planned.",
+            "description": "eos-plus fork: plan the appliance only on request. The controller reports the measurements '<device_id>-requested' (1 = a run is waiting, e.g. remote start enabled), '<device_id>-deadline' (Unix time the run has to be finished, 0 = none) and optionally '<device_id>-duration' (program duration [h], 0 = configured duration). Without a fresh request (see 'request_max_age_seconds') the appliance is not planned.",
             "default": false,
             "examples": [
               false,
@@ -12939,7 +12962,7 @@
             "type": "integer",
             "exclusiveMinimum": 0.0,
             "title": "Request Max Age Seconds",
-            "description": "RL29 fork: request measurements older than this are ignored [s]; a stale request is treated as no request.",
+            "description": "eos-plus fork: request measurements older than this are ignored [s]; a stale request is treated as no request.",
             "default": 3600,
             "examples": [
               3600
@@ -12951,7 +12974,7 @@
           "learn_profiles": {
             "type": "boolean",
             "title": "Learn Profiles",
-            "description": "RL29 fork: learn a load profile per program from the measurements '<device_id>-power' [W] and '<device_id>-program' (numeric program code). A request for a program with a learned profile is planned with that profile instead of the configured load.",
+            "description": "eos-plus fork: learn a load profile per program from the measurements '<device_id>-power' [W] and '<device_id>-program' (numeric program code). A request for a program with a learned profile is planned with that profile instead of the configured load.",
             "default": false,
             "examples": [
               false,
@@ -12966,7 +12989,7 @@
             "maximum": 1.0,
             "exclusiveMinimum": 0.0,
             "title": "Profile Learning Rate",
-            "description": "RL29 fork: weight of a new run when updating a learned profile; the first runs are averaged equally.",
+            "description": "eos-plus fork: weight of a new run when updating a learned profile; the first runs are averaged equally.",
             "default": 0.3,
             "examples": [
               0.3
@@ -12979,7 +13002,7 @@
             "type": "number",
             "minimum": 0.0,
             "title": "Profile Power Threshold W",
-            "description": "RL29 fork: power above which the appliance counts as running [W].",
+            "description": "eos-plus fork: power above which the appliance counts as running [W].",
             "default": 20.0,
             "examples": [
               20.0
@@ -12993,7 +13016,7 @@
             "maximum": 1.0,
             "minimum": 0.5,
             "title": "Profile Duration Quantile",
-            "description": "RL29 fork: the planning length of a learned profile is this quantile of the recent run durations (1.0 = the longest run), so that a run planned against a deadline is finished in time even when the machine takes longer than on average.",
+            "description": "eos-plus fork: the planning length of a learned profile is this quantile of the recent run durations (1.0 = the longest run), so that a run planned against a deadline is finished in time even when the machine takes longer than on average.",
             "default": 0.8,
             "examples": [
               0.8,
@@ -13007,7 +13030,7 @@
             "type": "number",
             "minimum": 0.0,
             "title": "Profile Outlier Tolerance",
-            "description": "RL29 fork: once a program has three learned runs, a run whose energy or duration deviates more than this fraction from the recent median is not learned (interrupted measurement, wrong program code). Three rejected runs in a row are accepted again. 0 disables the check.",
+            "description": "eos-plus fork: once a program has three learned runs, a run whose energy or duration deviates more than this fraction from the recent median is not learned (interrupted measurement, wrong program code). Three rejected runs in a row are accepted again. 0 disables the check.",
             "default": 0.4,
             "examples": [
               0.4,
@@ -13293,7 +13316,7 @@
           "request_driven": {
             "type": "boolean",
             "title": "Request Driven",
-            "description": "RL29 fork: plan the appliance only on request. The controller reports the measurements '<device_id>-requested' (1 = a run is waiting, e.g. remote start enabled), '<device_id>-deadline' (Unix time the run has to be finished, 0 = none) and optionally '<device_id>-duration' (program duration [h], 0 = configured duration). Without a fresh request (see 'request_max_age_seconds') the appliance is not planned.",
+            "description": "eos-plus fork: plan the appliance only on request. The controller reports the measurements '<device_id>-requested' (1 = a run is waiting, e.g. remote start enabled), '<device_id>-deadline' (Unix time the run has to be finished, 0 = none) and optionally '<device_id>-duration' (program duration [h], 0 = configured duration). Without a fresh request (see 'request_max_age_seconds') the appliance is not planned.",
             "default": false,
             "examples": [
               false,
@@ -13307,7 +13330,7 @@
             "type": "integer",
             "exclusiveMinimum": 0.0,
             "title": "Request Max Age Seconds",
-            "description": "RL29 fork: request measurements older than this are ignored [s]; a stale request is treated as no request.",
+            "description": "eos-plus fork: request measurements older than this are ignored [s]; a stale request is treated as no request.",
             "default": 3600,
             "examples": [
               3600
@@ -13319,7 +13342,7 @@
           "learn_profiles": {
             "type": "boolean",
             "title": "Learn Profiles",
-            "description": "RL29 fork: learn a load profile per program from the measurements '<device_id>-power' [W] and '<device_id>-program' (numeric program code). A request for a program with a learned profile is planned with that profile instead of the configured load.",
+            "description": "eos-plus fork: learn a load profile per program from the measurements '<device_id>-power' [W] and '<device_id>-program' (numeric program code). A request for a program with a learned profile is planned with that profile instead of the configured load.",
             "default": false,
             "examples": [
               false,
@@ -13334,7 +13357,7 @@
             "maximum": 1.0,
             "exclusiveMinimum": 0.0,
             "title": "Profile Learning Rate",
-            "description": "RL29 fork: weight of a new run when updating a learned profile; the first runs are averaged equally.",
+            "description": "eos-plus fork: weight of a new run when updating a learned profile; the first runs are averaged equally.",
             "default": 0.3,
             "examples": [
               0.3
@@ -13347,7 +13370,7 @@
             "type": "number",
             "minimum": 0.0,
             "title": "Profile Power Threshold W",
-            "description": "RL29 fork: power above which the appliance counts as running [W].",
+            "description": "eos-plus fork: power above which the appliance counts as running [W].",
             "default": 20.0,
             "examples": [
               20.0
@@ -13361,7 +13384,7 @@
             "maximum": 1.0,
             "minimum": 0.5,
             "title": "Profile Duration Quantile",
-            "description": "RL29 fork: the planning length of a learned profile is this quantile of the recent run durations (1.0 = the longest run), so that a run planned against a deadline is finished in time even when the machine takes longer than on average.",
+            "description": "eos-plus fork: the planning length of a learned profile is this quantile of the recent run durations (1.0 = the longest run), so that a run planned against a deadline is finished in time even when the machine takes longer than on average.",
             "default": 0.8,
             "examples": [
               0.8,
@@ -13375,7 +13398,7 @@
             "type": "number",
             "minimum": 0.0,
             "title": "Profile Outlier Tolerance",
-            "description": "RL29 fork: once a program has three learned runs, a run whose energy or duration deviates more than this fraction from the recent median is not learned (interrupted measurement, wrong program code). Three rejected runs in a row are accepted again. 0 disables the check.",
+            "description": "eos-plus fork: once a program has three learned runs, a run whose energy or duration deviates more than this fraction from the recent median is not learned (interrupted measurement, wrong program code). Three rejected runs in a row are accepted again. 0 disables the check.",
             "default": 0.4,
             "examples": [
               0.4,
@@ -13843,7 +13866,7 @@
               }
             ],
             "title": "Device Measurement History Keys",
-            "description": "RL29 fork: keys of 'device_measurement_entity_ids' whose full Home Assistant history (every state change since the last import, at most 48 h) is imported instead of only the current state, e.g. the power of an appliance whose load profile is learned.",
+            "description": "eos-plus fork: keys of 'device_measurement_entity_ids' whose full Home Assistant history (every state change since the last import, at most 48 h) is imported instead of only the current state, e.g. the power of an appliance whose load profile is learned.",
             "examples": [
               [
                 "washer-power"
@@ -14070,7 +14093,7 @@
               }
             ],
             "title": "Device Measurement History Keys",
-            "description": "RL29 fork: keys of 'device_measurement_entity_ids' whose full Home Assistant history (every state change since the last import, at most 48 h) is imported instead of only the current state, e.g. the power of an appliance whose load profile is learned.",
+            "description": "eos-plus fork: keys of 'device_measurement_entity_ids' whose full Home Assistant history (every state change since the last import, at most 48 h) is imported instead of only the current state, e.g. the power of an appliance whose load profile is learned.",
             "examples": [
               [
                 "washer-power"
@@ -15405,11 +15428,11 @@
           },
           "loadmeasured": {
             "$ref": "#/components/schemas/LoadMeasuredCommonSettings",
-            "description": "LoadMeasured provider settings (RL29 fork: own measured history)."
+            "description": "LoadMeasured provider settings (eos-plus fork: own measured history)."
           },
           "loadml": {
             "$ref": "#/components/schemas/LoadMLCommonSettings",
-            "description": "LoadML provider settings (RL29 fork: gradient boosting base load)."
+            "description": "LoadML provider settings (eos-plus fork: gradient boosting base load)."
           },
           "loadimport": {
             "$ref": "#/components/schemas/LoadImportCommonSettings",
@@ -15447,11 +15470,11 @@
           },
           "loadmeasured": {
             "$ref": "#/components/schemas/LoadMeasuredCommonSettings",
-            "description": "LoadMeasured provider settings (RL29 fork: own measured history)."
+            "description": "LoadMeasured provider settings (eos-plus fork: own measured history)."
           },
           "loadml": {
             "$ref": "#/components/schemas/LoadMLCommonSettings",
-            "description": "LoadML provider settings (RL29 fork: gradient boosting base load)."
+            "description": "LoadML provider settings (eos-plus fork: gradient boosting base load)."
           },
           "loadimport": {
             "$ref": "#/components/schemas/LoadImportCommonSettings",
@@ -15650,13 +15673,36 @@
               "wbb12-return-ts"
             ]
           },
-          "state": {
-            "type": "string",
-            "title": "State",
-            "description": "German federal state for public holidays.",
-            "default": "BW",
+          "holiday_region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holiday Region",
+            "description": "Public holidays as ISO 3166 code: country ('NL') or country-subdivision ('DE-BW', 'AT-9', 'CH-ZH'). Empty: no public holidays, weekends only.",
             "examples": [
-              "BW"
+              "DE-BW",
+              "AT",
+              "NL"
+            ]
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State",
+            "description": "Deprecated: German federal state, use holiday_region, e.g. 'DE-BW' for 'BW'.",
+            "examples": [
+              null
             ]
           },
           "refit_hours": {
@@ -15714,7 +15760,7 @@
         },
         "type": "object",
         "title": "LoadMLCommonSettings",
-        "description": "Settings of the gradient boosting base load provider (RL29 fork)."
+        "description": "Settings of the gradient boosting base load provider (eos-plus fork)."
       },
       "LoadMeasuredCommonSettings": {
         "properties": {
@@ -15776,7 +15822,7 @@
         },
         "type": "object",
         "title": "LoadMeasuredCommonSettings",
-        "description": "Settings of the measured-history load provider (RL29 fork)."
+        "description": "Settings of the measured-history load provider (eos-plus fork)."
       },
       "LoadVrmCommonSettings": {
         "properties": {
@@ -16516,7 +16562,7 @@
         },
         "type": "object",
         "title": "MilpCommonSettings",
-        "description": "MILP optimization settings (RL29 fork)."
+        "description": "MILP optimization settings (eos-plus fork)."
       },
       "NodeREDAdapterCommonSettings": {
         "properties": {
@@ -16724,7 +16770,7 @@
             },
             "type": "array",
             "title": "Alternate Algorithms",
-            "description": "RL29 fork: A/B operation - when set, the algorithm changes every local day in this order (day number modulo the list length) and `algorithm` is ignored for automatic runs. The history records which algorithm planned each run, so realised costs can be compared.",
+            "description": "eos-plus fork: A/B operation - when set, the algorithm changes every local day in this order (day number modulo the list length) and `algorithm` is ignored for automatic runs. The history records which algorithm planned each run, so realised costs can be compared.",
             "examples": [
               [],
               [
@@ -16735,7 +16781,7 @@
           },
           "milp": {
             "$ref": "#/components/schemas/MilpCommonSettings",
-            "description": "MILP optimization configuration (RL29 fork). MILP uses the GENETIC settings (slots, horizons, terminal value) and adds these.",
+            "description": "MILP optimization configuration (eos-plus fork). MILP uses the GENETIC settings (slots, horizons, terminal value) and adds these.",
             "examples": [
               {
                 "hp_search_seconds": 20,
@@ -16798,7 +16844,7 @@
             },
             "type": "array",
             "title": "Alternate Algorithms",
-            "description": "RL29 fork: A/B operation - when set, the algorithm changes every local day in this order (day number modulo the list length) and `algorithm` is ignored for automatic runs. The history records which algorithm planned each run, so realised costs can be compared.",
+            "description": "eos-plus fork: A/B operation - when set, the algorithm changes every local day in this order (day number modulo the list length) and `algorithm` is ignored for automatic runs. The history records which algorithm planned each run, so realised costs can be compared.",
             "examples": [
               [],
               [
@@ -16809,7 +16855,7 @@
           },
           "milp": {
             "$ref": "#/components/schemas/MilpCommonSettings",
-            "description": "MILP optimization configuration (RL29 fork). MILP uses the GENETIC settings (slots, horizons, terminal value) and adds these.",
+            "description": "MILP optimization configuration (eos-plus fork). MILP uses the GENETIC settings (slots, horizons, terminal value) and adds these.",
             "examples": [
               {
                 "hp_search_seconds": 20,
@@ -17651,7 +17697,7 @@
           },
           "ensemble": {
             "$ref": "#/components/schemas/PVForecastEnsembleCommonSettings",
-            "description": "PV ensemble provider settings (RL29 fork)"
+            "description": "PV ensemble provider settings (eos-plus fork)"
           },
           "pvlib": {
             "$ref": "#/components/schemas/PVForecastPVLibCommonSettings",
@@ -17784,7 +17830,7 @@
           },
           "ensemble": {
             "$ref": "#/components/schemas/PVForecastEnsembleCommonSettings",
-            "description": "PV ensemble provider settings (RL29 fork)"
+            "description": "PV ensemble provider settings (eos-plus fork)"
           },
           "pvlib": {
             "$ref": "#/components/schemas/PVForecastPVLibCommonSettings",
@@ -18013,7 +18059,7 @@
         },
         "type": "object",
         "title": "PVForecastEnsembleCommonSettings",
-        "description": "Settings of the PV ensemble (RL29 fork)."
+        "description": "Settings of the PV ensemble (eos-plus fork)."
       },
       "PVForecastForecastSolarCommonSettings": {
         "properties": {

@@ -1,4 +1,4 @@
-"""Glue between the energy management run and the long-term history (RL29 fork).
+"""Glue between the energy management run and the long-term history (eos-plus fork).
 
 Called by ``EnergyManagement.run`` after a solution was published. Everything happens
 in a background task and a worker thread, so a slow or unreachable database never

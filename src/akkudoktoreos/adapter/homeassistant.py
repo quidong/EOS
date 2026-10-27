@@ -1,7 +1,7 @@
 """Home Assistant adapter."""
 
-import math
 import difflib
+import math
 import os
 import re
 from typing import Iterable, Optional, Union
@@ -32,18 +32,18 @@ HEADERS = {
 
 HOMEASSISTANT_ENTITY_ID_PREFIX = "sensor.eos_"
 
-# RL29 fork: binary entities (binary_sensor, switch, input_boolean) are device
+# eos-plus fork: binary entities (binary_sensor, switch, input_boolean) are device
 # measurements too, e.g. a grid operator dimming signal ("<id>-power-limited").
 _BINARY_STATES = {"on": 1.0, "off": 0.0, "true": 1.0, "false": 0.0, "open": 1.0, "closed": 0.0}
 
 
-# RL29 fork: end of the last history import per measurement key.
+# eos-plus fork: end of the last history import per measurement key.
 _HISTORY_IMPORTED: dict[str, DateTime] = {}
 HISTORY_IMPORT_MAX_HOURS = 48
 
 
 _MISSING_STATES = {"unknown", "unavailable", "none"}
-"""Home Assistant states that carry no value (RL29 fork)."""
+"""Home Assistant states that carry no value (eos-plus fork)."""
 
 
 def state_to_float(state: str) -> float:
@@ -61,7 +61,7 @@ def homeassistant_api(
     """Base URL of the Home Assistant REST API and request headers.
 
     With ``base_url`` set, EOS talks to Home Assistant directly (standalone
-    container, RL29 fork): the URL is ``<base_url>/api`` and ``token`` must be a
+    container, eos-plus fork): the URL is ``<base_url>/api`` and ``token`` must be a
     long-lived access token. Without it, the add-on Supervisor proxy is used with
     the injected ``SUPERVISOR_TOKEN``.
 
@@ -96,7 +96,7 @@ def resolve_measurement_key(key: str, known_keys: Iterable[str]) -> tuple[Option
 
     Device measurement keys are registered with hyphens (``<device_id>-soc-factor``).
     Configurations often use underscores instead (issue #1302), which made every
-    write fail and the optimizer assume 0 % SoC. (RL29 fork.)
+    write fail and the optimizer assume 0 % SoC. (eos-plus fork.)
 
     Args:
         key: Key as configured in ``device_measurement_entity_ids``.
@@ -225,7 +225,7 @@ class HomeAssistantAdapterCommonSettings(SettingsBaseModel):
         default=None,
         json_schema_extra={
             "description": (
-                "RL29 fork: keys of 'device_measurement_entity_ids' whose full Home Assistant "
+                "eos-plus fork: keys of 'device_measurement_entity_ids' whose full Home Assistant "
                 "history (every state change since the last import, at most 48 h) is imported "
                 "instead of only the current state, e.g. the power of an appliance whose load "
                 "profile is learned."
@@ -486,7 +486,7 @@ class HomeAssistantAdapter(AdapterProvider):
     def get_entity_history(
         self, entity_id: str, start: DateTime, end: DateTime
     ) -> list[tuple[DateTime, float]]:
-        """Numeric state changes of an entity between start and end (RL29 fork)."""
+        """Numeric state changes of an entity between start and end (eos-plus fork)."""
         api, headers = self._api()
         url = f"{api}/history/period/{start.isoformat()}"
         params = {
@@ -512,7 +512,7 @@ class HomeAssistantAdapter(AdapterProvider):
         return samples
 
     async def _import_entity_history(self, measurement_key: str, entity_id: str) -> int:
-        """Import all state changes since the last import into a measurement key (RL29 fork)."""
+        """Import all state changes since the last import into a measurement key (eos-plus fork)."""
         end = to_datetime()
         earliest = end.subtract(hours=HISTORY_IMPORT_MAX_HOURS)
         start = _HISTORY_IMPORTED.get(measurement_key, earliest)
@@ -630,7 +630,7 @@ class HomeAssistantAdapter(AdapterProvider):
             # Retrieve measurements necessary for device simulations
             entity_ids = self.config.adapter.homeassistant.device_measurement_entity_ids
             if entity_ids:
-                # RL29 fork: device states are judged against the unrounded run
+                # eos-plus fork: device states are judged against the unrounded run
                 # time (``observation_datetime``) with ``measurement_max_age_seconds``.
                 # Stamping them with the slot start (rounded down to the full hour
                 # with 1 h slots) made them "stale" in every run later than
@@ -663,7 +663,7 @@ class HomeAssistantAdapter(AdapterProvider):
                             state = self.get_entity_state(entity_id)
                             logger.debug(f"Entity {entity_id}: {state}")
                             if state and str(state).strip().lower() in _MISSING_STATES:
-                                # RL29 fork: e.g. template sensors right after a Home
+                                # eos-plus fork: e.g. template sensors right after a Home
                                 # Assistant restart. Skip this run, name the entity.
                                 logger.warning(
                                     f"Entity {entity_id} ({measurement_key}) is '{state}';"
@@ -781,7 +781,7 @@ class HomeAssistantAdapter(AdapterProvider):
                     try:
                         value = row[solution_key]
                         if value is None or (isinstance(value, float) and math.isnan(value)):
-                            value = "unknown"  # RL29 fork: no NaN into the HA REST API
+                            value = "unknown"  # eos-plus fork: no NaN into the HA REST API
                         self.set_entity_state(entity_id, value)
                     except Exception as e:
                         logger.error(f"{e}")

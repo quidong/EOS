@@ -92,7 +92,7 @@ class PVForecastHomeAssistant(PVForecastProvider):
         """API base URL and token.
 
         Own ``base_url``/``token`` win; otherwise the Home Assistant adapter's
-        direct connection settings are reused (RL29 fork), and finally the
+        direct connection settings are reused (eos-plus fork), and finally the
         add-on Supervisor API.
         """
         from akkudoktoreos.adapter.homeassistant import homeassistant_api

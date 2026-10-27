@@ -153,7 +153,7 @@ class GeneticOptimizationParameters(
         json_schema_extra={
             "description": (
                 "Global horizontal irradiance forecast [W/m²] per interval, for the solar "
-                "gains of heat pump buildings (RL29 fork)."
+                "gains of heat pump buildings (eos-plus fork)."
             )
         },
     )
@@ -161,7 +161,7 @@ class GeneticOptimizationParameters(
         default=None,
         json_schema_extra={
             "description": (
-                "Heat pumps optimized together with battery, EV and appliances (RL29 fork)."
+                "Heat pumps optimized together with battery, EV and appliances (eos-plus fork)."
             )
         },
     )

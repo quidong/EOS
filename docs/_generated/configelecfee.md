@@ -9,7 +9,7 @@
 | ---- | -------------------- | ---- | --------- | ------- | ----------- |
 | elecfeefixed | `EOS_ELECFEE__ELECFEEFIXED` | `ElecFeeFixedCommonSettings` | `rw` | `required` | Fixed electricity fees provider settings. |
 | elecfeeimport | `EOS_ELECFEE__ELECFEEIMPORT` | `ElecFeeImportCommonSettings` | `rw` | `required` | Electricity fees import provider settings. |
-| grid_control_14a | `EOS_ELECFEE__GRID_CONTROL_14A` | `GridControl14aSettings` | `rw` | `required` | §14a EnWG grid fee module (none, module1, module2, module1_3) and dimming of controllable consumers (RL29 fork). Module 3 prices are applied to the fixed fee provider. |
+| grid_control_14a | `EOS_ELECFEE__GRID_CONTROL_14A` | `GridControl14aSettings` | `rw` | `required` | §14a EnWG grid fee module (none, module1, module2, module1_3) and dimming of controllable consumers (eos-plus fork). Module 3 prices are applied to the fixed fee provider. |
 | provider | `EOS_ELECFEE__PROVIDER` | `Optional[str]` | `rw` | `None` | Electricity fee provider id of provider to be used. |
 | providers | | `list[str]` | `ro` | `N/A` | Available electricity fee provider ids. |
 :::

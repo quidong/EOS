@@ -9,11 +9,11 @@
 | ---- | -------------------- | ---- | --------- | ------- | ----------- |
 | algorithm | `EOS_OPTIMIZATION__ALGORITHM` | `<enum 'OptimizationAlgorithm'>` | `rw` | `required` | Optimization algorithm [GENETIC | GENETIC0 | MILP]. Defaults to GENETIC. |
 | algorithms | | `list[str]` | `ro` | `N/A` | Available optimization algorithms. |
-| alternate_algorithms | `EOS_OPTIMIZATION__ALTERNATE_ALGORITHMS` | `list[akkudoktoreos.optimization.optimization.OptimizationAlgorithm]` | `rw` | `required` | RL29 fork: A/B operation - when set, the algorithm changes every local day in this order (day number modulo the list length) and `algorithm` is ignored for automatic runs. The history records which algorithm planned each run, so realised costs can be compared. |
+| alternate_algorithms | `EOS_OPTIMIZATION__ALTERNATE_ALGORITHMS` | `list[akkudoktoreos.optimization.optimization.OptimizationAlgorithm]` | `rw` | `required` | eos-plus fork: A/B operation - when set, the algorithm changes every local day in this order (day number modulo the list length) and `algorithm` is ignored for automatic runs. The history records which algorithm planned each run, so realised costs can be compared. |
 | genetic | `EOS_OPTIMIZATION__GENETIC` | `GeneticCommonSettings` | `rw` | `required` | GENETIC optimization algorithm configuration. |
 | genetic0 | `EOS_OPTIMIZATION__GENETIC0` | `Genetic0CommonSettings` | `rw` | `required` | GENETIC0 optimization algorithm configuration. |
 | keys | | `list[str]` | `ro` | `N/A` | The keys of the solution. |
-| milp | `EOS_OPTIMIZATION__MILP` | `MilpCommonSettings` | `rw` | `required` | MILP optimization configuration (RL29 fork). MILP uses the GENETIC settings (slots, horizons, terminal value) and adds these. |
+| milp | `EOS_OPTIMIZATION__MILP` | `MilpCommonSettings` | `rw` | `required` | MILP optimization configuration (eos-plus fork). MILP uses the GENETIC settings (slots, horizons, terminal value) and adds these. |
 | self_consumption_interpolator | `EOS_OPTIMIZATION__SELF_CONSUMPTION_INTERPOLATOR` | `<enum 'GridInterpolatorBackend'>` | `rw` | `scipy` | How the inverter's self-consumption probability table is evaluated [scipy | numpy]. 'scipy' (default) uses scipy.interpolate. 'numpy' gives the same values without importing SciPy, which saves about 35 MB RSS after the first optimization run (useful on devices with little RAM); a run takes about 2.5 % longer. |
 :::
 <!-- pyml enable line-length -->
@@ -143,7 +143,7 @@
 ```
 <!-- pyml enable line-length -->
 
-### MILP optimization settings (RL29 fork)
+### MILP optimization settings (eos-plus fork)
 
 <!-- pyml disable line-length -->
 :::{table} optimization::milp

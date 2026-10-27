@@ -80,7 +80,7 @@ class ElecPriceCommonSettings(SettingsBaseModel):
         default_factory=ElecPriceMLSettings,
         json_schema_extra={
             "description": (
-                "RL29 fork: LightGBM forecast of the hours after the published day-ahead "
+                "eos-plus fork: LightGBM forecast of the hours after the published day-ahead "
                 "prices (Energy-Charts provider)."
             )
         },

@@ -8,7 +8,7 @@
 | Name | Environment Variable | Type | Read-Only | Default | Description |
 | ---- | -------------------- | ---- | --------- | ------- | ----------- |
 | akkudoktor | `EOS_PVFORECAST__AKKUDOKTOR` | `PVForecastAkkudoktorLocalCommonSettings` | `rw` | `required` | Akkudoktor forecast backend and local calibration settings |
-| ensemble | `EOS_PVFORECAST__ENSEMBLE` | `PVForecastEnsembleCommonSettings` | `rw` | `required` | PV ensemble provider settings (RL29 fork) |
+| ensemble | `EOS_PVFORECAST__ENSEMBLE` | `PVForecastEnsembleCommonSettings` | `rw` | `required` | PV ensemble provider settings (eos-plus fork) |
 | forecastsolar | `EOS_PVFORECAST__FORECASTSOLAR` | `PVForecastForecastSolarCommonSettings` | `rw` | `required` | ForecastSolar provider settings |
 | homeassistant | `EOS_PVFORECAST__HOMEASSISTANT` | `PVForecastHomeAssistantCommonSettings` | `rw` | `required` | Home Assistant provider settings |
 | max_planes | `EOS_PVFORECAST__MAX_PLANES` | `Optional[int]` | `rw` | `0` | Maximum number of planes that can be set |
@@ -615,7 +615,7 @@
 ```
 <!-- pyml enable line-length -->
 
-### Settings of the PV ensemble (RL29 fork)
+### Settings of the PV ensemble (eos-plus fork)
 
 <!-- pyml disable line-length -->
 :::{table} pvforecast::ensemble

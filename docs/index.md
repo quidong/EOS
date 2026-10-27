@@ -40,7 +40,7 @@ akkudoktoreos/adapter/adapternodered.md
 
 ```{toctree}
 :maxdepth: 2
-:caption: RL29 fork
+:caption: eos-plus fork
 
 akkudoktoreos/fork/overview.md
 

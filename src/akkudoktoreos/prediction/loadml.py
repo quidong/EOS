@@ -1,4 +1,4 @@
-"""Base load forecast with gradient boosting and quantiles (RL29 fork).
+"""Base load forecast with gradient boosting and quantiles (eos-plus fork).
 
 ``LoadMeasured`` forecasts a robust statistic per weekday and hour. ``LoadML`` learns
 the household's **base load** (the house meter minus the consumers EOS plans itself:
@@ -8,7 +8,7 @@ heat pump, heating rod, washing machine, ...) with LightGBM quantile regression:
   minus the hourly mean power of ``subtract_power_keys`` (hold-last-value, like the
   Home Assistant history),
 - features: hour, weekday, day type (working day / Saturday / Sunday or public holiday
-  of ``state``), bridge day, season (day of year), outdoor temperature, away mode,
+  of ``holiday_region``), bridge day, season (day of year), outdoor temperature, away mode,
   the load of the same hour one week before and the level of the week before last,
 - one model per quantile (``quantiles``); the forecast EOS plans with is
   ``plan_quantile`` (0.5 = median, higher = more conservative = more reserve), the
@@ -41,7 +41,14 @@ from pydantic import Field, field_validator
 
 from akkudoktoreos.config.configabc import SettingsBaseModel
 from akkudoktoreos.core.coreabc import PredictionMixin
-from akkudoktoreos.prediction.calendarfeatures import STATES, day_type, is_bridge_day
+from akkudoktoreos.core.forkpaths import fork_data_dir
+from akkudoktoreos.prediction.calendarfeatures import (
+    GERMAN_STATES,
+    day_type,
+    is_bridge_day,
+    resolve_region,
+    validate_region,
+)
 from akkudoktoreos.prediction.loadakkudoktor import LoadAkkudoktorDataRecord
 from akkudoktoreos.prediction.loadmeasured import (
     LoadMeasured,
@@ -69,7 +76,7 @@ FEATURES = (
 
 
 class LoadMLCommonSettings(SettingsBaseModel):
-    """Settings of the gradient boosting base load provider (RL29 fork)."""
+    """Settings of the gradient boosting base load provider (eos-plus fork)."""
 
     history_weeks: int = Field(
         default=52,
@@ -161,11 +168,21 @@ class LoadMLCommonSettings(SettingsBaseModel):
             "examples": ["wbb12-return-ts"],
         },
     )
-    state: str = Field(
-        default="BW",
+    holiday_region: Optional[str] = Field(
+        default=None,
         json_schema_extra={
-            "description": "German federal state for public holidays.",
-            "examples": ["BW"],
+            "description": (
+                "Public holidays as ISO 3166 code: country ('NL') or country-subdivision "
+                "('DE-BW', 'AT-9', 'CH-ZH'). Empty: no public holidays, weekends only."
+            ),
+            "examples": ["DE-BW", "AT", "NL"],
+        },
+    )
+    state: Optional[str] = Field(
+        default=None,
+        json_schema_extra={
+            "description": "Deprecated: German federal state, use holiday_region, e.g. 'DE-BW' for 'BW'.",
+            "examples": [None],
         },
     )
     refit_hours: float = Field(
@@ -198,13 +215,25 @@ class LoadMLCommonSettings(SettingsBaseModel):
         default=20, ge=1, json_schema_extra={"description": "LightGBM min_data_in_leaf."}
     )
 
+    @field_validator("holiday_region")
+    @classmethod
+    def _holiday_region(cls, value: Optional[str]) -> Optional[str]:
+        return validate_region(value)
+
     @field_validator("state")
     @classmethod
-    def _state(cls, value: str) -> str:
+    def _state(cls, value: Optional[str]) -> Optional[str]:
+        if not value:
+            return None
         value = value.upper()
-        if value not in STATES:
-            raise ValueError(f"state must be one of {', '.join(STATES)}")
+        if value not in GERMAN_STATES:
+            raise ValueError(f"state must be one of {', '.join(GERMAN_STATES)}")
         return value
+
+    @property
+    def region(self) -> Optional[str]:
+        """Effective holiday region (``holiday_region``, else the deprecated ``state``)."""
+        return resolve_region(self.holiday_region, self.state)
 
     @field_validator("quantiles")
     @classmethod
@@ -292,7 +321,7 @@ def feature_rows(
     history: dict[datetime, float],
     temperature: dict[datetime, float],
     away: dict[datetime, float],
-    state: str,
+    region: Optional[str],
 ) -> np.ndarray:
     """Feature matrix (``FEATURES`` order) for local hour starts.
 
@@ -305,8 +334,8 @@ def feature_rows(
         doy = stamp.timetuple().tm_yday
         rows[i, 0] = stamp.hour
         rows[i, 1] = stamp.weekday()
-        rows[i, 2] = day_type(day, state)
-        rows[i, 3] = 1.0 if is_bridge_day(day, state) else 0.0
+        rows[i, 2] = day_type(day, region)
+        rows[i, 3] = 1.0 if is_bridge_day(day, region) else 0.0
         rows[i, 4] = math.sin(2 * math.pi * doy / 365.25)
         rows[i, 5] = math.cos(2 * math.pi * doy / 365.25)
         rows[i, 6] = temperature.get(stamp, np.nan)
@@ -402,7 +431,7 @@ def train_load_model(
     if len(good_days) < settings.min_days:
         return None
     history = {h: float(v) for h, v, ok in zip(hours, base_wh, mask) if ok and v is not None}
-    X_all = feature_rows(good_hours, history, temperature, away, settings.state)
+    X_all = feature_rows(good_hours, history, temperature, away, settings.region)
     y_all = np.array([history[h] for h in good_hours], dtype=float)
 
     # Holdout: the last days, models trained only on the days before.
@@ -461,10 +490,10 @@ def predict_load(
     history: dict[datetime, float],
     temperature: dict[datetime, float],
     away: dict[datetime, float],
-    state: str,
+    region: Optional[str],
 ) -> dict[float, list[float]]:
     """Forecast [Wh] per quantile for local hour starts; monotone across quantiles."""
-    X = feature_rows(hours, history, temperature, away, state)
+    X = feature_rows(hours, history, temperature, away, region)
     quantiles = sorted(model.models)
     raw = np.vstack([np.clip(model.models[q].predict(X), 0, model.max_wh * 1.5) for q in quantiles])
     raw = np.maximum.accumulate(raw, axis=0)  # no quantile crossing
@@ -513,7 +542,7 @@ class LoadML(PredictionMixin, LoadMeasured):
         return self.config.load.loadml
 
     def _summary_path(self) -> Path:
-        return Path(self.config.general.data_folder_path) / "rl29" / "load_ml.json"
+        return fork_data_dir(self.config.general.data_folder_path) / "load_ml.json"
 
     async def _hourly_history(self) -> tuple[list[datetime], list[Optional[float]], dict, dict]:
         """Local hour starts, base load Wh, temperature and away per hour."""
@@ -675,7 +704,7 @@ class LoadML(PredictionMixin, LoadMeasured):
         away.update(f_away)
         history = {h: v for h, v in zip(hours, base) if v is not None}
         forecast = predict_load(
-            model, [_naive(h) for h in future_local], history, temperature, away, settings.state
+            model, [_naive(h) for h in future_local], history, temperature, away, settings.region
         )
         plan_q = min(forecast, key=lambda q: abs(q - settings.plan_quantile))
         self._write_spread(forecast)

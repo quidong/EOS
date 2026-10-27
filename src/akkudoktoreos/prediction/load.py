@@ -49,14 +49,14 @@ class LoadCommonSettings(SettingsBaseModel):
     loadmeasured: LoadMeasuredCommonSettings = Field(
         default_factory=LoadMeasuredCommonSettings,
         json_schema_extra={
-            "description": "LoadMeasured provider settings (RL29 fork: own measured history)."
+            "description": "LoadMeasured provider settings (eos-plus fork: own measured history)."
         },
     )
 
     loadml: LoadMLCommonSettings = Field(
         default_factory=LoadMLCommonSettings,
         json_schema_extra={
-            "description": "LoadML provider settings (RL29 fork: gradient boosting base load)."
+            "description": "LoadML provider settings (eos-plus fork: gradient boosting base load)."
         },
     )
 

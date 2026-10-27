@@ -1,4 +1,4 @@
-"""Plan versus actual for the heat pump (RL29 fork).
+"""Plan versus actual for the heat pump (eos-plus fork).
 
 The feedback loop the calibration alone does not give: every optimization run
 records the first hours of its heat pump plan (room, screed and tank
@@ -12,7 +12,7 @@ of the last day are compared with what the measurements say happened:
 each for two lead times: the plan issued shortly before the slot (how well the
 controller follows the model) and the plan issued hours earlier (how well the
 model predicts). The result goes to the log and to
-``<data folder>/rl29/heatpump_plan_actual.json``; a growing room bias is the
+``<data folder>/plus/heatpump_plan_actual.json``; a growing room bias is the
 cue to look at the building parameters, a wrong energy ratio at the COP.
 """
 
@@ -25,6 +25,7 @@ from typing import Any, Optional, Sequence
 
 from loguru import logger
 
+from akkudoktoreos.core.forkpaths import fork_data_dir
 from akkudoktoreos.devices.heatpumpcalibration import _as_datetime, _measurement_series
 from akkudoktoreos.devices.thermal.calibration import hourly_means
 
@@ -164,7 +165,7 @@ async def evaluate_plans(
     room = await _measurement_series(measurement, keys["room_c"], start, end)
     dhw = await _measurement_series(measurement, keys["dhw_c"], start, end)
     electric = await _measurement_series(measurement, keys["electric_w"], start, end)
-    # Airing (RL29 fork): the room air drops and recovers within the hour; the model
+    # Airing (eos-plus fork): the room air drops and recovers within the hour; the model
     # only knows the expected airing, so slots near open windows are not compared.
     windows = await _measurement_series(
         measurement, keys["window_open"], start - timedelta(hours=1), end
@@ -264,7 +265,7 @@ async def evaluate_device(
     every_hours: float = 1.0,
 ) -> Optional[dict[str, Any]]:
     """Evaluate at most every ``every_hours``; returns the current evaluation."""
-    store = PlanActualStore(Path(data_folder) / "rl29" / "heatpump_plan_actual.json")
+    store = PlanActualStore(fork_data_dir(data_folder) / "heatpump_plan_actual.json")
     previous = store.evaluation(device.device_id)
     now = _as_datetime(observation_time)
     if previous is not None:
@@ -298,7 +299,7 @@ def record_plan(
 ) -> None:
     """Record a plan from the optimizer; never raises."""
     try:
-        store = PlanActualStore(Path(data_folder) / "rl29" / "heatpump_plan_actual.json")
+        store = PlanActualStore(fork_data_dir(data_folder) / "heatpump_plan_actual.json")
         store.record(device_id, issued_at, slot_starts, slot_hours, result)
         store.save()
     except Exception as exc:  # recording is diagnostics, never part of the run

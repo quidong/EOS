@@ -1,4 +1,4 @@
-"""PV forecast ensemble with self-calibration (RL29 fork).
+"""PV forecast ensemble with self-calibration (eos-plus fork).
 
 Combines the physical PVLib forecast (weather → irradiance → module → inverter) with a
 forecast read from a Home Assistant entity (Helios Forecast, Solcast, ...):
@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 import math
-from pathlib import Path
 from typing import Any, Optional, Sequence
 
 import numpy as np
@@ -29,6 +28,7 @@ from loguru import logger
 from pydantic import Field, model_validator
 
 from akkudoktoreos.config.configabc import SettingsBaseModel
+from akkudoktoreos.core.forkpaths import fork_data_dir
 from akkudoktoreos.prediction.pvforecastabc import PVForecastDataRecord
 from akkudoktoreos.prediction.pvforecastpvlib import PVForecastPVLib
 from akkudoktoreos.utils.datetimeutil import to_datetime, to_duration
@@ -41,7 +41,7 @@ MEMBER_KEYS = {
 
 
 class PVForecastEnsembleCommonSettings(SettingsBaseModel):
-    """Settings of the PV ensemble (RL29 fork)."""
+    """Settings of the PV ensemble (eos-plus fork)."""
 
     members: list[str] = Field(
         default_factory=lambda: ["pvlib"],
@@ -397,7 +397,7 @@ class PVForecastEnsemble(PVForecastPVLib):
         }
         logger.info("PVForecastEnsemble: {}", summary)
         try:
-            path = Path(self.config.general.data_folder_path) / "rl29" / "pv_ensemble.json"
+            path = fork_data_dir(self.config.general.data_folder_path) / "pv_ensemble.json"
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(summary, indent=1), encoding="utf-8")
         except Exception as exc:

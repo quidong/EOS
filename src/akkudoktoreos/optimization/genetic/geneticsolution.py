@@ -302,7 +302,7 @@ class GeneticSimulationResult(GeneticParametersBaseModel):
         json_schema_extra={
             "description": (
                 "Electric energy of all heat pumps and heating rods per slot [Wh] "
-                "(RL29 fork); included in load_wh_per_hour."
+                "(eos-plus fork); included in load_wh_per_hour."
             )
         },
     )
@@ -503,7 +503,7 @@ class GeneticSolution(ConfigMixin, GeneticParametersBaseModel):
         default_factory=dict,
         json_schema_extra={
             "description": (
-                "Per heat pump device_id (RL29 fork): schedule and predicted states per "
+                "Per heat pump device_id (eos-plus fork): schedule and predicted states per "
                 "slot - heating_mode, dhw_mode, rod_target_c, electric_wh, hp_electric_wh, rod_electric_wh, room_c, "
                 "slab_c, dhw_c, flow_c, cop_space - and a summary."
             )
@@ -934,7 +934,7 @@ class GeneticSolution(ConfigMixin, GeneticParametersBaseModel):
         # energy arrays start at start_day_slot, like the other result arrays.
         for device_id, energy_wh in self.result.home_appliance_energy_wh.items():
             solution[f"{device_id}_energy_wh"] = energy_wh[:n_points]
-            # RL29 fork: Unix time of the next planned run start at or after each
+            # eos-plus fork: Unix time of the next planned run start at or after each
             # slot (0 = none), so a controller can program a delayed start.
             run_starts = [start.timestamp() for start in self.appliance_starts.get(device_id, [])]
             solution[f"{device_id}_next_start_ts"] = [
@@ -971,7 +971,7 @@ class GeneticSolution(ConfigMixin, GeneticParametersBaseModel):
                     raise ValueError(error_msg)
                 solution[key] = operation[key]
 
-        # RL29 fork: a request-driven appliance without a pending request is not
+        # eos-plus fork: a request-driven appliance without a pending request is not
         # part of the optimization. Keep its columns anyway (no energy, no start
         # planned), so controllers reading them get a defined "nothing planned".
         for appliance in (self.config.devices.home_appliances or {}).values():
@@ -980,7 +980,7 @@ class GeneticSolution(ConfigMixin, GeneticParametersBaseModel):
                 solution[f"{device_id}_energy_wh"] = [0.0] * n_points
                 solution[f"{device_id}_next_start_ts"] = [0.0] * n_points
 
-        # Heat pumps (RL29 fork): one block of columns per device.
+        # Heat pumps (eos-plus fork): one block of columns per device.
         for device_id, schedule in self.heat_pumps.items():
             for column, key, convert in HEAT_PUMP_SOLUTION_COLUMNS:
                 values = list(schedule.get(key, []))[:n_points]
@@ -1266,7 +1266,7 @@ class GeneticSolution(ConfigMixin, GeneticParametersBaseModel):
                     )
                     last_state = running
 
-        # Heat pumps (RL29 fork): fill-rate based control of the thermal
+        # Heat pumps (eos-plus fork): fill-rate based control of the thermal
         # storages, one resource per actuator (space heating, hot water) so
         # each gets its own Home Assistant entity (sensor.eos_<id>_space_heating,
         # sensor.eos_<id>_dhw). A new instruction is emitted on a mode change only.

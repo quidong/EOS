@@ -1,4 +1,4 @@
-"""MILP optimization, selectable next to GENETIC (RL29 fork).
+"""MILP optimization, selectable next to GENETIC (eos-plus fork).
 
 The algorithm ``MILP`` uses the GENETIC machinery for everything that is not the
 search itself - parameter preparation, the device simulation that judges every plan,
@@ -32,6 +32,7 @@ from typing import Any, Optional
 
 from loguru import logger
 
+from akkudoktoreos.core.forkpaths import fork_data_dir
 from akkudoktoreos.optimization.genetic.genetic import GeneticOptimization
 from akkudoktoreos.optimization.genetic.geneticparams import (
     GeneticOptimizationParameters,
@@ -182,9 +183,8 @@ class MilpOptimization(GeneticOptimization):
             return float(configured)
         try:
             import json
-            from pathlib import Path
 
-            path = Path(self.config.general.data_folder_path) / "rl29" / "load_ml.json"
+            path = fork_data_dir(self.config.general.data_folder_path) / "load_ml.json"
             data = json.loads(path.read_text(encoding="utf-8"))
             if data.get("used"):
                 spread = max(

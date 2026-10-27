@@ -345,7 +345,7 @@ class TimeWindow(SettingsBaseModel):
         # an ambiguous start resolves to its first occurrence, an ambiguous end
         # to its last one, and a non-existent time is moved forward by the
         # length of the gap (PEP 495 semantics; for windows on full hours this
-        # is the moment the clocks jump).  (RL29 fork fix.)
+        # is the moment the clocks jump).  (eos-plus fork fix.)
         tz = reference_date.tzinfo
         naive_start = pendulum.naive(
             reference_date.year,

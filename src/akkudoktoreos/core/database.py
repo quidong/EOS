@@ -34,7 +34,7 @@ from akkudoktoreos.core.databaseabc import (
     DATABASE_METADATA_KEY,
     DatabaseBackendABC,
 )
-from akkudoktoreos.core.history import HistorySettings  # RL29 fork
+from akkudoktoreos.core.history import HistorySettings  # eos-plus fork
 
 # Valid database providers
 database_providers: List[str] = ["LMDB", "SQLite", "NoDB"]
@@ -130,11 +130,11 @@ class DatabaseCommonSettings(SettingsBaseModel):
         },
     )
 
-    # RL29 fork: long-term history of forecasts, plans and actuals in PostgreSQL.
+    # eos-plus fork: long-term history of forecasts, plans and actuals in PostgreSQL.
     history: HistorySettings = Field(
         default_factory=HistorySettings,
         json_schema_extra={
-            "description": "Long-term history in PostgreSQL / TimescaleDB (RL29 fork).",
+            "description": "Long-term history in PostgreSQL / TimescaleDB (eos-plus fork).",
         },
     )
 

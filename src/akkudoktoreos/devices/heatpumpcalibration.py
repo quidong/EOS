@@ -1,4 +1,4 @@
-"""Automatic heat pump calibration inside EOS (RL29 fork).
+"""Automatic heat pump calibration inside EOS (eos-plus fork).
 
 Glue between the measurement store and ``devices.thermal.calibration``, the
 heat pump counterpart of the PV calibration in ``PVForecastAkkudoktorLocal``:
@@ -10,7 +10,7 @@ heat pump counterpart of the PV calibration in ``PVForecastAkkudoktorLocal``:
    as measurements, so the history builds up while EOS runs and the solar term
    needs no extra sensor.
 3. The fits run at most every ``calibration.refit_hours``; the result is kept
-   in ``<data folder>/rl29/heatpump_calibration.json`` and applied to a copy of
+   in ``<data folder>/plus/heatpump_calibration.json`` and applied to a copy of
    the device settings for the optimization run. The configuration itself is
    never written: it stays the prior of the next fit.
 """
@@ -27,6 +27,7 @@ from zoneinfo import ZoneInfo
 
 from loguru import logger
 
+from akkudoktoreos.core.forkpaths import fork_data_dir
 from akkudoktoreos.devices.thermal.calibration import (
     CalibrationResult,
     HourlySample,
@@ -197,7 +198,7 @@ async def calibrate_device(
     if not settings.enabled:
         return None
     now = _as_datetime(observation_time)
-    store = HeatPumpCalibrationStore(Path(data_folder) / "rl29" / "heatpump_calibration.json")
+    store = HeatPumpCalibrationStore(fork_data_dir(data_folder) / "heatpump_calibration.json")
     priors = device.calibration_priors()
     # A changed configuration (new prior, other window or options) refits at once.
     priors_key = json.dumps(

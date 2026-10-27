@@ -13,6 +13,7 @@ from akkudoktoreos.core.coreabc import (
     PredictionMixin,
     get_ems,
 )
+from akkudoktoreos.core.forkpaths import fork_data_dir
 from akkudoktoreos.devices.settings.batterysettings import BatteriesCommonSettings
 from akkudoktoreos.optimization.genetic.forecast import bounded_forecast_array
 from akkudoktoreos.optimization.genetic.geneticabc import GeneticParametersBaseModel
@@ -50,11 +51,11 @@ class RuntimeForecasts(GeneticParametersBaseModel):
 
 
 PLANNED_SOC_MAX_AGE_SECONDS = 3 * 3600
-"""A plan older than this is not used as a SoC substitute (RL29 fork)."""
+"""A plan older than this is not used as a SoC substitute (eos-plus fork)."""
 
 
 def planned_soc_percentage(ems: Any, device_id: str, moment: Any) -> Optional[int]:
-    """SoC [%] the latest plan expected for ``device_id`` at ``moment`` (RL29 fork).
+    """SoC [%] the latest plan expected for ``device_id`` at ``moment`` (eos-plus fork).
 
     Used when the measured SoC is missing or stale. Only a plan generated within the
     last ``PLANNED_SOC_MAX_AGE_SECONDS`` whose slots cover ``moment`` counts.
@@ -170,7 +171,7 @@ class ConfigOptimizationRequest(
                     raise ValueError("Invalid or stale SoC factor")
                 return int(value * 100)
             except (ValueError, KeyError) as exc:
-                # RL29 fork: rolling horizon - continue from the last plan's SoC for
+                # eos-plus fork: rolling horizon - continue from the last plan's SoC for
                 # this moment instead of assuming an empty battery.
                 planned = planned_soc_percentage(ems, device.device_id, observation_time)
                 if planned is not None:
@@ -226,7 +227,7 @@ class ConfigOptimizationRequest(
                 )
             except KeyError:
                 continue
-            # RL29 fork: records written for other keys (e.g. the request
+            # eos-plus fork: records written for other keys (e.g. the request
             # measurements) carry no count; only reported counts are considered.
             samples = [
                 (date, count)
@@ -342,7 +343,7 @@ class ConfigOptimizationRequest(
         """Outdoor temperature per slot in degC, aligned with the other forecasts.
 
         A supplied series takes precedence. Otherwise the configured weather
-        provider's ``weather_temp_air`` is read from the prediction store (RL29
+        provider's ``weather_temp_air`` is read from the prediction store (eos-plus
         fork: upstream left the forecast empty for configuration-owned runs, so
         temperature dependent device models had no input). Missing slots stay
         ``None``; no data at all yields ``None``. The temperature is optional, so
@@ -384,7 +385,7 @@ class ConfigOptimizationRequest(
         return temperatures
 
     async def _appliance_request(self, device: Any, observation_time: DateTime) -> Optional[Any]:
-        """Apply a pending request to a request-driven appliance (RL29 fork).
+        """Apply a pending request to a request-driven appliance (eos-plus fork).
 
         Returns the settings to plan with, or ``None`` when the appliance has no
         fresh request and must not be planned. Appliances that are not
@@ -452,13 +453,13 @@ class ConfigOptimizationRequest(
         return type(device).model_validate(data)
 
     async def _learned_profile(self, device: Any, observation_time: DateTime) -> Optional[dict]:
-        """Learn finished runs and return the profile of the selected program (RL29 fork)."""
+        """Learn finished runs and return the profile of the selected program (eos-plus fork)."""
         from akkudoktoreos.devices.applianceprofiles import (
             ApplianceProfileStore,
             detect_runs,
         )
 
-        path = Path(self.config.general.data_folder_path) / "rl29" / "appliance_profiles.json"
+        path = fork_data_dir(self.config.general.data_folder_path) / "appliance_profiles.json"
         store = ApplianceProfileStore(path)
         since = observation_time.subtract(days=2)
 
@@ -541,7 +542,7 @@ class ConfigOptimizationRequest(
         return float(max(samples, key=lambda sample: sample[0].timestamp())[1])
 
     async def _calibrated_heat_pump(self, device: Any, observation_time: DateTime) -> Any:
-        """Device settings with the automatic calibration applied (RL29 fork).
+        """Device settings with the automatic calibration applied (eos-plus fork).
 
         With ``calibration.enabled`` the model parameters are fitted from the
         measurement history (at most every ``refit_hours``) and a copy of the
@@ -577,7 +578,7 @@ class ConfigOptimizationRequest(
     async def _heat_pump_state(
         self, device: Any, observation_time: DateTime
     ) -> GeneticHeatPumpParameters:
-        """Current thermal state of a heat pump from fresh measurements (RL29 fork).
+        """Current thermal state of a heat pump from fresh measurements (eos-plus fork).
 
         Missing or stale values stay ``None`` and the optimizer uses model
         defaults. The time since the last legionella heat-up is read from the
@@ -683,7 +684,7 @@ class ConfigOptimizationRequest(
                 logger.info(
                     "Heat pump {}: cooling season, dew point {} degC.", device.device_id, dewpoint
                 )
-        # Holiday mode (RL29 fork).
+        # Holiday mode (eos-plus fork).
         away = False
         away_until: Optional[DateTime] = None
         away_room: Optional[float] = None
@@ -716,7 +717,7 @@ class ConfigOptimizationRequest(
                     away_until.isoformat() if away_until is not None else "unknown",
                     away_room if away_room is not None else device.away.room_c,
                 )
-        # Zone setback and window ventilation (RL29 fork).
+        # Zone setback and window ventilation (eos-plus fork).
         setback_room: Optional[float] = None
         if device.zone_setback.enabled:
             value = await self._latest_measurement(

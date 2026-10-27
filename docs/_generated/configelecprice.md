@@ -11,7 +11,7 @@
 | elecpricefixed | `EOS_ELECPRICE__ELECPRICEFIXED` | `ElecPriceFixedCommonSettings` | `rw` | `required` | Fixed electricity price provider settings. |
 | elecpriceimport | `EOS_ELECPRICE__ELECPRICEIMPORT` | `ElecPriceImportCommonSettings` | `rw` | `required` | Electricity price import provider settings. |
 | energycharts | `EOS_ELECPRICE__ENERGYCHARTS` | `ElecPriceEnergyChartsCommonSettings` | `rw` | `required` | Energy Charts provider settings. |
-| ml | `EOS_ELECPRICE__ML` | `ElecPriceMLSettings` | `rw` | `required` | RL29 fork: LightGBM forecast of the hours after the published day-ahead prices (Energy-Charts provider). |
+| ml | `EOS_ELECPRICE__ML` | `ElecPriceMLSettings` | `rw` | `required` | eos-plus fork: LightGBM forecast of the hours after the published day-ahead prices (Energy-Charts provider). |
 | provider | `EOS_ELECPRICE__PROVIDER` | `Optional[str]` | `rw` | `None` | Electricity price provider id of provider to be used. |
 | providers | | `list[str]` | `ro` | `N/A` | Available electricity price provider ids. |
 | smard | `EOS_ELECPRICE__SMARD` | `ElecPriceSMARDCommonSettings` | `rw` | `required` | SMARD electricity price provider settings. |
@@ -52,7 +52,8 @@
                "holdout_days": 7,
                "horizon_hours": 72,
                "refit_hours": 6.0,
-               "state": "BW",
+               "holiday_region": null,
+               "state": null,
                "num_leaves": 15,
                "n_estimators": 300,
                "learning_rate": 0.05,
@@ -100,7 +101,8 @@
                "holdout_days": 7,
                "horizon_hours": 72,
                "refit_hours": 6.0,
-               "state": "BW",
+               "holiday_region": null,
+               "state": null,
                "num_leaves": 15,
                "n_estimators": 300,
                "learning_rate": 0.05,
@@ -185,7 +187,7 @@
 ```
 <!-- pyml enable line-length -->
 
-### Machine-learning forecast of the prices after the published day-ahead (RL29 fork)
+### Price forecast after the published day-ahead with LightGBM (eos-plus fork)
 
 <!-- pyml disable line-length -->
 :::{table} elecprice::ml
@@ -197,6 +199,7 @@
 | enabled | `bool` | `rw` | `False` | Forecast the hours after the last published price with LightGBM (used only when it beats the ETS forecast on the holdout days). |
 | history_days | `int` | `rw` | `180` | Price history fetched and used for training [days]. |
 | holdout_days | `int` | `rw` | `7` | The model must beat ETS on these last days to be used. |
+| holiday_region | `Optional[str]` | `rw` | `None` | Public holidays as ISO 3166 code: country ('NL') or country-subdivision ('DE-BW', 'AT-9', 'CH-ZH'). Empty: no public holidays, weekends only. |
 | horizon_hours | `int` | `rw` | `72` | Longest lead time after the last known price that is trained [h]. |
 | learning_rate | `float` | `rw` | `0.05` | None |
 | min_data_in_leaf | `int` | `rw` | `40` | None |
@@ -204,7 +207,7 @@
 | n_estimators | `int` | `rw` | `300` | None |
 | num_leaves | `int` | `rw` | `15` | None |
 | refit_hours | `float` | `rw` | `6.0` | Retrain after this many hours. |
-| state | `str` | `rw` | `BW` | Federal state for public holidays. |
+| state | `Optional[str]` | `rw` | `None` | Deprecated: German federal state, use holiday_region, e.g. 'DE-BW' for 'BW'. |
 :::
 <!-- pyml enable line-length -->
 
@@ -223,7 +226,8 @@
                "holdout_days": 7,
                "horizon_hours": 72,
                "refit_hours": 6.0,
-               "state": "BW",
+               "holiday_region": "DE-BW",
+               "state": null,
                "num_leaves": 15,
                "n_estimators": 300,
                "learning_rate": 0.05,

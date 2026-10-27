@@ -21,17 +21,17 @@ reads the model reports from the data volume (read-only). Run it as an extra ser
 
 ```yaml
   eos-mcp:
-    image: ghcr.io/quidong/eos:rl29-<commit>      # same image as eos
+    image: ghcr.io/quidong/eos:plus-stable      # same image as eos
     restart: unless-stopped
     user: "100:101"
-    command: ["python", "-m", "akkudoktoreos.rl29mcp"]
+    command: ["python", "-m", "akkudoktoreos.mcp"]
     environment:
       EOS_MCP_TOKEN: ${EOS_MCP_TOKEN}            # openssl rand -hex 32
       EOS_MCP_EOS_URL: http://eos:8503
       EOS_MCP_PORT: "8505"
       EOS_MCP_ALLOWED_HOSTS: <host>:8505
       EOS_MCP_ALLOW_WRITE: "false"
-      EOS_MCP_REPORT_DIR: /data/rl29
+      EOS_MCP_REPORT_DIR: /data/plus
     volumes: ["eos_data:/data:ro"]
     ports: ["8505:8505"]
     healthcheck:
@@ -73,10 +73,10 @@ claude mcp add --transport http eos http://<host>:8505/mcp \
   --header "Authorization: Bearer <token>"
 ```
 
-Claude Desktop: `scripts/rl29/mcpb/` builds a desktop extension that asks for address and token at install time:
+Claude Desktop: `scripts/plus/mcpb/` builds a desktop extension that asks for address and token at install time:
 
 ```bash
-cd scripts/rl29/mcpb/server && npm ci --omit=dev && cd ..
+cd scripts/plus/mcpb/server && npm ci --omit=dev && cd ..
 npx -y @anthropic-ai/mcpb@2.1.2 pack . eos.mcpb
 ```
 

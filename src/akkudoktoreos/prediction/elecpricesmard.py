@@ -75,6 +75,12 @@ class ElecPriceSMARD(ElecPriceEnergyCharts):
         """Return the unique identifier for the direct SMARD provider."""
         return "ElecPriceSMARD"
 
+    def _market_country(self) -> Optional[str]:
+        """Country of the SMARD market region for the holidays of the price model."""
+        settings = self.config.elecprice.smard
+        region = str(settings.region if settings is not None else "DE")
+        return region.split("-")[0].upper()[:2] or None
+
     @classmethod
     def _validate_index(cls, json_data: bytes) -> SmardIndex:
         """Validate a SMARD chunk index response."""

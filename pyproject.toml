@@ -49,6 +49,7 @@ dependencies = [
     "psycopg[binary]==3.3.6",
     "lightgbm==4.6.0",
     "mcp==1.27.0",
+    "holidays==0.105",
 ]
 
 [project.optional-dependencies]

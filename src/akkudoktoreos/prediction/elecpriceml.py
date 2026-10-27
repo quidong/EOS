@@ -1,4 +1,4 @@
-"""Electricity price forecast beyond the published day-ahead prices (RL29 fork).
+"""Electricity price forecast beyond the published day-ahead prices (eos-plus fork).
 
 Day-ahead prices are known until midnight today, from about 13:00 until midnight
 tomorrow. Everything after that - up to 60 hours with a 72 hour prediction - used to come
@@ -25,7 +25,7 @@ are "forecast" from what was known at that midnight.
 
 Safety gate (as for the base load): the model is used only when it beats the ETS
 forecast on the last ``holdout_days`` days (both trained without them); otherwise ETS
-stays in charge. Report: ``<data>/rl29/price_ml.json``.
+stays in charge. Report: ``<data>/plus/price_ml.json``.
 """
 
 from __future__ import annotations
@@ -41,7 +41,12 @@ import numpy as np
 from pydantic import Field, field_validator
 
 from akkudoktoreos.config.configabc import SettingsBaseModel
-from akkudoktoreos.prediction.calendarfeatures import STATES, day_type
+from akkudoktoreos.prediction.calendarfeatures import (
+    GERMAN_STATES,
+    day_type,
+    resolve_region,
+    validate_region,
+)
 
 WEATHER_KEYS = ("weather_ghi", "weather_wind_speed", "weather_temp_air", "weather_total_clouds")
 
@@ -69,7 +74,7 @@ FEATURES = (
 
 
 class ElecPriceMLSettings(SettingsBaseModel):
-    """Machine-learning forecast of the prices after the published day-ahead (RL29 fork)."""
+    """Price forecast after the published day-ahead with LightGBM (eos-plus fork)."""
 
     enabled: bool = Field(
         default=False,
@@ -121,22 +126,47 @@ class ElecPriceMLSettings(SettingsBaseModel):
         ge=1,
         json_schema_extra={"description": "Retrain after this many hours.", "examples": [6]},
     )
-    state: str = Field(
-        default="BW",
-        json_schema_extra={"description": "Federal state for public holidays.", "examples": ["BW"]},
+    holiday_region: Optional[str] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "Public holidays as ISO 3166 code: country ('NL') or country-subdivision "
+                "('DE-BW', 'AT-9', 'CH-ZH'). Empty: no public holidays, weekends only."
+            ),
+            "examples": ["DE-BW", "AT", "NL"],
+        },
+    )
+    state: Optional[str] = Field(
+        default=None,
+        json_schema_extra={
+            "description": "Deprecated: German federal state, use holiday_region, e.g. 'DE-BW' for 'BW'.",
+            "examples": [None],
+        },
     )
     num_leaves: int = Field(default=15, ge=4, le=127)
     n_estimators: int = Field(default=300, ge=20, le=3000)
     learning_rate: float = Field(default=0.05, gt=0, le=1)
     min_data_in_leaf: int = Field(default=40, ge=1)
 
+    @field_validator("holiday_region")
+    @classmethod
+    def _holiday_region(cls, value: Optional[str]) -> Optional[str]:
+        return validate_region(value)
+
     @field_validator("state")
     @classmethod
-    def _state(cls, value: str) -> str:
+    def _state(cls, value: Optional[str]) -> Optional[str]:
+        if not value:
+            return None
         value = value.upper()
-        if value not in STATES:
-            raise ValueError(f"state must be one of {', '.join(STATES)}")
+        if value not in GERMAN_STATES:
+            raise ValueError(f"state must be one of {', '.join(GERMAN_STATES)}")
         return value
+
+    @property
+    def region(self) -> Optional[str]:
+        """Effective holiday region (``holiday_region``, else the deprecated ``state``)."""
+        return resolve_region(self.holiday_region, self.state)
 
 
 # --------------------------------------------------------------------------------------
@@ -207,7 +237,7 @@ def feature_row(
     cutoff: float,
     target: float,
     tz: ZoneInfo,
-    state: str,
+    region: Optional[str],
     level: Optional[tuple[float, float, float, float, float]] = None,
 ) -> list[float]:
     """Features of ``target`` forecast with prices known up to the slot ``cutoff``."""
@@ -222,7 +252,7 @@ def feature_row(
     return [
         local.hour + local.minute / 60.0,
         float(local.weekday()),
-        float(day_type(local.date(), state)),
+        float(day_type(local.date(), region)),
         math.sin(2 * math.pi * doy / 366.0),
         math.cos(2 * math.pi * doy / 366.0),
         (target - cutoff) / 3600.0,
@@ -266,7 +296,7 @@ def training_rows(
     cutoffs: Sequence[float],
     horizon_hours: float,
     tz: ZoneInfo,
-    state: str,
+    region: Optional[str],
     target_until: Optional[float] = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """(X, y relative to the day mean, cutoff per row) for the given cutoffs."""
@@ -284,7 +314,7 @@ def training_rows(
             value = series.at(target)
             if not math.isfinite(value):
                 continue
-            row = feature_row(series, cutoff, target, tz, state, level)
+            row = feature_row(series, cutoff, target, tz, region, level)
             if not math.isfinite(row[DAY_MEAN]):
                 continue
             rows.append(row)
@@ -339,13 +369,13 @@ def _ct(value_per_wh: Optional[float]) -> Optional[float]:
 
 
 def predict_prices(
-    model: PriceModel, series: PriceSeries, count: int, tz: ZoneInfo, state: str
+    model: PriceModel, series: PriceSeries, count: int, tz: ZoneInfo, region: Optional[str]
 ) -> np.ndarray:
     """``count`` prices after the last known slot."""
     cutoff = series.end
     level = level_features(series, cutoff)
     rows = [
-        feature_row(series, cutoff, cutoff + (k + 1) * series.step, tz, state, level)
+        feature_row(series, cutoff, cutoff + (k + 1) * series.step, tz, region, level)
         for k in range(count)
     ]
     X = np.array(rows, dtype=float)
@@ -376,7 +406,7 @@ def train_price_model(
         train_cutoffs,
         settings.horizon_hours,
         tz,
-        settings.state,
+        settings.region,
         target_until=holdout_start,
     )
     if len(y) < 500 or not holdout_cutoffs:
@@ -387,7 +417,7 @@ def train_price_model(
     steps_per_day = int(86400 / series.step)
     ets_window = 35 * steps_per_day
     for cutoff in holdout_cutoffs:
-        Xh, yh, _ = training_rows(series, [cutoff], settings.horizon_hours, tz, settings.state)
+        Xh, yh, _ = training_rows(series, [cutoff], settings.horizon_hours, tz, settings.region)
         if len(yh) == 0:
             continue
         predicted = np.asarray(booster.predict(Xh), dtype=float) + Xh[:, DAY_MEAN]
@@ -405,7 +435,7 @@ def train_price_model(
     mae_ets = float(np.mean(errors_ets)) if errors_ets else None
     use = mae_ml is not None and mae_ets is not None and mae_ml < mae_ets
     # Final model with all days.
-    X_all, y_all, _ = training_rows(series, cutoffs, settings.horizon_hours, tz, settings.state)
+    X_all, y_all, _ = training_rows(series, cutoffs, settings.horizon_hours, tz, settings.region)
     final = _fit(X_all, y_all, settings) if use else booster
     return PriceModel(
         booster=final,

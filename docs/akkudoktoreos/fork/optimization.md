@@ -39,7 +39,7 @@ Cooling seasons use the mode search without the linear heat pump model.
 and the first `shared_slots` battery decisions are common, afterwards each scenario adapts (two-stage).
 **Negative feed-in tariffs** lead to curtailment instead of export.
 
-`scripts/rl29/compare_milp_genetic.py` compares both algorithms on a synthetic day. On a 96-slot day with
+`scripts/plus/compare_milp_genetic.py` compares both algorithms on a synthetic day. On a 96-slot day with
 battery, heat pump and washer the MILP reached the GENETIC result (300 individuals × 400 generations) in about
 a fifth of the time; a long GENETIC run after the MILP found practically no further improvement.
 

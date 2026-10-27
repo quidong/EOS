@@ -120,8 +120,8 @@ Recommended rules in the controller, independent of EOS:
 - an emergency switch-off when rooms get too warm or too cold;
 - time logic in the actuator (e.g. staircase timers) so that contacts open even if the controller fails.
 
-Check the plan during commissioning: `scripts/rl29/check_heatpump_plan.py --url http://<eos>:8503`
-(exit 0 = plausible, 1 = warning, 2 = implausible). `scripts/rl29/compare_heatpump_plan.py` compares
+Check the plan during commissioning: `scripts/plus/check_heatpump_plan.py --url http://<eos>:8503`
+(exit 0 = plausible, 1 = warning, 2 = implausible). `scripts/plus/compare_heatpump_plan.py` compares
 plans with measured values from Home Assistant.
 
 ## Calibration
@@ -143,8 +143,8 @@ bounded. The configuration file is never changed; EOS plans with the fitted valu
 days with drifting room temperature, outages and holiday days are left out.
 
 Missing outdoor temperature or irradiance is filled from the weather forecast
-(`weather_from_prediction`). Results: `<data>/rl29/heatpump_calibration.json` and the log.
-`scripts/rl29/calibrate_heatpump.py` does a first calibration from Home Assistant history before EOS has
+(`weather_from_prediction`). Results: `<data>/plus/heatpump_calibration.json` and the log.
+`scripts/plus/calibrate_heatpump.py` does a first calibration from Home Assistant history before EOS has
 collected its own.
 
 ### Plan vs actual
@@ -220,7 +220,7 @@ controllable devices: reduced price, not part of the house balance) or `module1_
 fee: the regular grid fee in the fixed fee provider is replaced per quarter hour by the band prices,
 `module3_network_amt_kwh`). `controllable_device_ids`, `regular_network_amt_kwh`, `dimming_power_w`
 (4200 W). `<id>-power-limited` = 1 limits the controllable devices to the dimming power from now.
-`scripts/rl29/gridfee_14a.py` writes these settings (`--module …`, `--apply http://<eos>:8503`).
+`scripts/plus/gridfee_14a.py` writes these settings (`--module …`, `--apply http://<eos>:8503`).
 
 ## PDF report
 

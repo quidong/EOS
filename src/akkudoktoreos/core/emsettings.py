@@ -61,7 +61,7 @@ class EnergyManagementCommonSettings(SettingsBaseModel):
         },
     )
 
-    # RL29 fork: rolling horizon aligned to the optimization slots.
+    # eos-plus fork: rolling horizon aligned to the optimization slots.
     run_on_slot_start: bool = Field(
         default=False,
         json_schema_extra={
@@ -92,7 +92,7 @@ class EnergyManagementCommonSettings(SettingsBaseModel):
         default=False,
         json_schema_extra={
             "description": (
-                "RL29 fork: start an extra run between slot starts when the battery SoC or "
+                "eos-plus fork: start an extra run between slot starts when the battery SoC or "
                 "a heat pump temperature deviates from the plan (polled every `interval`)."
             ),
             "examples": [True],

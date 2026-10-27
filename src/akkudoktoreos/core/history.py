@@ -1,4 +1,4 @@
-"""Long-term history of forecasts, plans and measurements (RL29 fork).
+"""Long-term history of forecasts, plans and measurements (eos-plus fork).
 
 EOS keeps its own data only as long as the optimizer needs it. To judge how good a
 forecast or a plan was, and to train forecast models on more than a few weeks, every
@@ -136,7 +136,7 @@ def _default_pairs() -> list[HistoryAccuracyPair]:
 
 
 class HistorySettings(SettingsBaseModel):
-    """Long-term history in PostgreSQL / TimescaleDB (RL29 fork)."""
+    """Long-term history in PostgreSQL / TimescaleDB (eos-plus fork)."""
 
     enabled: bool = Field(
         default=False,

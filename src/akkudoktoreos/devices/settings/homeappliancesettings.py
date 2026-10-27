@@ -305,7 +305,7 @@ class HomeApplianceCommonSettings(DevicesBaseSettings):
         json_schema_extra={
             "x-scope": [str(ConfigScope.GENETIC)],
             "description": (
-                "RL29 fork: plan the appliance only on request. The controller reports "
+                "eos-plus fork: plan the appliance only on request. The controller reports "
                 "the measurements '<device_id>-requested' (1 = a run is waiting, e.g. "
                 "remote start enabled), '<device_id>-deadline' (Unix time the run has "
                 "to be finished, 0 = none) and optionally '<device_id>-duration' "
@@ -321,7 +321,7 @@ class HomeApplianceCommonSettings(DevicesBaseSettings):
         json_schema_extra={
             "x-scope": [str(ConfigScope.GENETIC)],
             "description": (
-                "RL29 fork: request measurements older than this are ignored [s]; a "
+                "eos-plus fork: request measurements older than this are ignored [s]; a "
                 "stale request is treated as no request."
             ),
             "examples": [3600],
@@ -333,7 +333,7 @@ class HomeApplianceCommonSettings(DevicesBaseSettings):
         json_schema_extra={
             "x-scope": [str(ConfigScope.GENETIC)],
             "description": (
-                "RL29 fork: learn a load profile per program from the measurements "
+                "eos-plus fork: learn a load profile per program from the measurements "
                 "'<device_id>-power' [W] and '<device_id>-program' (numeric program code). "
                 "A request for a program with a learned profile is planned with that "
                 "profile instead of the configured load."
@@ -348,7 +348,7 @@ class HomeApplianceCommonSettings(DevicesBaseSettings):
         json_schema_extra={
             "x-scope": [str(ConfigScope.GENETIC)],
             "description": (
-                "RL29 fork: weight of a new run when updating a learned profile; the "
+                "eos-plus fork: weight of a new run when updating a learned profile; the "
                 "first runs are averaged equally."
             ),
             "examples": [0.3],
@@ -359,7 +359,7 @@ class HomeApplianceCommonSettings(DevicesBaseSettings):
         ge=0,
         json_schema_extra={
             "x-scope": [str(ConfigScope.GENETIC)],
-            "description": "RL29 fork: power above which the appliance counts as running [W].",
+            "description": "eos-plus fork: power above which the appliance counts as running [W].",
             "examples": [20.0],
         },
     )
@@ -370,7 +370,7 @@ class HomeApplianceCommonSettings(DevicesBaseSettings):
         json_schema_extra={
             "x-scope": [str(ConfigScope.GENETIC)],
             "description": (
-                "RL29 fork: the planning length of a learned profile is this quantile of "
+                "eos-plus fork: the planning length of a learned profile is this quantile of "
                 "the recent run durations (1.0 = the longest run), so that a run planned "
                 "against a deadline is finished in time even when the machine takes longer "
                 "than on average."
@@ -384,7 +384,7 @@ class HomeApplianceCommonSettings(DevicesBaseSettings):
         json_schema_extra={
             "x-scope": [str(ConfigScope.GENETIC)],
             "description": (
-                "RL29 fork: once a program has three learned runs, a run whose energy or "
+                "eos-plus fork: once a program has three learned runs, a run whose energy or "
                 "duration deviates more than this fraction from the recent median is not "
                 "learned (interrupted measurement, wrong program code). Three rejected runs "
                 "in a row are accepted again. 0 disables the check."

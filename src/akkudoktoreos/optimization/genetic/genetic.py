@@ -4,7 +4,6 @@ import ctypes
 import ctypes.util
 import gc
 import math
-from pathlib import Path
 import multiprocessing
 import os
 import random
@@ -14,6 +13,7 @@ from array import array
 from collections import OrderedDict, defaultdict
 from dataclasses import dataclass, field
 from functools import lru_cache
+from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
@@ -415,7 +415,7 @@ class GeneticSimulation(PydanticBaseModel):
 
     home_appliance_start_hour: Optional[int] = Field(default=None)
 
-    # RL29 fork: electric energy of heat pumps and heating rods per slot [Wh],
+    # eos-plus fork: electric energy of heat pumps and heating rods per slot [Wh],
     # set per candidate from the heat pump genes. None = no heat pump.
     heat_pump_load_wh: Optional[list[float]] = Field(default=None)
 
@@ -757,7 +757,7 @@ class GeneticSimulation(PydanticBaseModel):
                 consumption += ha_load
                 home_appliance_wh_per_hour[hour_idx] = ha_load
 
-            # Heat pumps and heating rods (RL29 fork)
+            # Heat pumps and heating rods (eos-plus fork)
             if heat_pump_load_fast is not None:
                 hp_load = heat_pump_load_fast[hour]
                 consumption += hp_load
@@ -1125,7 +1125,7 @@ class GeneticOptimization(OptimizationBase):
         # optimize_ems(). Empty by default so setup_deap_environment() can be
         # exercised standalone (e.g. in tests) without appliances.
         self.appliance_layout: ApplianceGeneLayout = ApplianceGeneLayout([])
-        # RL29 fork: heat pump genome block (between EV and appliance genes),
+        # eos-plus fork: heat pump genome block (between EV and appliance genes),
         # built per run in optimize_ems(). Empty = no heat pump genes at all.
         self.heat_pump_layout: HeatPumpGeneLayout = HeatPumpGeneLayout()
         self._heat_pump_extra_cost = 0.0
@@ -1137,7 +1137,7 @@ class GeneticOptimization(OptimizationBase):
         self.simulation = GeneticSimulation()
 
     # ------------------------------------------------------------------
-    # Heat pump genes (RL29 fork)
+    # Heat pump genes (eos-plus fork)
     # ------------------------------------------------------------------
 
     def _hp_layout(self) -> HeatPumpGeneLayout:
@@ -1207,7 +1207,7 @@ class GeneticOptimization(OptimizationBase):
             for device in heat_pumps
         ]
         self.heat_pump_layout = HeatPumpGeneLayout(plans)
-        # RL29 fork: plans of calibrated heat pumps are recorded for plan vs actual.
+        # eos-plus fork: plans of calibrated heat pumps are recorded for plan vs actual.
         self._hp_record_plan_ids = {
             device.device_id
             for device in heat_pumps
@@ -2382,7 +2382,7 @@ class GeneticOptimization(OptimizationBase):
         operation = random.random()  # noqa: S311
         changed = False
         if self._hp_layout():
-            # Heat pump modes (RL29 fork): a quarter of the mutations, half of
+            # Heat pump modes (eos-plus fork): a quarter of the mutations, half of
             # them combined with one of the other families. The other families
             # keep their relative weights.
             if operation < 0.25:
@@ -2437,7 +2437,7 @@ class GeneticOptimization(OptimizationBase):
                 ev_controls[-self.fixed_eauto_hours :] = [0] * self.fixed_eauto_hours
             individual_components += ev_controls
 
-        # Heat pump modes (RL29 fork); no draws without a heat pump.
+        # Heat pump modes (eos-plus fork); no draws without a heat pump.
         if self._hp_layout():
             individual_components.extend(self._hp_layout().random_genes())
 
@@ -2477,7 +2477,7 @@ class GeneticOptimization(OptimizationBase):
             # optimize_ev active but no EV data present: pad with zeros
             individual.extend([0] * self.control_end_slot)
 
-        # Heat pump genes (RL29 fork), status quo when not given.
+        # Heat pump genes (eos-plus fork), status quo when not given.
         if self._hp_layout():
             individual.extend(
                 heat_pump_gene_values
@@ -3573,7 +3573,7 @@ class GeneticOptimization(OptimizationBase):
         if appliance_gene_values:
             individual[-len(appliance_gene_values) :] = appliance_gene_values
 
-        # Heat pump load of this candidate (RL29 fork).
+        # Heat pump load of this candidate (eos-plus fork).
         hp_layout = self._hp_layout()
         if hp_layout:
             hp_load, self._heat_pump_extra_cost = hp_layout.evaluate(
@@ -3803,7 +3803,7 @@ class GeneticOptimization(OptimizationBase):
 
         gesamtbilanz = simulation_result["Gesamtbilanz_Euro"] * (-1.0 if worst_case else 1.0)
         # Heat pump comfort, legionella and switching penalties minus the
-        # value of the heat stored at the end of the horizon (RL29 fork).
+        # value of the heat stored at the end of the horizon (eos-plus fork).
         gesamtbilanz += getattr(self, "_heat_pump_extra_cost", 0.0)
 
         # New check: Activate discharge when battery SoC is 0
@@ -3976,7 +3976,7 @@ class GeneticOptimization(OptimizationBase):
     def _extra_seeds(
         self, parameters: GeneticOptimizationParameters, start_slot: int
     ) -> list[list[int]]:
-        """Candidates from another method for the initial population (RL29 fork).
+        """Candidates from another method for the initial population (eos-plus fork).
 
         Called once per run after all layouts are built; the GENETIC algorithm has none.
         """
@@ -4068,7 +4068,7 @@ class GeneticOptimization(OptimizationBase):
         seed_budget = max(individuals - minimum_random, 0)
         seeded: list[list[Any]] = []
 
-        # RL29 fork: priority seeds (MILP) first: each exact once plus mutated
+        # eos-plus fork: priority seeds (MILP) first: each exact once plus mutated
         # neighbours of the best one; they count against the seed budget.
         priority_seeds = [
             seed
@@ -4475,7 +4475,7 @@ class GeneticOptimization(OptimizationBase):
 
         self._validate_forecast_availability()
 
-        # Heat pump thermal models and genes (RL29 fork). Before the terminal
+        # Heat pump thermal models and genes (eos-plus fork). Before the terminal
         # value curve: a load forecast with heat pump is corrected here.
         self._build_heat_pump_layout(parameters)
 
@@ -4504,7 +4504,7 @@ class GeneticOptimization(OptimizationBase):
             lambda ind: self.evaluate(ind, parameters, start_slot, worst_case),
         )
 
-        # RL29 fork: candidates computed by another method (MILP) enter the
+        # eos-plus fork: candidates computed by another method (MILP) enter the
         # initial population ahead of the warm start; empty for plain GENETIC.
         self._priority_seeds = self._extra_seeds(parameters, start_slot)
 
@@ -4562,7 +4562,7 @@ class GeneticOptimization(OptimizationBase):
         simulation_result["home_appliance_energy_wh"] = home_appliance_energy_wh
         simulation_result["home_appliance_running"] = home_appliance_running
 
-        # Heat pump schedules and predicted temperatures (RL29 fork).
+        # Heat pump schedules and predicted temperatures (eos-plus fork).
         heat_pump_results: dict[str, Any] = {}
         hp_layout = self._hp_layout()
         if hp_layout:

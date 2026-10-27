@@ -1,4 +1,4 @@
-"""Heat pump genes for the GENETIC optimizer (RL29 fork).
+"""Heat pump genes for the GENETIC optimizer (eos-plus fork).
 
 The heat pump is optimized jointly with battery, EV and appliances: every
 configured heat pump adds two blocks of genes to the genome, one space heating
@@ -120,7 +120,7 @@ class GeneticHeatPumpParameters(GeneticParametersBaseModel):
         default=False,
         json_schema_extra={
             "description": (
-                "RL29 fork: the system is in cooling operation; the optimizer chooses "
+                "eos-plus fork: the system is in cooling operation; the optimizer chooses "
                 "between NORMAL (no active cooling) and COOL instead of heating modes."
             )
         },
@@ -132,7 +132,7 @@ class GeneticHeatPumpParameters(GeneticParametersBaseModel):
     away: bool = Field(
         default=False,
         json_schema_extra={
-            "description": "RL29 fork: holiday mode is active (reduced comfort until away_until)."
+            "description": "eos-plus fork: holiday mode is active (reduced comfort until away_until)."
         },
     )
     away_until: Optional[DateTime] = Field(
@@ -154,7 +154,7 @@ class GeneticHeatPumpParameters(GeneticParametersBaseModel):
         default=None,
         json_schema_extra={
             "description": (
-                "RL29 fork: room floor while away with the heat pump in standby [degC]; "
+                "eos-plus fork: room floor while away with the heat pump in standby [degC]; "
                 "None = away.standby_min_c."
             )
         },
@@ -163,7 +163,7 @@ class GeneticHeatPumpParameters(GeneticParametersBaseModel):
         default=None,
         json_schema_extra={
             "description": (
-                "RL29 fork: temperature of the set-back zone [degC]; None = zone_setback.room_c."
+                "eos-plus fork: temperature of the set-back zone [degC]; None = zone_setback.room_c."
             )
         },
     )
@@ -172,7 +172,7 @@ class GeneticHeatPumpParameters(GeneticParametersBaseModel):
         ge=0,
         le=1,
         json_schema_extra={
-            "description": "RL29 fork: share of the monitored windows open now (0..1)."
+            "description": "eos-plus fork: share of the monitored windows open now (0..1)."
         },
     )
 
@@ -259,9 +259,9 @@ class HeatPumpRunPlan:
     away_slots: int = 0
     """Holiday mode: number of slots before the return (0 = at home)."""
     zone_setback_slots: tuple[bool, ...] = ()
-    """Zone setback active per slot (RL29 fork)."""
+    """Zone setback active per slot (eos-plus fork)."""
     ventilate_slots: tuple[bool, ...] = ()
-    """Recommended airing per slot (RL29 fork)."""
+    """Recommended airing per slot (eos-plus fork)."""
     tank_heat_value_above_setpoint: Optional[float] = None
     """Value of tank heat above the heat pump setpoint [currency/Wh]; None = tank_heat_value.
     Water the rod heated beyond the setpoint loses more and is valued with a discount."""
@@ -905,7 +905,7 @@ def build_run_plan(
                     surplus if surplus >= cooling.min_pv_surplus_w else 0.0
                 )
 
-    # Holiday mode (RL29 fork): reduced comfort and hot water off until the return.
+    # Holiday mode (eos-plus fork): reduced comfort and hot water off until the return.
     away_slots = 0
     if parameters.away:
         away = settings.away
@@ -987,7 +987,7 @@ def build_run_plan(
         if parameters.initial_dhw_c is not None
         else system.dhw.setpoint_c - system.dhw.hysteresis_k / 2.0
     )
-    # In standby at the start when the controller's rule holds (RL29 fork): the
+    # In standby at the start when the controller's rule holds (eos-plus fork): the
     # restart charge of the next non-REDUCED slot is then part of the plan.
     standby0 = bool(first.standby_possible and room > first.comfort_min_c + 0.3)
     initial = ThermalState(slab_c=slab, room_c=room, dhw_c=dhw, standby=standby0)
@@ -1071,7 +1071,7 @@ def build_run_plan(
     tank_value = mean_price / cop_dhw if cop_dhw > 0 else 0.0
     tank_value_above = tank_value * retention
     if inputs and inputs[-1].dhw_off:
-        # Still away with hot water off at the horizon end (RL29 fork): heat put into
+        # Still away with hot water off at the horizon end (eos-plus fork): heat put into
         # the tank now is lost long before anybody taps it, and the heat pump charges
         # the tank at the restart anyway - it has no value at the end.
         tank_value = tank_value_above = 0.0
@@ -1111,7 +1111,7 @@ def _apply_zone_setback_and_ventilation(
     away_slots: int,
     pv_surplus_w: Optional[Sequence[float]],
 ) -> tuple[list[bool], list[bool]]:
-    """Zone setback and window ventilation of the slots (RL29 fork).
+    """Zone setback and window ventilation of the slots (eos-plus fork).
 
     Zone setback: the zone's share of the difference to its setback temperature
     comes off the comfort minimum and the NORMAL setpoint (the measured room

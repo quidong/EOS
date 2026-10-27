@@ -1,6 +1,6 @@
-"""Plan-versus-actual and calibration figures of a heat pump as solution columns (RL29 fork).
+"""Plan-versus-actual and calibration figures of a heat pump as solution columns (eos-plus fork).
 
-The figures are already in ``<data folder>/rl29/heatpump_plan_actual.json`` and
+The figures are already in ``<data folder>/plus/heatpump_plan_actual.json`` and
 ``heatpump_calibration.json`` and in the log. Published as constant columns of
 the optimization solution, the Home Assistant adapter can push them like every
 other solution value (``sensor.eos_<device>_kpi_<name>``), so drift shows up on
@@ -16,6 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from akkudoktoreos.core.forkpaths import fork_data_dir
 from akkudoktoreos.devices.heatpumpcalibration import HeatPumpCalibrationStore
 from akkudoktoreos.devices.heatpumpplanactual import PlanActualStore
 from akkudoktoreos.devices.thermal.calibration import CalibrationResult
@@ -66,7 +67,7 @@ KPI_COLUMNS: list[tuple[str, Callable[[Any, Any], Optional[float]]]] = [
 
 def device_kpis(device_id: str, data_folder: Path) -> dict[str, Optional[float]]:
     """All KPI columns of a device (suffix -> value or None)."""
-    folder = Path(data_folder) / "rl29"
+    folder = fork_data_dir(data_folder)
     evaluation = PlanActualStore(folder / "heatpump_plan_actual.json").evaluation(device_id)
     result = HeatPumpCalibrationStore(folder / "heatpump_calibration.json").result(device_id)
     kpis = {name: getter(evaluation, result) for name, getter in KPI_COLUMNS}

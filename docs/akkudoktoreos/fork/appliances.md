@@ -60,4 +60,4 @@ Solution key `<id>_next_start_ts`: Unix time of the next planned start (0 = none
 - planning duration: the `profile_duration_quantile` (0.8) of the last 20 run times, so that deadlines
   hold in most cases.
 
-Storage: `<data>/rl29/appliance_profiles.json`.
+Storage: `<data>/plus/appliance_profiles.json`.

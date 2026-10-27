@@ -1,4 +1,4 @@
-"""Mixed-integer linear dispatch of battery, grid and appliances (RL29 fork).
+"""Mixed-integer linear dispatch of battery, grid and appliances (eos-plus fork).
 
 A pure model, independent of EOS objects: forecasts and device figures go in, a
 cost-optimal schedule comes out. Solved with HiGHS through ``scipy.optimize.milp``

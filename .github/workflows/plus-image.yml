@@ -1,0 +1,226 @@
+# eos-plus fork: test, build and publish the EOS image.
+#
+# Branch builds (push to plus/main, manual runs):
+#   ghcr.io/<owner>/eos:plus-<short-sha> and :plus-latest
+# Releases (push of a tag plus-YYYY.MM.N, e.g. plus-2026.11.0):
+#   ghcr.io/<owner>/eos:plus-YYYY.MM.N and :plus-stable, plus a GitHub release whose
+#   notes are the matching section of CHANGELOG-PLUS.md.
+# Upstream workflows stay untouched so that merging Akkudoktor-EOS/EOS main stays
+# conflict free.
+
+name: plus-image
+
+on:
+  push:
+    branches:
+      - 'plus/main'
+    tags:
+      - 'plus-[0-9]*'
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: "Skip the pytest job (emergency builds only)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: plus-image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.13.15"
+
+jobs:
+  test:
+    if: ${{ !inputs.skip_tests }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # TimescaleDB for the history tests (tests/plus/test_history.py).
+    services:
+      history-db:
+        image: timescale/timescaledb:latest-pg17
+        env:
+          POSTGRES_USER: eos
+          POSTGRES_PASSWORD: eos
+          POSTGRES_DB: eos_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U eos -d eos_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      PLUS_TEST_PG_DSN: postgresql://eos:eos@127.0.0.1:5432/eos_test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        run: |
+          python -m pip install --upgrade pip
+          pip install uv
+
+      - name: Sync environment
+        run: uv sync --extra dev
+
+      - name: Upstream test suite (incl. long optimizer runs)
+        run: |
+          set -o pipefail
+          uv run pytest --finalize --check-config-side-effect -q -rfE 2>&1 | tee pytest-upstream.log
+
+      - name: eos-plus fork tests
+        run: |
+          set -o pipefail
+          uv run pytest -q -rfE tests/plus 2>&1 | tee pytest-plus.log
+
+      # Job logs need a GitHub login; annotations are readable through the API
+      # (gh api repos/<owner>/EOS/check-runs/<job id>/annotations).
+      - name: Report failed tests as annotations
+        if: failure()
+        run: |
+          for log in pytest-upstream.log pytest-plus.log; do
+            [ -f "$log" ] || continue
+            grep -E '^(FAILED|ERROR) ' "$log" | head -40 | while IFS= read -r line; do
+              echo "::error title=${log%.log}::${line:0:900}"
+            done
+            tail -1 "$log" | sed 's/^/::notice title=summary::/'
+          done
+
+  build:
+    needs: test
+    # Run when tests passed, or when they were skipped on purpose.
+    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.names.outputs.image }}
+      digest: ${{ steps.build.outputs.digest }}
+      version: ${{ steps.names.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Image names
+        id: names
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          short="${GITHUB_SHA::7}"
+          echo "image=ghcr.io/${owner}/eos" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/plus-* ]]; then
+            version="${GITHUB_REF_NAME}"
+            channel="plus-stable"
+          else
+            version="plus-${short}"
+            channel="plus-latest"
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "channel=${channel}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push (linux/amd64)
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            BUILD_VERSION=${{ steps.names.outputs.version }}
+          tags: |
+            ${{ steps.names.outputs.image }}:${{ steps.names.outputs.version }}
+            ${{ steps.names.outputs.image }}:${{ steps.names.outputs.channel }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.names.outputs.version }}
+            org.opencontainers.image.licenses=Apache-2.0
+            com.centurylinklabs.watchtower.enable=false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  smoke:
+    needs: build
+    if: ${{ always() && needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Smoke test the published image (quick start configuration)
+        env:
+          SMOKE_CONFIG: scripts/plus/quickstart/EOS.config.json
+          SMOKE_PLAN_TIMEOUT: "600"
+        run: |
+          bash scripts/plus/smoke_test_image.sh \
+            "${{ needs.build.outputs.image }}@${{ needs.build.outputs.digest }}" \
+            "${{ needs.build.outputs.version }}"
+
+      - name: Summary
+        run: |
+          {
+            echo "### EOS image published"
+            echo ""
+            echo "- Version: \`${{ needs.build.outputs.version }}\`"
+            echo "- Digest:  \`${{ needs.build.outputs.image }}@${{ needs.build.outputs.digest }}\`"
+            echo ""
+            echo "Portainer stack line:"
+            echo ""
+            echo "\`image: ${{ needs.build.outputs.image }}@${{ needs.build.outputs.digest }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    needs: [build, smoke]
+    if: ${{ startsWith(github.ref, 'refs/tags/plus-') && needs.smoke.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Release notes from CHANGELOG-PLUS.md
+        run: |
+          python3 scripts/plus/release_notes.py "${GITHUB_REF_NAME}" CHANGELOG-PLUS.md > notes.md
+          {
+            echo ""
+            echo "Image: \`${{ needs.build.outputs.image }}:${GITHUB_REF_NAME}\`"
+            echo "Digest: \`${{ needs.build.outputs.image }}@${{ needs.build.outputs.digest }}\`"
+          } >> notes.md
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "${GITHUB_REF_NAME}" --title "eos-plus ${GITHUB_REF_NAME#plus-}" --notes-file notes.md

@@ -1,4 +1,4 @@
-"""Load forecast from the household's own measured history (RL29 fork).
+"""Load forecast from the household's own measured history (eos-plus fork).
 
 ``LoadAkkudoktorAdjusted`` corrects a standard load profile with the deviation of
 the last seven days. Once enough of the household's own measurements exist, this
@@ -33,7 +33,7 @@ from akkudoktoreos.utils.datetimeutil import compare_datetimes, to_datetime, to_
 
 
 class LoadMeasuredCommonSettings(SettingsBaseModel):
-    """Settings of the measured-history load provider (RL29 fork)."""
+    """Settings of the measured-history load provider (eos-plus fork)."""
 
     weeks: int = Field(
         default=6,

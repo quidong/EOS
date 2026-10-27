@@ -8,7 +8,6 @@ import json
 import math
 import time
 from abc import abstractmethod
-from pathlib import Path
 from typing import Any, Callable, List, Optional
 
 import numpy as np
@@ -16,6 +15,7 @@ import pandas as pd
 from loguru import logger
 from pydantic import Field, computed_field
 
+from akkudoktoreos.core.forkpaths import fork_data_dir
 from akkudoktoreos.prediction.predictionabc import PredictionRecord
 from akkudoktoreos.prediction.priceabc import PricePredictionProviderBase
 
@@ -117,13 +117,31 @@ class ElecPriceProvider(PricePredictionProviderBase[ElecPriceDataRecord]):
             / 100.0
         )
 
-    # --- RL29 fork: ML forecast of the hours after the published prices ------
+    # --- eos-plus fork: ML forecast of the hours after the published prices ------
 
     _price_model: Optional[Any] = None
 
     def _ml_settings(self) -> Optional[Any]:
         settings = getattr(self.config.elecprice, "ml", None)
         return settings if settings is not None and settings.enabled else None
+
+    def _market_country(self) -> Optional[str]:
+        """Country of the price market (ISO 3166-1), if the provider knows it."""
+        return None
+
+    def _ml_holiday_region(self, settings: Any) -> Optional[str]:
+        """Holiday region of the price model: setting, else the market's country."""
+        from akkudoktoreos.prediction.calendarfeatures import validate_region
+
+        if settings.region:
+            return settings.region
+        country = self._market_country()
+        if not country:
+            return None
+        try:
+            return validate_region(country)
+        except ValueError:
+            return None
 
     def _ml_history_days(self) -> int:
         """Days of price history to keep and fetch (35 = what ETS needs)."""
@@ -193,6 +211,9 @@ class ElecPriceProvider(PricePredictionProviderBase[ElecPriceDataRecord]):
         if settings is None:
             return ets(history, count)
         try:
+            region = self._ml_holiday_region(settings)
+            if region != settings.region:
+                settings = settings.model_copy(update={"holiday_region": region})
             from zoneinfo import ZoneInfo
 
             from akkudoktoreos.prediction.elecpriceml import (
@@ -254,7 +275,7 @@ class ElecPriceProvider(PricePredictionProviderBase[ElecPriceDataRecord]):
                 else:
                     logger.info("Price ML: too little price history; ETS forecast.")
             if model is not None and model.use:
-                return predict_prices(model, series, count, tz, settings.state)
+                return predict_prices(model, series, count, tz, settings.region)
         except ImportError as exc:
             logger.warning("Price ML: LightGBM unavailable ({}); ETS forecast.", exc)
         except Exception as exc:  # never lose the price forecast because of the model
@@ -263,7 +284,7 @@ class ElecPriceProvider(PricePredictionProviderBase[ElecPriceDataRecord]):
 
     def _write_price_report(self, model: Optional[Any], seconds: float, weather_keys: int) -> None:
         try:
-            path = Path(self.config.general.data_folder_path) / "rl29" / "price_ml.json"
+            path = fork_data_dir(self.config.general.data_folder_path) / "price_ml.json"
             path.parent.mkdir(parents=True, exist_ok=True)
             data = (
                 model.summary()

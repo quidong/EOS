@@ -54,7 +54,7 @@ class ElecFeeCommonSettings(SettingsBaseModel):
         json_schema_extra={
             "description": (
                 "§14a EnWG grid fee module (none, module1, module2, module1_3) and dimming "
-                "of controllable consumers (RL29 fork). Module 3 prices are applied to the "
+                "of controllable consumers (eos-plus fork). Module 3 prices are applied to the "
                 "fixed fee provider."
             )
         },

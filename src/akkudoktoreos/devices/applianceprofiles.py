@@ -1,4 +1,4 @@
-"""Learned load profiles of home appliances per program (RL29 fork).
+"""Learned load profiles of home appliances per program (eos-plus fork).
 
 A washing machine draws very different power depending on the program
 (60 degC cotton heats for 20 minutes at 4 kW, a wool program barely heats).
