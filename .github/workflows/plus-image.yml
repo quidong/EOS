@@ -223,4 +223,10 @@ jobs:
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "${GITHUB_REF_NAME}" --title "eos-plus ${GITHUB_REF_NAME#plus-}" --notes-file notes.md
+        run: |
+          # A release drafted in the GitHub UI creates the tag itself; then only fill in the notes.
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release edit "${GITHUB_REF_NAME}" --title "eos-plus ${GITHUB_REF_NAME#plus-}" --notes-file notes.md
+          else
+            gh release create "${GITHUB_REF_NAME}" --title "eos-plus ${GITHUB_REF_NAME#plus-}" --notes-file notes.md
+          fi

@@ -71,7 +71,8 @@ Rollback: previous image plus the configuration that matches it. Upstream images
 
 1. Move the entries of `## Unreleased` in `CHANGELOG-PLUS.md` into a new section `## plus-YYYY.MM.N (date)`
    (N counts the releases of the month from 0) and commit.
-2. `git tag plus-YYYY.MM.N && git push origin plus-YYYY.MM.N`.
+2. `git tag plus-YYYY.MM.N && git push origin plus-YYYY.MM.N`, or in the GitHub UI: Releases → Draft a new
+   release → new tag `plus-YYYY.MM.N` on `plus/main` → Publish (the workflow fills in the notes).
 3. The workflow tests, builds `:plus-YYYY.MM.N` and `:plus-stable`, runs the smoke test with the quick start
    configuration and creates the GitHub release with the changelog section as notes.
 
