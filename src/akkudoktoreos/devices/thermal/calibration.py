@@ -60,6 +60,7 @@ SAMPLE_FIELDS = (
     "dhw_heat_w",
     "ghi_w_per_m2",
     "window_open",
+    "away",
 )
 
 
@@ -81,6 +82,8 @@ class HourlySample:
     ghi_w_per_m2: Optional[float] = None
     window_open: Optional[float] = None
     """Mean share of the monitored windows open in the hour (0..1), if measured."""
+    away: Optional[float] = None
+    """Share of the hour in holiday mode (0..1), if measured (RL29 fork)."""
 
     def get(self, key: str) -> Optional[float]:
         value = getattr(self, key, None)
@@ -469,6 +472,11 @@ def _daily_aggregates(
             if None not in (s.get("outdoor_c"), s.get("room_c"), s.get("heat_w"))
         ]
         if len(usable) < options.min_hours_per_day:
+            continue
+        aways = [v for v in (s.get("away") for s in day_samples) if v is not None]
+        if aways and statistics.fmean(aways) >= 0.5:
+            # Holiday: other internal gains and the heat pump in standby; such days
+            # would read as a better insulated house (RL29 fork).
             continue
         usable.sort(key=lambda s: s.timestamp)
         delta = statistics.fmean(s.get("room_c") - s.get("outdoor_c") for s in usable)  # type: ignore[operator]

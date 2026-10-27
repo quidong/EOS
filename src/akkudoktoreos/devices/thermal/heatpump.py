@@ -55,7 +55,6 @@ from akkudoktoreos.devices.thermal.building import BuildingModel, BuildingParame
 from akkudoktoreos.devices.thermal.cop import CopModel, EerModel
 from akkudoktoreos.devices.thermal.dhw import DhwTank, DhwTankParameters
 
-
 # The controllers aim a little above the comfort minimum: the screed reacts
 # with a delay, a target exactly at the minimum undershoots it.
 REPAIR_MARGIN_K = 0.3
@@ -92,7 +91,12 @@ class HeatPumpParameters:
     """Maximum compressor electric power [W]."""
 
     standby_w: float = 22.0
-    """Electric standby power of controller and outdoor unit [W]."""
+    """Electric power of controller, outdoor unit and circulation pump while the heat
+    pump is ready but not running [W]."""
+
+    off_w: Optional[float] = None
+    """Electric power in the heat pump's own standby operating mode (frost protection,
+    pumps off) [W]; None = ``standby_w`` (RL29 fork)."""
 
     max_flow_c: float = 55.0
     """Highest flow temperature the optimizer may request for space heating [degC]."""
@@ -191,10 +195,20 @@ class ThermalState:
     """Heat pump is in an active hot water charge (hysteresis memory)."""
     hp_dhw_forced: bool = False
     """The active charge was started by the heat pump controller, not by the plan."""
+    standby: bool = False
+    """The heat pump is in its standby operating mode (RL29 fork)."""
+    charge_target_c: Optional[float] = None
+    """Target of an active restart charge (RL29 fork); None = the normal setpoint."""
 
     def copy(self) -> "ThermalState":
         return ThermalState(
-            self.slab_c, self.room_c, self.dhw_c, self.hp_dhw_charging, self.hp_dhw_forced
+            self.slab_c,
+            self.room_c,
+            self.dhw_c,
+            self.hp_dhw_charging,
+            self.hp_dhw_forced,
+            self.standby,
+            self.charge_target_c,
         )
 
 
@@ -230,6 +244,17 @@ class SlotInputs:
     """Hot water switched off (RL29 fork, holiday mode): the heat pump controller does
     not reheat on its own and the tank comfort minimum does not apply; only a planned
     HEAT_PUMP or ROD charge heats the tank."""
+    internal_gains_factor: float = 1.0
+    """Share of the internal gains present in this slot (RL29 fork): nobody at home
+    means less heat from people, cooking and devices."""
+    standby_possible: bool = False
+    """The controller puts the heat pump into its standby operating mode in this slot
+    when REDUCED is planned, no hot water charge is planned and the room is above its
+    floor (RL29 fork, holiday mode). Standby draws ``off_w``."""
+    standby_exit_dhw_c: Optional[float] = None
+    """Leaving standby starts a hot water charge to this temperature, which the heat
+    pump does on every restart and which cannot be switched off (RL29 fork); None =
+    no charge on restart."""
 
 
 @dataclass
@@ -318,6 +343,17 @@ class HeatPumpSystem:
         if mode == HeatingMode.FORCED:
             return high + self.hp.forced_overshoot_k
         return high
+
+    def slot_gains_w(self, inputs: "SlotInputs") -> float:
+        """Internal gains (scaled by presence) plus solar gains of a slot [W]."""
+        p = self.building.params
+        return p.internal_gains_w * max(
+            0.0, inputs.internal_gains_factor
+        ) + p.solar_aperture_m2 * max(0.0, inputs.ghi_w_per_m2)
+
+    @property
+    def off_w(self) -> float:
+        return self.hp.off_w if self.hp.off_w is not None else self.hp.standby_w
 
     def dhw_setpoint_c(self, heating_mode: HeatingMode) -> float:
         """Heat pump hot water setpoint in effect for the heating mode."""
@@ -423,13 +459,34 @@ class HeatPumpSystem:
         """
         dt = self.dt
         notes: list[str] = []
-        gains = self.building.gains_w(inputs.ghi_w_per_m2)
+        gains = self.slot_gains_w(inputs)
         if inputs.ventilation_w_per_k > 0:
             # Airing: an extra loss of the room node, linearised at the slot start.
             gains -= inputs.ventilation_w_per_k * (state.room_c - inputs.outdoor_c)
 
+        # --- Standby operating mode (RL29 fork) ---------------------------
+        # The controller keeps (or puts) the heat pump in standby while REDUCED is
+        # planned without a hot water charge and the room is above its floor.
+        stays_standby = (
+            inputs.standby_possible
+            and heating_mode == HeatingMode.REDUCED
+            and dhw_mode == DhwMode.HOLD
+            and state.room_c > inputs.comfort_min_c + REPAIR_MARGIN_K
+        )
+        restart_charge = (
+            state.standby
+            and not stays_standby
+            and inputs.standby_exit_dhw_c is not None
+            and state.dhw_c < inputs.standby_exit_dhw_c - 0.5
+        )
+
         # --- Hot water: decide heat pump share of the slot ---------------
+        forced_dhw = False
         hp_setpoint = self.dhw_setpoint_c(heating_mode)
+        if restart_charge:
+            hp_setpoint = float(inputs.standby_exit_dhw_c)  # type: ignore[arg-type]
+        elif state.hp_dhw_charging and state.charge_target_c is not None:
+            hp_setpoint = state.charge_target_c
         switch_on_c = self.dhw.setpoint_c - self.dhw.hysteresis_k
         # The controller checks continuously: a tank that falls below the
         # switch-on temperature within this slot starts a charge in this slot.
@@ -440,11 +497,19 @@ class HeatPumpSystem:
                 or self.tank.step(state.dhw_c, 0.0, inputs.draw_wh) < switch_on_c
             )
         )
-        if inputs.dhw_off and state.hp_dhw_forced:
+        if inputs.dhw_off and state.hp_dhw_forced and state.charge_target_c is None:
             hp_dhw_active = False  # an own-controller charge ends when hot water is switched off
-        forced_dhw = False
-        raised_dhw = hp_setpoint > self.dhw.setpoint_c
-        if (dhw_mode == DhwMode.HEAT_PUMP or raised_dhw) and state.dhw_c < hp_setpoint - 0.2:
+        if stays_standby:
+            hp_dhw_active = False  # frost protection only
+        if restart_charge:
+            hp_dhw_active = True
+        raised_dhw = hp_setpoint > self.dhw.setpoint_c and not stays_standby
+        charge_target: Optional[float] = None
+        if restart_charge or (state.hp_dhw_charging and state.charge_target_c is not None):
+            # Restart charge: the heat pump's own decision, not the plan's.
+            charge_target = hp_setpoint
+            forced_dhw = True
+        elif (dhw_mode == DhwMode.HEAT_PUMP or raised_dhw) and state.dhw_c < hp_setpoint - 0.2:
             hp_dhw_active = True
         elif hp_dhw_active and dhw_mode != DhwMode.HEAT_PUMP:
             # Own controller reheats below the switch-on temperature; the whole
@@ -492,8 +557,8 @@ class HeatPumpSystem:
             gains,
             min(inputs.comfort_min_c + REPAIR_MARGIN_K, self.comfort_band(inputs)[1]),
         )
-        if state.room_c >= room_max:
-            wanted = 0.0
+        if state.room_c >= room_max or stays_standby:
+            wanted = 0.0  # standby: no space heating above the room floor
             minimum = 0.0
 
         capacity, _, _ = self._space_heat_capacity_w(inputs.outdoor_c, state.slab_c)
@@ -557,7 +622,8 @@ class HeatPumpSystem:
             hp_dhw_w / cop_dhw if hp_dhw_w > 0 else 0.0
         )
         hp_el_w += cool_w / eer
-        hp_el_w += self.hp.standby_w
+        in_standby = stays_standby and hp_dhw_w <= 0 and space_w <= 0
+        hp_el_w += self.off_w if in_standby else self.hp.standby_w
         if cool_w > 0:
             _, flow = self._space_cool_capacity_w(state.slab_c, inputs.dewpoint_c)
 
@@ -568,13 +634,16 @@ class HeatPumpSystem:
         dhw = self.tank.step(state.dhw_c, hp_dhw_w + rod_w, inputs.draw_wh)
         still_charging = hp_dhw_active and dhw < hp_setpoint - 0.1
         still_forced = still_charging and forced_dhw
+        next_target = charge_target if still_charging else None
 
         comfort_violation = max(0.0, inputs.comfort_min_c - room) * dt
         overheat = max(0.0, room - self.comfort_band(inputs)[2]) * dt
         dhw_violation = 0.0 if inputs.dhw_off else max(0.0, self.dhw.min_c - dhw) * dt
 
         return SlotResult(
-            state=ThermalState(slab, room, dhw, still_charging, still_forced),
+            state=ThermalState(
+                slab, room, dhw, still_charging, still_forced, in_standby, next_target
+            ),
             hp_electric_wh=hp_el_w * dt,
             rod_electric_wh=rod_w * dt,
             heat_space_wh=(space_w - cool_w) * dt,

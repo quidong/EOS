@@ -201,6 +201,7 @@
                        "max_heat_w": 10000.0,
                        "max_electric_w": 5500.0,
                        "standby_w": 22.0,
+                       "off_w": null,
                        "max_flow_c": 45.0,
                        "flow_spread_k": 3.0,
                        "dhw_heat_w": 5000.0,
@@ -350,6 +351,8 @@
                        "room_c": 20.0,
                        "dhw_off": true,
                        "standby_min_c": null,
+                       "standby_exit_dhw_c": null,
+                       "internal_gains_share": 1.0,
                        "cooling_max_c": 28.0,
                        "max_age_hours": 48.0
                    },

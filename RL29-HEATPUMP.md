@@ -352,6 +352,28 @@ EOS-Konfiguration (eingespielt 23.10.2026, zusammen mit `away.dhw_off: true`):
   fährt hoch“. WLAN-Geräte (Shellys, Waschmaschine, Saugroboter, ESP32-BT-Proxy, Tonieboxen) sind bis dahin offline;
   die Shellys behalten ihren Schaltzustand.
 
+### Standby, Neustart-Ladung, Wärme der Bewohner (Fork, ab 27.10.2026)
+
+Gemessen am KNX-Zähler (`sensor.strom_warmepumpe`): **10 W** in der Betriebsart Standby,
+**30–35 W** bereit zwischen den Läufen (Regelung, Außeneinheit, Umwälzpumpe). Jeder Neustart aus
+dem Standby lädt das Warmwasser (am 26.10. von 28,5 auf 41 °C, ~1 kWh), das lässt sich an der WP
+nicht abschalten.
+
+| Einstellung | Bedeutung | unsere Anlage |
+| --- | --- | --- |
+| `unit.standby_w` | Leistung bereit, ohne Lauf | 32 W |
+| `unit.off_w` | Leistung in der Betriebsart Standby (Urlaub) | 10 W |
+| `away.standby_exit_dhw_c` | Ziel der Warmwasserladung bei jedem Neustart aus dem Standby | 41 °C |
+| `away.internal_gains_share` | Anteil der inneren Gewinne bei Abwesenheit (Menschen, Kochen, Geräte fehlen) | 0,4 |
+
+Das Modell bildet die HA-Regel nach: Standby, solange EOS REDUCED ohne Warmwasserladung plant und der
+Raum über der Untergrenze liegt. Jeder andere Modus (oder die Untergrenze) beendet den Standby und
+löst die Ladung aus. Im Urlaub ist REDUCED damit deutlich billiger als NORMAL (vorher waren beide
+gleich teuer und EOS blieb beim Status quo NORMAL – die WP verließ den Standby und lud Warmwasser).
+Warmwasser im Speicher hat am Horizontende keinen Wert, solange dann noch Urlaub ist.
+Urlaubstage fließen nicht mehr in die Gebäude-Kalibrierung ein (Messwert `wbb12-away`).
+Tests: `tests/rl29/test_heatpump_standby.py`.
+
 ## 2e. OG-Absenkung und Lüften (Fork + HA, ab 23.10.2026)
 
 **OG-Absenkung (`devices.heat_pumps.<id>.zone_setback`):** Alle Räume im Obergeschoss laufen nachts (22–24 und

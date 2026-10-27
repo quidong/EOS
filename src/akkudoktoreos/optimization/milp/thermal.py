@@ -92,6 +92,9 @@ class ThermalBlock:
     rod_max_c: float
     standby_w: float
     max_electric_w: list[Optional[float]]
+    idle_w: list[float] = field(default_factory=list)
+    """Electric power without operation per slot: standby_w, or the standby operating
+    mode's off_w where the controller may use it (holiday)."""
     legionella_c: Optional[float] = None
     legionella_deadline: Optional[int] = None
     legionella_penalty: float = 0.0
@@ -184,6 +187,7 @@ def thermal_block(plan: "HeatPumpRunPlan") -> Optional[ThermalBlock]:
     room_ceiling: list[float] = []
     tank_floor: list[Optional[float]] = []
     max_el: list[Optional[float]] = []
+    idle_w: list[float] = []
     for t, slot in enumerate(inputs):
         out = float(slot.outdoor_c)
         slab_ref = starts_slab[t]
@@ -199,7 +203,8 @@ def thermal_block(plan: "HeatPumpRunPlan") -> Optional[ThermalBlock]:
         points.append(_breakpoints(electric, q_cap[-1]))
         flow_dhw = (starts_tank[t] + setpoint) / 2 + hp.dhw_flow_overshoot_k
         cop_dhw.append(max(system.cop.cop(out, flow_dhw), 1.0))
-        gains.append(building.gains_w(slot.ghi_w_per_m2))
+        gains.append(system.slot_gains_w(slot))
+        idle_w.append(system.off_w if slot.standby_possible else hp.standby_w)
         low, set_c, high = system.comfort_band(slot)
         room_min.append(low)
         room_max.append(high)
@@ -251,6 +256,7 @@ def thermal_block(plan: "HeatPumpRunPlan") -> Optional[ThermalBlock]:
         rod_power_w=rod_power,
         rod_max_c=rod_max,
         standby_w=hp.standby_w,
+        idle_w=idle_w,
         max_electric_w=max_el,
         legionella_c=plan.legionella_c if deadline is not None else None,
         legionella_deadline=deadline,
@@ -310,11 +316,12 @@ def add_thermal(b: Any, block: ThermalBlock) -> ThermalVars:
         w = b.var(0.0, block.dhw_heat_w)
         r = b.var(0.0, block.rod_power_w)
         energy = b.var(0.0, inf, (sep[t] if sep is not None and t < len(sep) else 0.0))
+        idle = block.idle_w[t] if t < len(block.idle_w) else block.standby_w
         # energy [Wh] = dt * (space + dhw + rod + standby)
         b.row(
             {energy: 1.0, e_sp: -dt, w: -dt / block.cop_dhw[t], r: -dt},
-            block.standby_w * dt,
-            block.standby_w * dt,
+            idle * dt,
+            idle * dt,
         )
         # Compressor time shared between space heating and hot water.
         share: dict[int, float] = {w: 1.0 / block.dhw_heat_w}
@@ -326,7 +333,7 @@ def add_thermal(b: Any, block: ThermalBlock) -> ThermalVars:
             b.row(
                 {e_sp: 1.0, w: 1.0 / block.cop_dhw[t], r: 1.0},
                 -inf,
-                max(0.0, limit - block.standby_w),
+                max(0.0, limit - idle),
             )
         # Building (ventilation: extra loss with the room temperature at the slot start).
         v = block.vent_w_per_k[t]

@@ -928,8 +928,17 @@ def build_run_plan(
                 slot_input.raised_c = normal_setpoint  # RAISED heats back to normal
                 # comfort_max_c stays: PREHEAT/FORCED heat up towards the return
             slot_input.draw_wh = 0.0  # nobody taps hot water while away
+            slot_input.internal_gains_factor = away.internal_gains_share
             if away.dhw_off:
                 slot_input.dhw_off = True
+                if floor is not None and not slot_input.cooling_season:
+                    # The controller's standby for REDUCED; every restart charges hot water.
+                    slot_input.standby_possible = True
+                    slot_input.standby_exit_dhw_c = (
+                        away.standby_exit_dhw_c
+                        if away.standby_exit_dhw_c is not None
+                        else settings.dhw.setpoint_c
+                    )
         logger.info(
             "Heat pump {}: holiday mode, {} of {} slots away (return {}), room {} degC, hot water {}.",
             parameters.device_id,
@@ -971,7 +980,7 @@ def build_run_plan(
         if parameters.initial_room_c is not None
         else settings.comfort.setpoint_c
     )
-    gains = system.building.gains_w(first.ghi_w_per_m2)
+    gains = system.slot_gains_w(first)
     slab = (
         parameters.initial_slab_c
         if parameters.initial_slab_c is not None
@@ -982,7 +991,10 @@ def build_run_plan(
         if parameters.initial_dhw_c is not None
         else system.dhw.setpoint_c - system.dhw.hysteresis_k / 2.0
     )
-    initial = ThermalState(slab_c=slab, room_c=room, dhw_c=dhw)
+    # In standby at the start when the controller's rule holds (RL29 fork): the
+    # restart charge of the next non-REDUCED slot is then part of the plan.
+    standby0 = bool(first.standby_possible and room > first.comfort_min_c + 0.3)
+    initial = ThermalState(slab_c=slab, room_c=room, dhw_c=dhw, standby=standby0)
 
     # Allowed modes; one rod option per configured target, only with a rod.
     opt = settings.optimization
@@ -1060,6 +1072,14 @@ def build_run_plan(
             if slot <= len(inputs):
                 deadline_slot = slot
 
+    tank_value = mean_price / cop_dhw if cop_dhw > 0 else 0.0
+    tank_value_above = tank_value * retention
+    if inputs and inputs[-1].dhw_off:
+        # Still away with hot water off at the horizon end (RL29 fork): heat put into
+        # the tank now is lost long before anybody taps it, and the heat pump charges
+        # the tank at the restart anyway - it has no value at the end.
+        tank_value = tank_value_above = 0.0
+
     return HeatPumpRunPlan(
         device_id=parameters.device_id,
         system=system,
@@ -1073,8 +1093,8 @@ def build_run_plan(
         legionella_penalty=opt.legionella_penalty_amt,
         mode_change_penalty=opt.mode_change_penalty_amt,
         building_heat_value=mean_price / cop_space if cop_space > 0 else 0.0,
-        tank_heat_value=mean_price / cop_dhw if cop_dhw > 0 else 0.0,
-        tank_heat_value_above_setpoint=(mean_price / cop_dhw * retention) if cop_dhw > 0 else 0.0,
+        tank_heat_value=tank_value,
+        tank_heat_value_above_setpoint=tank_value_above,
         legionella_c=settings.dhw.legionella_c,
         legionella_deadline_slot=deadline_slot,
         load_includes_heat_pump=opt.load_forecast_includes_heat_pump and separate_prices is None,

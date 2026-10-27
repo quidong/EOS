@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610262196159948"
+    "version": "v0.3.0.dev2610270651638912"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -11169,6 +11169,34 @@
               null
             ]
           },
+          "standby_exit_dhw_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Standby Exit Dhw C",
+            "description": "With standby (standby_min_c set): every restart of the heat pump from standby charges the tank to this temperature, the heat pump does that on its own [degC]. None = the hot water setpoint.",
+            "examples": [
+              41.0,
+              null
+            ]
+          },
+          "internal_gains_share": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Internal Gains Share",
+            "description": "Share of building.internal_gains_w present while away (people, cooking, devices are gone; fridge and standby stay) [-].",
+            "default": 1.0,
+            "examples": [
+              0.4,
+              1.0
+            ]
+          },
           "cooling_max_c": {
             "type": "number",
             "title": "Cooling Max C",
@@ -12171,8 +12199,25 @@
             "type": "number",
             "minimum": 0.0,
             "title": "Standby W",
-            "description": "Standby power [W].",
+            "description": "Power while the heat pump is ready but not running: controller, outdoor unit, circulation pump [W].",
             "default": 22.0
+          },
+          "off_w": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Off W",
+            "description": "RL29 fork: power in the heat pump's own standby operating mode (frost protection, pumps off), used in holiday mode [W]; None = standby_w.",
+            "examples": [
+              10.0,
+              null
+            ]
           },
           "max_flow_c": {
             "type": "number",

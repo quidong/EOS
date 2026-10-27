@@ -155,7 +155,25 @@ class HeatPumpUnitSettings(SettingsBaseModel):
         default=5500.0, gt=0, json_schema_extra={"description": "Maximum compressor power [W]."}
     )
     standby_w: float = Field(
-        default=22.0, ge=0, json_schema_extra={"description": "Standby power [W]."}
+        default=22.0,
+        ge=0,
+        json_schema_extra={
+            "description": (
+                "Power while the heat pump is ready but not running: controller, outdoor "
+                "unit, circulation pump [W]."
+            )
+        },
+    )
+    off_w: Optional[float] = Field(
+        default=None,
+        ge=0,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: power in the heat pump's own standby operating mode (frost "
+                "protection, pumps off), used in holiday mode [W]; None = standby_w."
+            ),
+            "examples": [10.0, None],
+        },
     )
     max_flow_c: float = Field(
         default=45.0,
@@ -629,6 +647,29 @@ class HeatPumpAwaySettings(SettingsBaseModel):
                 "is the floor."
             ),
             "examples": [16.0, None],
+        },
+    )
+    standby_exit_dhw_c: Optional[float] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "With standby (standby_min_c set): every restart of the heat pump from "
+                "standby charges the tank to this temperature, the heat pump does that on "
+                "its own [degC]. None = the hot water setpoint."
+            ),
+            "examples": [41.0, None],
+        },
+    )
+    internal_gains_share: float = Field(
+        default=1.0,
+        ge=0,
+        le=1,
+        json_schema_extra={
+            "description": (
+                "Share of building.internal_gains_w present while away (people, cooking, "
+                "devices are gone; fridge and standby stay) [-]."
+            ),
+            "examples": [0.4, 1.0],
         },
     )
     cooling_max_c: float = Field(
@@ -1130,6 +1171,7 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
             "dhw_heat_w": f"{self.device_id}-dhw-heat-power",
             "ghi_w_per_m2": f"{self.device_id}-ghi",
             "window_open": self.measurement_key_window_open,
+            "away": self.measurement_key_away,
         }
 
     @computed_field  # type: ignore[prop-decorator]
@@ -1260,6 +1302,7 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
                 max_heat_w=unit.max_heat_w,
                 max_electric_w=unit.max_electric_w,
                 standby_w=unit.standby_w,
+                off_w=unit.off_w,
                 max_flow_c=unit.max_flow_c,
                 flow_spread_k=unit.flow_spread_k,
                 dhw_heat_w=unit.dhw_heat_w,
