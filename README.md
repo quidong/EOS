@@ -1,3 +1,7 @@
+> **RL29 fork:** this repository is a fork of Akkudoktor-EOS with additional features (heat pump model,
+> MILP optimizer, learning forecasts, history, MCP server). See [RL29.md](RL29.md) and
+> [docs/akkudoktoreos/fork](docs/akkudoktoreos/fork/overview.md).
+
 ![AkkudoktorEOS](./docs/_static/logo.png#gh-light-mode-only)
 ![AkkudoktorEOS](./docs/_static/logo_dark.png#gh-dark-mode-only)
 

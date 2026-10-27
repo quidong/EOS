@@ -1,12 +1,13 @@
 {
   "manifest_version": "0.2",
   "name": "eos-rl29",
-  "display_name": "EOS Energiemanagement (RL29)",
+  "display_name": "EOS energy management",
   "version": "1.0.0",
-  "description": "Zugriff auf das EOS-Energiemanagement im Heimnetz: Plan, Prognosen, Kennzahlen, Modellberichte und freigegebene Einstellungen.",
-  "long_description": "Verbindet Claude mit dem EOS-MCP-Server (Container eos-mcp, http://eos.local:8505/mcp). Der Zugriff braucht den Token aus EOS_MCP_TOKEN; er wird beim Installieren abgefragt und sicher gespeichert. Funktioniert nur im Heimnetz bzw. per VPN.",
+  "description": "Access to an Akkudoktor-EOS (RL29 fork) MCP server: plan, forecasts, key figures, model reports and allow-listed settings.",
+  "long_description": "Connects Claude to the EOS MCP server (container eos-mcp, http://<host>:8505/mcp). Access needs the token from EOS_MCP_TOKEN; it is asked for at install time and stored securely. Keep the server inside your home network or behind a TLS reverse proxy.",
   "author": {
-    "name": "Bewohner A"
+    "name": "RL29 fork of Akkudoktor-EOS",
+    "url": "https://github.com/quidong/EOS"
   },
   "server": {
     "type": "node",
@@ -25,36 +26,72 @@
     }
   },
   "tools": [
-    {"name": "eos_status", "description": "Gesundheit, Algorithmus, letzter Plan"},
-    {"name": "eos_plan", "description": "Plan je Slot"},
-    {"name": "eos_forecast", "description": "Prognosereihen (Preis, PV, Last, Wetter)"},
-    {"name": "eos_kpis", "description": "Prognosegüte und realisierte Kosten"},
-    {"name": "eos_hours", "description": "Ist vs. Prognose je Stunde"},
-    {"name": "eos_reports", "description": "Berichte der Lernmodelle"},
-    {"name": "eos_config_get", "description": "Konfiguration lesen (Geheimnisse maskiert)"},
-    {"name": "eos_config_set", "description": "Freigegebenen Wert ändern"},
-    {"name": "eos_config_undo", "description": "Letzte Änderung zurücknehmen"},
-    {"name": "eos_config_save", "description": "Konfiguration dauerhaft speichern"}
+    {
+      "name": "eos_status",
+      "description": "Health, algorithm, latest plan"
+    },
+    {
+      "name": "eos_plan",
+      "description": "Plan per slot"
+    },
+    {
+      "name": "eos_forecast",
+      "description": "Prediction series (price, PV, load, weather)"
+    },
+    {
+      "name": "eos_kpis",
+      "description": "Forecast accuracy and realised costs"
+    },
+    {
+      "name": "eos_hours",
+      "description": "Actual vs predicted per hour"
+    },
+    {
+      "name": "eos_reports",
+      "description": "Reports of the learning models"
+    },
+    {
+      "name": "eos_config_get",
+      "description": "Read configuration (secrets masked)"
+    },
+    {
+      "name": "eos_config_set",
+      "description": "Change an allow-listed value"
+    },
+    {
+      "name": "eos_config_undo",
+      "description": "Undo the last change"
+    },
+    {
+      "name": "eos_config_save",
+      "description": "Persist the configuration"
+    }
   ],
   "user_config": {
     "url": {
       "type": "string",
-      "title": "EOS-MCP-Adresse",
-      "description": "URL des eos-mcp-Containers",
-      "default": "http://eos.local:8505/mcp",
+      "title": "EOS MCP URL",
+      "description": "URL of the eos-mcp container, e.g. http://192.0.2.10:8505/mcp",
+      "default": "http://localhost:8505/mcp",
       "required": true
     },
     "token": {
       "type": "string",
       "title": "Token (EOS_MCP_TOKEN)",
-      "description": "Der Wert von EOS_MCP_TOKEN aus dem Portainer-Stack",
+      "description": "Value of EOS_MCP_TOKEN of the eos-mcp container",
       "sensitive": true,
       "required": true
     }
   },
   "compatibility": {
-    "platforms": ["darwin", "win32", "linux"],
-    "runtimes": {"node": ">=20.0.0"}
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ],
+    "runtimes": {
+      "node": ">=20.0.0"
+    }
   },
   "license": "Apache-2.0"
 }

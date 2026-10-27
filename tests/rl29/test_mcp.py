@@ -30,7 +30,7 @@ class FakeEos:
             "optimization": {"algorithm": "MILP", "alternate_algorithms": []},
             "adapter": {"homeassistant": {"token": "real-ha-token", "url": "http://ha"}},
             "database": {"history": {"dsn": "postgresql://eos:pw@db/eos", "enabled": True}},
-            "general": {"latitude": 52.4},
+            "general": {"latitude": 52.5},
         }
         self.saved = 0
         self.requests: list[tuple[str, str]] = []

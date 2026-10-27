@@ -423,8 +423,16 @@ class ElecPriceTibber(ElecPriceProvider):
             len(history),
             needed_slots,
         )
-        prediction = self._predict_missing_prices(
-            history, slots=needed_slots, slots_per_hour=slots_per_hour
+        prediction = await self._predict_tail(
+            history,
+            needed_slots,
+            slots_per_hour,
+            resolution_seconds,
+            highest_orig_datetime,
+            key="elecprice_marketprice_wh",
+            reference=lambda values, n: self._predict_missing_prices(
+                values, slots=n, slots_per_hour=slots_per_hour
+            ),
         )
 
         prediction_series = pd.Series(

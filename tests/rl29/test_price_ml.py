@@ -190,3 +190,23 @@ async def test_provider_predict_tail_uses_model_and_falls_back(tmp_path):
     settings.enabled = False
     fallback = await ElecPriceProvider._predict_tail(fake, series.price[:-1], 40, 1, STEP, last)
     assert np.allclose(fallback, ets(series.price[:-1], 40))
+
+
+@pytest.mark.asyncio
+async def test_predict_tail_uses_the_provider_reference_when_disabled():
+    """Providers with their own forecast (Tibber) keep it when the model is off."""
+    fake = SimpleNamespace(
+        config=SimpleNamespace(elecprice=SimpleNamespace(ml=ElecPriceMLSettings(enabled=False)))
+    )
+    fake._ml_settings = lambda: ElecPriceProvider._ml_settings(fake)
+    out = await ElecPriceProvider._predict_tail(
+        fake,
+        np.ones(10),
+        5,
+        4,
+        900,
+        pd.Timestamp("2026-10-27T00:00:00Z"),
+        key="elecprice_marketprice_wh",
+        reference=lambda values, n: np.full(n, 7.0),
+    )
+    assert list(out) == [7.0] * 5

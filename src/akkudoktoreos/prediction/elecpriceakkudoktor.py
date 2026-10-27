@@ -204,7 +204,7 @@ class ElecPriceAkkudoktor(ElecPriceProvider):
             )
             return
 
-        prediction = self._predict(history, needed_hours)
+        prediction = await self._predict_tail(history, needed_hours, 1, 3600, highest_orig_datetime)
 
         # write predictions into the records, update if exist.
         prediction_series = pd.Series(

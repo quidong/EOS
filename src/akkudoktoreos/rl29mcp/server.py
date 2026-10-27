@@ -2,7 +2,7 @@
 
 A separate process (own container in the EOS stack) that talks to the EOS REST API and
 offers MCP tools: status, plan, forecasts, forecast quality and costs, model reports,
-configuration read/change/save. See ``security.py`` for the guards and RL29-MCP.md for
+configuration read/change/save. See ``security.py`` for the guards and docs/akkudoktoreos/fork/mcp.md for
 setup.
 """
 

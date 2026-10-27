@@ -172,11 +172,22 @@ class ElecPriceProvider(PricePredictionProviderBase[ElecPriceDataRecord]):
         slots_per_hour: int,
         resolution_seconds: int,
         last_datetime: Any,
+        key: Optional[str] = None,
+        reference: Optional[Callable[[np.ndarray, int], np.ndarray]] = None,
     ) -> np.ndarray:
-        """Prices after the last known slot: LightGBM when enabled and validated, else ETS."""
+        """Prices after the last known slot, from LightGBM or the provider's forecast.
+
+        LightGBM when enabled and validated, else ``reference`` (default ETS).
+        ``key`` is the record key holding the provider's price history (default: the raw
+        market price); the model learns on the same series it extends.
+        """
 
         def ets(values: np.ndarray, n: int) -> np.ndarray:
+            if reference is not None:
+                return reference(values, n)
             return self._predict(values, n, slots_per_hour=slots_per_hour)
+
+        price_key = key or self._raw_key
 
         settings = self._ml_settings()
         if settings is None:
@@ -198,7 +209,7 @@ class ElecPriceProvider(PricePredictionProviderBase[ElecPriceDataRecord]):
             # Own read with an explicit start: index i is start + i * resolution and the
             # last element is the last published slot (the ETS input ends one earlier).
             prices = await self.key_to_array(
-                key=self._raw_key,
+                key=price_key,
                 start_datetime=to_datetime(start_ts),
                 end_datetime=to_datetime(last_ts + resolution_seconds),
                 interval=to_duration(f"{resolution_seconds} seconds"),
@@ -208,7 +219,7 @@ class ElecPriceProvider(PricePredictionProviderBase[ElecPriceDataRecord]):
             start_ts = last_ts - (len(prices) - 1) * resolution_seconds
             # No made-up history before the first record (the resampling fills edges).
             raw = await self.key_to_raw_series(
-                key=self._raw_key,
+                key=price_key,
                 start_datetime=to_datetime(start_ts),
                 end_datetime=to_datetime(last_ts + resolution_seconds),
             )

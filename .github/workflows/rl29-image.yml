@@ -4,7 +4,7 @@
 # untouched so that rebasing onto Akkudoktor-EOS/EOS main stays conflict free.
 #
 # Result: ghcr.io/<owner>/eos:rl29-<short-sha> and ghcr.io/<owner>/eos:rl29-latest
-# The Portainer stack pins the image by digest (see RL29.md).
+# The Portainer stack pins the image by digest (see RL29.md, "Update and rollback").
 
 name: rl29-image
 
