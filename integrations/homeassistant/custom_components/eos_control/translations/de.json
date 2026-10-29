@@ -73,7 +73,8 @@
             "humidity_entity": "Feuchtesensor (optional)",
             "humidity_max_pct": "Feuchtegrenze",
             "humidity_delay_min": "Feuchte-Verzögerung",
-            "in_zone": "Gehört zur EOS-Absenkzone"
+            "in_zone": "Gehört zur EOS-Absenkzone",
+            "setpoint_entity": "Raum-Sollwert für das Komfort-Lernen (optional)"
           }
         },
         "reconfigure": {
@@ -87,7 +88,8 @@
             "humidity_entity": "Feuchtesensor (optional)",
             "humidity_max_pct": "Feuchtegrenze",
             "humidity_delay_min": "Feuchte-Verzögerung",
-            "in_zone": "Gehört zur EOS-Absenkzone"
+            "in_zone": "Gehört zur EOS-Absenkzone",
+            "setpoint_entity": "Raum-Sollwert für das Komfort-Lernen (optional)"
           }
         }
       },
@@ -124,6 +126,9 @@
       },
       "shadow_agreement": {
         "name": "Schattenvergleich Übereinstimmung"
+      },
+      "comfort_suggestions": {
+        "name": "Komfort-Vorschläge"
       }
     },
     "binary_sensor": {
@@ -146,6 +151,9 @@
     "button": {
       "reset_shadow": {
         "name": "Schattenvergleich zurücksetzen"
+      },
+      "reset_comfort": {
+        "name": "Komfort-Lernen zurücksetzen"
       }
     }
   }

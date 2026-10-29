@@ -1,4 +1,4 @@
-"""Button to reset the shadow comparison."""
+"""Buttons to reset the shadow comparison and the comfort learning."""
 
 from __future__ import annotations
 
@@ -16,7 +16,12 @@ async def async_setup_entry(
     entry: EosControlConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    async_add_entities([ResetShadowButton(entry.runtime_data, "reset_shadow")])
+    async_add_entities(
+        [
+            ResetShadowButton(entry.runtime_data, "reset_shadow"),
+            ResetComfortButton(entry.runtime_data, "reset_comfort"),
+        ]
+    )
 
 
 class ResetShadowButton(EosControlEntity, ButtonEntity):
@@ -24,3 +29,10 @@ class ResetShadowButton(EosControlEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         await self.coordinator.async_reset_shadow()
+
+
+class ResetComfortButton(EosControlEntity, ButtonEntity):
+    _attr_entity_category = EntityCategory.CONFIG
+
+    async def async_press(self) -> None:
+        await self.coordinator.async_reset_comfort()

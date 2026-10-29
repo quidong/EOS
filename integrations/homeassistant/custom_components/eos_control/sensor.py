@@ -104,6 +104,15 @@ SENSORS: tuple[EosSensorDescription, ...] = (
             "last_mismatches": d.shadow.log[-10:],
         },
     ),
+    EosSensorDescription(
+        key="comfort_suggestions",
+        value=lambda d: len(d.suggestions),
+        state_class=SensorStateClass.MEASUREMENT,
+        attributes=lambda d: {
+            "suggestions": [s.as_dict() for s in d.suggestions],
+            "events": d.comfort_events,
+        },
+    ),
 )
 
 
