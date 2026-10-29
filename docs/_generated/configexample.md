@@ -473,6 +473,17 @@
                        "recommend_end_hour": 15,
                        "recommend_open_hours": 0.15
                    },
+                   "room_limits": {
+                       "enabled": false,
+                       "horizon_hours": 6.0,
+                       "max_raise_k": 2.0
+                   },
+                   "humidity": {
+                       "enabled": false,
+                       "max_pct": 65.0,
+                       "hold_hours": 2.0,
+                       "max_drop_k": 0.5
+                   },
                    "power_limit_w": null
                }
            },

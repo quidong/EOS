@@ -91,6 +91,8 @@ Measurements EOS reads (via `adapter.homeassistant.device_measurement_entity_ids
 | `<id>-cooling-season`, `<id>-dewpoint` | cooling operation and room dew point |
 | `<id>-away`, `<id>-return-ts`, `<id>-away-room-temperature`, `<id>-away-min-temperature` | holiday mode |
 | `<id>-setback-room-temperature`, `<id>-window-open` | zone set-back temperature, share of open windows |
+| `<id>-room-min-margin`, `<id>-room-max-margin` | optional: closest room to its own lower / upper limit [K] |
+| `<id>-humidity` | optional: highest relative humidity of the monitored rooms [%] |
 | `<id>-outdoor-temperature`, `<id>-heat-power`, `<id>-electric-power`, `<id>-flow-temperature` | calibration |
 
 Use a power meter that sees all consumers of the heat pump (pumps, controller, cooling) for
@@ -113,7 +115,8 @@ Recommended rules in the controller, independent of EOS:
 
 - plan missing or older than 45 min → NORMAL;
 - no reduction while a room is below a lower limit (with hysteresis; rooms with open windows excluded),
-  no raising while the warmest room is above an upper limit;
+  no raising while the warmest room is above an upper limit – report the margins to EOS as well
+  (see room limits below), so the plan already respects them;
 - maximum duration of a reduction, minimum holding time per mode, a daily limit of switchings and
   hot water charges;
 - manual changes at the unit pause the automation and notify;
@@ -205,6 +208,29 @@ violations. Solution key `<id>_zone_setback` tells the controller when.
 (`loss_w_per_k` × share × (room − outdoor)); the expected airing per hour (`profile`) is learned by the
 calibration. With `recommend`, EOS picks one slot per day for airing (warmest, most PV surplus) and
 publishes `<id>_ventilate`.
+
+## Room limits and humidity
+
+EOS models the mean of all rooms. Two optional inputs let the controller pass on what it knows
+about single rooms; without them nothing changes.
+
+`room_limits` (`enabled`, `horizon_hours` 6, `max_raise_k` 2): the controller compares every room
+with its own limits (rooms with open windows or just aired left out) and reports the smallest
+margins, `<id>-room-min-margin` = min(room − lower limit) and `<id>-room-max-margin` =
+min(upper limit − room). For the next `horizon_hours` EOS assumes the rooms move with the mean:
+
+- comfort minimum of the mean ≥ room now − min margin (at most `max_raise_k` above the band and
+  not above the NORMAL setpoint), so REDUCED stops before the coldest room reaches its limit;
+- comfort maximum and RAISED target ≤ room now + max margin (not below the NORMAL setpoint).
+
+While away the margins apply until the return only (the controller reports them against the
+limits valid now). Give rooms that are cold by design (a basement office with a lower setpoint)
+their own lower limit in the controller instead of raising the whole house.
+
+`humidity` (`enabled`, `max_pct` 65, `hold_hours` 2, `max_drop_k` 0.5): while `<id>-humidity`
+is at or above `max_pct`, the comfort minimum for the next `hold_hours` is at most `max_drop_k`
+below the NORMAL setpoint – REDUCED then does not cool damp rooms. The controller may send its own
+debounced flag instead (100 = high, 0 = normal).
 
 ## Cooling
 

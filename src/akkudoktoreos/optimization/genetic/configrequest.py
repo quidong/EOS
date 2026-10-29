@@ -737,8 +737,33 @@ class ConfigOptimizationRequest(
                         device.device_id,
                         window_share * 100,
                     )
+        # Per-room margins and humidity reported by the controller (fork), both optional.
+        min_margin: Optional[float] = None
+        max_margin: Optional[float] = None
+        if device.room_limits.enabled:
+            for key, name in (
+                (device.measurement_key_room_min_margin, "min"),
+                (device.measurement_key_room_max_margin, "max"),
+            ):
+                value = await self._latest_measurement(key, observation_time, max_age)
+                if value is None or not math.isfinite(value) or not -15.0 <= value <= 15.0:
+                    continue
+                if name == "min":
+                    min_margin = value
+                else:
+                    max_margin = value
+        humidity: Optional[float] = None
+        if device.humidity.enabled:
+            value = await self._latest_measurement(
+                device.measurement_key_humidity, observation_time, max_age
+            )
+            if value is not None and math.isfinite(value) and 0.0 <= value <= 100.0:
+                humidity = value
         return GeneticHeatPumpParameters(
             device_id=device.device_id,
+            room_min_margin_k=min_margin,
+            room_max_margin_k=max_margin,
+            humidity_pct=humidity,
             setback_room_c=setback_room,
             window_open_share=window_share,
             away=away,

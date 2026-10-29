@@ -175,6 +175,32 @@ class GeneticHeatPumpParameters(GeneticParametersBaseModel):
             "description": "RL29 fork: share of the monitored windows open now (0..1)."
         },
     )
+    room_min_margin_k: Optional[float] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "Fork: smallest margin of a room above its own lower limit now [K]; "
+                "None = not reported."
+            )
+        },
+    )
+    room_max_margin_k: Optional[float] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "Fork: smallest margin of a room below its own upper limit now [K]; "
+                "None = not reported."
+            )
+        },
+    )
+    humidity_pct: Optional[float] = Field(
+        default=None,
+        ge=0,
+        le=100,
+        json_schema_extra={
+            "description": "Fork: highest relative humidity of the monitored rooms now [%]."
+        },
+    )
 
 
 def _nearest(allowed: Sequence[int], wanted: int) -> int:
@@ -948,6 +974,7 @@ def build_run_plan(
     zone_slots, vent_slots = _apply_zone_setback_and_ventilation(
         parameters, slot_starts, slot_hours, inputs, away_slots, pv_surplus_w
     )
+    _apply_room_limits_and_humidity(parameters, slot_hours, inputs, away_slots)
 
     # Active §14a dimming: limit the first slots.
     if parameters.power_limited_w is not None:
@@ -1196,6 +1223,77 @@ def _apply_zone_setback_and_ventilation(
             extra = max(0.0, vent.recommend_open_hours - expected)
             inputs[best].ventilation_w_per_k += vent.loss_w_per_k * extra / slot_hours
     return zone_slots, vent_slots
+
+
+def _apply_room_limits_and_humidity(
+    parameters: GeneticHeatPumpParameters,
+    slot_hours: float,
+    inputs: list[SlotInputs],
+    away_slots: int,
+) -> None:
+    """Per-room margins and humidity protection reported by the controller (fork).
+
+    Both only apply to heating slots near now: the rooms are assumed to move with
+    the mean for ``room_limits.horizon_hours``, a high humidity reading holds for
+    ``humidity.hold_hours``. Room margins also stop at the end of a holiday, because
+    the controller reports them against the limits valid now.
+    """
+    settings = parameters.settings
+    room_now = parameters.initial_room_c
+    limits = settings.room_limits
+    if limits.enabled and room_now is not None:
+        count = min(len(inputs), max(1, math.ceil(limits.horizon_hours / slot_hours)))
+        if away_slots > 0:
+            count = min(count, away_slots)
+        changed = 0
+        for slot_input in inputs[:count]:
+            if slot_input.cooling_season or slot_input.setpoint_c is None:
+                continue
+            setpoint = slot_input.setpoint_c
+            if parameters.room_min_margin_k is not None:
+                floor = room_now - parameters.room_min_margin_k
+                floor = min(floor, slot_input.comfort_min_c + limits.max_raise_k, setpoint)
+                if floor > slot_input.comfort_min_c:
+                    slot_input.comfort_min_c = floor
+                    changed += 1
+            if parameters.room_max_margin_k is not None:
+                ceiling = max(room_now + parameters.room_max_margin_k, setpoint)
+                if slot_input.comfort_max_c is not None and ceiling < slot_input.comfort_max_c:
+                    slot_input.comfort_max_c = ceiling
+                    changed += 1
+                raised = (
+                    slot_input.raised_c
+                    if slot_input.raised_c is not None
+                    else setpoint + settings.comfort.raised_offset_k
+                )
+                if ceiling < raised:
+                    slot_input.raised_c = ceiling
+        if changed:
+            logger.info(
+                "Heat pump {}: room margins min {} K / max {} K applied to {} slots.",
+                parameters.device_id,
+                parameters.room_min_margin_k,
+                parameters.room_max_margin_k,
+                count,
+            )
+
+    humidity = settings.humidity
+    value = parameters.humidity_pct
+    if humidity.enabled and value is not None and value >= humidity.max_pct:
+        count = min(len(inputs), max(1, math.ceil(humidity.hold_hours / slot_hours)))
+        for slot_input in inputs[:count]:
+            if slot_input.cooling_season or slot_input.setpoint_c is None:
+                continue
+            hold = slot_input.setpoint_c - humidity.max_drop_k
+            if hold > slot_input.comfort_min_c:
+                slot_input.comfort_min_c = hold
+        logger.info(
+            "Heat pump {}: humidity {} % >= {} %, rooms held warm for {} slots.",
+            parameters.device_id,
+            value,
+            humidity.max_pct,
+            count,
+        )
 
 
 def plan_result(plan: HeatPumpRunPlan, genes: Sequence[int]) -> dict[str, Any]:
