@@ -5,14 +5,6 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
-from homeassistant import config_entries
-from homeassistant.config_entries import ConfigSubentryData
-from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResultType
-from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
-from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
-
 from custom_components.eos_control.const import (
     CONF_DEVICE_ID,
     CONF_HOLIDAY_ENTITY,
@@ -23,6 +15,16 @@ from custom_components.eos_control.const import (
     DEFAULTS,
     DOMAIN,
 )
+from homeassistant import config_entries
+from homeassistant.config_entries import ConfigSubentryData
+from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_fire_time_changed,
+)
+from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
 
 
 @pytest.fixture(autouse=True)
@@ -326,7 +328,9 @@ async def test_standby_reference(hass: HomeAssistant, aioclient_mock: AiohttpCli
 async def test_periodic_refresh_and_diagnostics(
     hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
 ):
-    from custom_components.eos_control.diagnostics import async_get_config_entry_diagnostics
+    from custom_components.eos_control.diagnostics import (
+        async_get_config_entry_diagnostics,
+    )
 
     set_rooms(hass)
     entry = await setup(hass, aioclient_mock, solution(1), rooms=ROOMS)

@@ -183,7 +183,9 @@ async def isolated_measurement(config_eos: ConfigEOS) -> AsyncGenerator[Measurem
 async def test_request_reads_margins_and_humidity(
     config_eos: ConfigEOS, isolated_measurement: Measurement
 ):
-    from akkudoktoreos.optimization.genetic.configrequest import ConfigOptimizationRequest
+    from akkudoktoreos.optimization.genetic.configrequest import (
+        ConfigOptimizationRequest,
+    )
 
     config_eos.merge_settings_from_dict(
         {

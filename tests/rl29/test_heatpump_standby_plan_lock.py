@@ -20,7 +20,9 @@ from akkudoktoreos.core.coreabc import get_ems, get_measurement
 from akkudoktoreos.devices.settings.heatpumpsettings import HeatPumpCommonSettings
 from akkudoktoreos.devices.thermal.heatpump import DhwMode, HeatingMode
 from akkudoktoreos.measurement.measurement import Measurement
-from akkudoktoreos.optimization.genetic.geneticsolution import HEAT_PUMP_SOLUTION_COLUMNS
+from akkudoktoreos.optimization.genetic.geneticsolution import (
+    HEAT_PUMP_SOLUTION_COLUMNS,
+)
 from akkudoktoreos.optimization.genetic.heatpumpgenes import (
     GeneticHeatPumpParameters,
     build_run_plan,
@@ -32,10 +34,12 @@ T0 = pendulum.datetime(2026, 11, 3, 10, 0, tz=TZ)
 
 
 def device(**away) -> HeatPumpCommonSettings:
-    return HeatPumpCommonSettings(
-        device_id="hp1",
-        unit={"standby_w": 32.0, "off_w": 10.0},
-        away={"standby_min_c": 16.0, **away},
+    return HeatPumpCommonSettings.model_validate(
+        {
+            "device_id": "hp1",
+            "unit": {"standby_w": 32.0, "off_w": 10.0},
+            "away": {"standby_min_c": 16.0, **away},
+        }
     )
 
 
@@ -165,7 +169,9 @@ async def isolated_measurement(config_eos: ConfigEOS) -> AsyncGenerator[Measurem
 
 @pytest.mark.asyncio
 async def test_request_reads_the_lock(config_eos: ConfigEOS, isolated_measurement: Measurement):
-    from akkudoktoreos.optimization.genetic.configrequest import ConfigOptimizationRequest
+    from akkudoktoreos.optimization.genetic.configrequest import (
+        ConfigOptimizationRequest,
+    )
 
     config_eos.merge_settings_from_dict(
         {
@@ -201,6 +207,11 @@ async def test_request_reads_the_lock(config_eos: ConfigEOS, isolated_measuremen
     await isolated_measurement.update_value(now, "hp1-room-temperature", 20.5)
     await isolated_measurement.update_value(now, "hp1-dhw-temperature", 45.0)
 
+    async def lock_until():
+        heat_pumps = (await request().resolve()).heat_pumps
+        assert heat_pumps is not None
+        return heat_pumps[0].reduce_locked_until
+
     def request() -> ConfigOptimizationRequest:
         return ConfigOptimizationRequest.model_validate(
             {
@@ -215,16 +226,16 @@ async def test_request_reads_the_lock(config_eos: ConfigEOS, isolated_measuremen
             }
         )
 
-    assert (await request().resolve()).heat_pumps[0].reduce_locked_until is None
+    assert await lock_until() is None
     until = now.add(hours=2)
     await isolated_measurement.update_value(now, "hp1-reduce-lock-until-ts", until.timestamp())
-    state = (await request().resolve()).heat_pumps[0]
-    assert state.reduce_locked_until is not None
-    assert state.reduce_locked_until.timestamp() == pytest.approx(until.timestamp())
+    locked = await lock_until()
+    assert locked is not None
+    assert locked.timestamp() == pytest.approx(until.timestamp())
     # 0 (no lock) and a time in the past are ignored
     await isolated_measurement.update_value(now, "hp1-reduce-lock-until-ts", 0.0)
-    assert (await request().resolve()).heat_pumps[0].reduce_locked_until is None
+    assert await lock_until() is None
     await isolated_measurement.update_value(
         now, "hp1-reduce-lock-until-ts", now.subtract(hours=1).timestamp()
     )
-    assert (await request().resolve()).heat_pumps[0].reduce_locked_until is None
+    assert await lock_until() is None
