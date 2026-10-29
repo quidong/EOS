@@ -212,7 +212,7 @@ def decide(data: ControlInput, settings: Settings) -> Decision:
     plan_knows_away = bool(slot is not None and slot.away)
 
     decision = Decision(sg_target=2, reason="", eos_mode=mode, eos_fresh=fresh)
-    _room_figures(data, decision)
+    _room_figures(data, settings, decision)
 
     # -- SG Ready target ------------------------------------------------
     if not fresh:
@@ -293,7 +293,27 @@ def decide(data: ControlInput, settings: Settings) -> Decision:
 # ----------------------------------------------------------------------
 
 
-def _room_figures(data: ControlInput, decision: Decision) -> None:
+def _zone_active(data: ControlInput) -> bool:
+    slot = data.plan.current(data.now) if data.plan is not None else None
+    return bool(data.zone_setback_allowed and slot is not None and slot.zone_setback)
+
+
+def _lower_limit(
+    room: RoomState, data: ControlInput, settings: Settings, zone_active: bool
+) -> float:
+    """Lower limit of ``room`` valid now (holiday and set-back zone use the reduced setpoint)."""
+    if data.holiday:
+        return (
+            data.reduced_setpoint_c - 1.0
+            if data.reduced_setpoint_c is not None
+            else settings.holiday_floor_c
+        )
+    if zone_active and room.in_zone and data.reduced_setpoint_c is not None:
+        return data.reduced_setpoint_c - 1.0
+    return room.lower_c
+
+
+def _room_figures(data: ControlInput, settings: Settings, decision: Decision) -> None:
     valid = [r for r in data.rooms if r.temperature is not None]
     decision.valid_rooms = len(valid)
     if not valid:
@@ -301,10 +321,16 @@ def _room_figures(data: ControlInput, decision: Decision) -> None:
     decision.room_mean_c = sum(r.temperature for r in valid) / len(valid)  # type: ignore[misc]
     considered = [r for r in valid if not r.airing]
     if considered:
-        low = min(considered, key=lambda r: r.temperature - r.lower_c)  # type: ignore[operator]
-        high = min(considered, key=lambda r: r.upper_c - r.temperature)  # type: ignore[operator]
-        decision.room_min_margin_k = low.temperature - low.lower_c  # type: ignore[operator]
-        decision.room_max_margin_k = high.upper_c - high.temperature  # type: ignore[operator]
+        zone = _zone_active(data)
+        # Margins against the limits valid now (EOS applies them until the return).
+        decision.room_min_margin_k = min(
+            r.temperature - _lower_limit(r, data, settings, zone)  # type: ignore[operator]
+            for r in considered
+        )
+        decision.room_max_margin_k = min(
+            r.upper_c - r.temperature  # type: ignore[operator]
+            for r in considered
+        )
         coldest = min(considered, key=lambda r: r.temperature)  # type: ignore[arg-type,return-value]
         decision.coldest_room = coldest.name
         warmest = max(valid, key=lambda r: r.temperature)  # type: ignore[arg-type,return-value]
@@ -332,26 +358,14 @@ def _reduction_blocked(data: ControlInput, settings: Settings, decision: Decisio
     ):
         return f"reduction locked until {data.reduction_locked_until:%H:%M}"
     running = data.sg_actual == 1
-    slot = data.plan.current(data.now) if data.plan is not None else None
-    zone_active = bool(data.zone_setback_allowed and slot is not None and slot.zone_setback)
+    zone_active = _zone_active(data)
     cold: list[str] = []
     for room in data.rooms:
         if room.temperature is None or room.airing:
             continue
-        if data.holiday:
-            limit = (
-                data.reduced_setpoint_c - 1.0
-                if data.reduced_setpoint_c is not None
-                else settings.holiday_floor_c
-            )
-        elif zone_active and room.in_zone:
-            limit = (
-                data.reduced_setpoint_c - 1.0
-                if data.reduced_setpoint_c is not None
-                else room.lower_c
-            )
-        else:
-            limit = room.lower_c + (0.0 if running else settings.reduction_hysteresis_k)
+        limit = _lower_limit(room, data, settings, zone_active)
+        if not data.holiday and not (zone_active and room.in_zone):
+            limit += 0.0 if running else settings.reduction_hysteresis_k
         if room.temperature < limit:
             cold.append(f"{room.name} {room.temperature:.1f} < {limit:.1f}")
     decision.cold_rooms = cold
