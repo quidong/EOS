@@ -26,6 +26,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EosControlConfigEntry) -
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: EosControlConfigEntry) -> bool:
+    await entry.runtime_data.async_save_shadow()
     return await hass.config_entries.async_unload_platforms(entry, [*PLATFORMS, "button"])
 
 
