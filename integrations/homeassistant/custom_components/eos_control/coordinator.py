@@ -136,6 +136,8 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
         self.learning = ComfortLearning()
         self._humidity_since: dict[str, datetime] = {}
         self._setpoints: dict[str, Optional[float]] = {}
+        self._presets: dict[str, Optional[str]] = {}
+        self._holiday_until: Optional[datetime] = None
         self._lock: Optional[datetime] = None
         self._lock_seen = False
         self._loaded = False
@@ -355,6 +357,10 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
     def _learn(self, now: datetime, data: ControlInput) -> bool:
         """Record manual setpoint raises and newly set locks; True = something recorded."""
         recorded = False
+        if data.holiday:
+            self._holiday_until = now
+        # The return from holiday raises setpoints and presets everywhere: no event.
+        settled = self._holiday_until is None or now - self._holiday_until > timedelta(hours=2)
         temps = {r.name: r.temperature for r in data.rooms}
         lowers = {r.name: r.lower_c for r in data.rooms}
         for cfg in self._room_configs():
@@ -363,10 +369,15 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             current = self._setpoint(state)
             previous = self._setpoints.get(name)
             self._setpoints[name] = current
+            preset = state.attributes.get("preset_mode") if state is not None else None
+            preset_before = self._presets.get(name, preset)
+            self._presets[name] = preset
             temperature = temps.get(name)
             if (
                 setpoint_raised(previous, current)
+                and preset == preset_before  # a mode change (economy -> comfort) is no event
                 and not data.holiday
+                and settled
                 and state is not None
                 and state.context.parent_id is None  # not changed by an automation
                 and temperature is not None
@@ -376,7 +387,7 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
                 )
                 recorded = True
         lock = data.reduction_locked_until
-        if self._lock_seen and not data.holiday and lock_set(self._lock, lock, now):
+        if self._lock_seen and not data.holiday and settled and lock_set(self._lock, lock, now):
             room = lock_room(
                 [(r.name, r.temperature, r.lower_c) for r in data.rooms if not r.airing]
             )

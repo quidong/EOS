@@ -389,11 +389,21 @@ async def test_comfort_learning_from_setpoints_and_lock(
     assert coordinator.data.comfort_events == 1
     assert coordinator.learning.events[-1].room == "Living"
     assert coordinator.learning.events[-1].temperature_c == pytest.approx(19.8)
+    # mode change of the controller (economy -> comfort) raises the setpoint: ignored
+    hass.states.async_set(
+        "climate.living_controller", "heat", {"temperature": 22.0, "preset_mode": "economy"}
+    )
+    await coordinator.async_refresh()
+    hass.states.async_set(
+        "climate.living_controller", "heat", {"temperature": 22.5, "preset_mode": "comfort"}
+    )
+    await coordinator.async_refresh()
+    assert coordinator.data.comfort_events == 1
     # raised by an automation: ignored
     hass.states.async_set(
         "climate.living_controller",
         "heat",
-        {"temperature": 23.0},
+        {"temperature": 23.5, "preset_mode": "comfort"},
         context=Context(parent_id="automation-run"),
     )
     await coordinator.async_refresh()
@@ -415,3 +425,26 @@ async def test_comfort_learning_from_setpoints_and_lock(
         "button", "press", {"entity_id": "button.eos_hp1_reset_comfort_learning"}, blocking=True
     )
     assert entry.runtime_data.data.comfort_events == 0
+
+
+async def test_comfort_learning_ignores_holiday_and_the_return(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+):
+    set_rooms(hass, living=19.8, bath=20.8)
+    hass.states.async_set("climate.living_controller", "heat", {"temperature": 18.0})
+    hass.states.async_set("input_boolean.away", "on")
+    rooms = [room("Living", "sensor.living", setpoint_entity="climate.living_controller")]
+    entry = await setup(
+        hass,
+        aioclient_mock,
+        solution(1, away=1),
+        options={CONF_HOLIDAY_ENTITY: "input_boolean.away"},
+        rooms=rooms,
+    )
+    coordinator = entry.runtime_data
+    hass.states.async_set("climate.living_controller", "heat", {"temperature": 21.0})
+    await coordinator.async_refresh()
+    hass.states.async_set("input_boolean.away", "off")  # back home: setpoints go up
+    hass.states.async_set("climate.living_controller", "heat", {"temperature": 22.0})
+    await coordinator.async_refresh()
+    assert coordinator.data.comfort_events == 0
