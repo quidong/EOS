@@ -19,6 +19,7 @@ Per slot the model simulates
   COP from outdoor and flow temperature (Carnot efficiency fitted to the rating points `unit.cop_points`,
   scaled by `unit.cop_scale`, capped by `unit.cop_max`), hot water charging at its own COP;
 - an optional **heating rod** (`dhw.rod_power_w`, 0 = none) that charges the tank to a target;
+  with its own PV surplus controller (`dhw.rod_surplus_c`, see below) it also heats on its own;
 - the **controller logic**: each mode sets a room target, the heat pump delivers the heat a heating
   curve with room thermostats would deliver; the room never falls below the comfort minimum (the
   controller would heat), the tank is reheated below setpoint − hysteresis;
@@ -95,6 +96,7 @@ Measurements EOS reads (via `adapter.homeassistant.device_measurement_entity_ids
 | `<id>-room-min-margin`, `<id>-room-max-margin` | optional: closest room to its own lower / upper limit [K] |
 | `<id>-humidity` | optional: highest relative humidity of the monitored rooms [%] |
 | `<id>-reduce-lock-until-ts` | optional: Unix time until which the controller does not reduce, 0 = no lock |
+| `<id>-warning-start-ts`, `<id>-warning-end-ts` | optional: weather warning period (Unix times, 0 = none) |
 | `<id>-outdoor-temperature`, `<id>-heat-power`, `<id>-electric-power`, `<id>-flow-temperature` | calibration |
 
 Use a power meter that sees all consumers of the heat pump (pumps, controller, cooling) for
@@ -238,6 +240,26 @@ is at or above `max_pct`, the comfort minimum for the next `hold_hours` is at mo
 below the NORMAL setpoint – REDUCED then does not cool damp rooms. The controller may send its own
 debounced flag instead (100 = high, 0 = normal).
 
+## Heating rod with its own surplus controller
+
+Rods behind a PV power diverter (e.g. a controller that reads the grid meter or the inverter) heat
+on their own with PV surplus, second by second and stepless. `dhw.rod_surplus_c` (e.g. 60 °C) tells
+EOS about it: in every slot the rod uses the forecast PV surplus (PV minus household load) left after
+the heat pump, up to this temperature. EOS then plans no heat pump charge the rod covers anyway, and
+values the rod energy like any other load (lost feed-in). A planned `ROD_<target>` slot remains a
+boost from the grid (negative prices, legionella) that the controller has to start, e.g. via the
+diverter's boost or setpoint input. The MILP model plans without this rod; its final check uses the
+model above.
+
+## Weather warnings
+
+`weather_warning` (`enabled`, `raise_room_k` 1 K, `dhw_min_c` 50 °C, `max_hours` 48): the controller
+reports a warning that may cut the power (storm, ice, heavy frost) as `<id>-warning-start-ts` and
+`<id>-warning-end-ts` (Unix times, 0 = none). For the slots of the warning the comfort minimum rises
+by `raise_room_k` (at most to the comfort maximum) and the hot water minimum to `dhw_min_c` (at most
+what heat pump or rod reach). EOS charges building and tank beforehand, in the cheapest hours before
+the warning. While away with hot water off only the room part applies.
+
 ## Lock of the reduction
 
 A controller may block reducing for a while, e.g. after somebody felt cold. It reports the end as
@@ -260,6 +282,17 @@ fee: the regular grid fee in the fixed fee provider is replaced per quarter hour
 `module3_network_amt_kwh`). `controllable_device_ids`, `regular_network_amt_kwh`, `dimming_power_w`
 (4200 W). `<id>-power-limited` = 1 limits the controllable devices to the dimming power from now.
 `scripts/rl29/gridfee_14a.py` writes these settings (`--module …`, `--apply http://<eos>:8503`).
+
+Module 3 with the import fee provider (`ElecFeeImport`): imported fees are used as they are. If they
+contain only the regular grid fee, set `elecfee.elecfeeimport.module3_included: false`; EOS then adds
+the band price minus the regular price, like the fixed provider does.
+
+## Negative prices (Germany, § 51 EEG)
+
+Plants commissioned from 2025-02-25 get no feed-in tariff while the market price is negative.
+`feedintariff.zero_at_negative_price: true` sets the feed-in value of these slots to 0 (raw market
+price < 0, also in the price forecast after the published day-ahead). Feed-in then earns nothing, so
+the optimizer moves the heat pump, hot water and appliances into these slots.
 
 ## PDF report
 

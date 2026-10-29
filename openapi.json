@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610291295146898"
+    "version": "v0.3.0.dev2610291615605635"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -5489,6 +5489,16 @@
             "examples": [
               "{\"elecfee_consumption_amt_wh\": [0.0003384, 0.0003318, 0.0003284]}"
             ]
+          },
+          "module3_included": {
+            "type": "boolean",
+            "title": "Module3 Included",
+            "description": "Fork: the imported consumption fees already contain the \u00a714a module 3 network price. False = EOS adds the module 3 band price (elecfee.grid_control_14a.module3_network_amt_kwh) like the fixed provider.",
+            "default": true,
+            "examples": [
+              true,
+              false
+            ]
           }
         },
         "type": "object",
@@ -6362,6 +6372,23 @@
               0.8
             ]
           },
+          "replan_pv_deviation_w": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replan Pv Deviation W",
+            "description": "Fork: mean PV power of the last complete slot (PV production meters) differs from the forecast by more than this [W] -> run. None = off.",
+            "examples": [
+              null,
+              1500.0
+            ]
+          },
           "replan_min_interval_sec": {
             "type": "number",
             "minimum": 60.0,
@@ -6466,6 +6493,23 @@
             "default": 0.8,
             "examples": [
               0.8
+            ]
+          },
+          "replan_pv_deviation_w": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replan Pv Deviation W",
+            "description": "Fork: mean PV power of the last complete slot (PV production meters) differs from the forecast by more than this [W] -> run. None = off.",
+            "examples": [
+              null,
+              1500.0
             ]
           },
           "replan_min_interval_sec": {
@@ -6887,6 +6931,16 @@
             "description": "Enable export-aware GENETIC optimization. Sale revenues remain those of the configured feed-in provider or explicit forecast; purchase prices never replace them.",
             "default": false
           },
+          "zero_at_negative_price": {
+            "type": "boolean",
+            "title": "Zero At Negative Price",
+            "description": "Fork: no feed-in compensation while the raw market price is negative (Germany: plants commissioned from 2025-02-25, \u00a7 51 EEG). The optimizer then values feed-in in these slots at 0 and moves flexible loads there.",
+            "default": false,
+            "examples": [
+              false,
+              true
+            ]
+          },
           "provider": {
             "anyOf": [
               {
@@ -6935,6 +6989,16 @@
             "title": "Direct Marketing Enabled",
             "description": "Enable export-aware GENETIC optimization. Sale revenues remain those of the configured feed-in provider or explicit forecast; purchase prices never replace them.",
             "default": false
+          },
+          "zero_at_negative_price": {
+            "type": "boolean",
+            "title": "Zero At Negative Price",
+            "description": "Fork: no feed-in compensation while the raw market price is negative (Germany: plants commissioned from 2025-02-25, \u00a7 51 EEG). The optimizer then values feed-in in these slots at 0 and moves flexible loads there.",
+            "default": false,
+            "examples": [
+              false,
+              true
+            ]
           },
           "provider": {
             "anyOf": [
@@ -9983,6 +10047,32 @@
             "title": "Humidity Pct",
             "description": "Fork: highest relative humidity of the monitored rooms now [%]."
           },
+          "warning_start": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning Start",
+            "description": "Fork: start of a weather warning; None = none."
+          },
+          "warning_end": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning End",
+            "description": "Fork: end of a weather warning."
+          },
           "reduce_locked_until": {
             "anyOf": [
               {
@@ -11626,6 +11716,9 @@
           "humidity": {
             "$ref": "#/components/schemas/HeatPumpHumiditySettings"
           },
+          "weather_warning": {
+            "$ref": "#/components/schemas/HeatPumpWeatherWarningSettings"
+          },
           "power_limit_w": {
             "anyOf": [
               {
@@ -11702,6 +11795,9 @@
           },
           "humidity": {
             "$ref": "#/components/schemas/HeatPumpHumiditySettings"
+          },
+          "weather_warning": {
+            "$ref": "#/components/schemas/HeatPumpWeatherWarningSettings"
           },
           "power_limit_w": {
             "anyOf": [
@@ -11839,6 +11935,18 @@
             "title": "Measurement Key Humidity",
             "description": "Highest relative humidity of the monitored rooms [%] (humidity protection).",
             "readOnly": true
+          },
+          "measurement_key_warning_start": {
+            "type": "string",
+            "title": "Measurement Key Warning Start",
+            "description": "Unix time a weather warning starts, 0 = none (weather warning).",
+            "readOnly": true
+          },
+          "measurement_key_warning_end": {
+            "type": "string",
+            "title": "Measurement Key Warning End",
+            "description": "Unix time a weather warning ends, 0 = none (weather warning).",
+            "readOnly": true
           }
         },
         "type": "object",
@@ -11861,7 +11969,9 @@
           "measurement_key_dewpoint",
           "measurement_key_room_min_margin",
           "measurement_key_room_max_margin",
-          "measurement_key_humidity"
+          "measurement_key_humidity",
+          "measurement_key_warning_start",
+          "measurement_key_warning_end"
         ],
         "title": "HeatPumpCommonSettings",
         "description": "Heat pump with building, hot water tank and heating rod (RL29 fork)."
@@ -12077,6 +12187,22 @@
             "title": "Rod Max C",
             "description": "Highest tank temperature by the rod [degC].",
             "default": 70.0
+          },
+          "rod_surplus_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rod Surplus C",
+            "description": "Fork: the rod has its own surplus controller (e.g. a PV power diverter reading the grid meter) that heats with PV surplus up to this temperature [degC]. EOS models it: the rod uses the forecast surplus left after the heat pump, so EOS plans no heat pump charge the rod covers anyway. A planned ROD slot (negative prices, legionella) is a boost from the grid that the controller has to start. None = the rod runs only as planned.",
+            "examples": [
+              null,
+              60.0
+            ]
           },
           "legionella_c": {
             "type": "number",
@@ -12504,6 +12630,57 @@
         "type": "object",
         "title": "HeatPumpVentilationSettings",
         "description": "Window ventilation (RL29 fork).\n\nThe controller reports ``<device_id>-window-open``: the share of the monitored\nwindows that are open (0..1). Airing removes heat with ``loss_w_per_k`` times\nthe open share times (room - outdoor temperature). The expected airing per\nhour of day is the profile (open share x hours); the calibration learns it\nfrom the window measurement and takes the measured airing out of the building\nbalance, so ``building.loss_w_per_k`` stays the closed-window loss. Slots with\nopen windows are left out of the plan-versus-actual room comparison.\n\nWith ``recommend`` EOS picks one slot per day in the midday window\n(warmest outdoor temperature, ties by PV surplus) and plans the airing there;\nthe solution column ``<device_id>_ventilate`` is 1 in that slot, for a\nnotification."
+      },
+      "HeatPumpWeatherWarningSettings": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Build up a heat reserve before weather warnings.",
+            "default": false
+          },
+          "raise_room_k": {
+            "type": "number",
+            "maximum": 3.0,
+            "minimum": 0.0,
+            "title": "Raise Room K",
+            "description": "Raise of the comfort minimum during the warning [K].",
+            "default": 1.0,
+            "examples": [
+              1.0
+            ]
+          },
+          "dhw_min_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dhw Min C",
+            "description": "Hot water minimum during the warning [degC]; None = unchanged. At most what the heat pump reaches.",
+            "default": 50.0,
+            "examples": [
+              50.0,
+              null
+            ]
+          },
+          "max_hours": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Max Hours",
+            "description": "Longest warning period that is applied, from its start [h].",
+            "default": 48.0,
+            "examples": [
+              48.0
+            ]
+          }
+        },
+        "type": "object",
+        "title": "HeatPumpWeatherWarningSettings",
+        "description": "Heat reserve before a weather warning (fork).\n\nA storm, ice or frost warning can mean a power cut. The controller reports the\nwarned period as ``<device_id>-warning-start-ts`` and ``<device_id>-warning-end-ts``\n(Unix times, 0 = no warning; e.g. from the DWD warnings in Home Assistant).\nFor the slots in this period the comfort minimum rises by ``raise_room_k`` (at most\nto the comfort maximum) and the hot water minimum to ``dhw_min_c``, so EOS charges\nthe building and the tank beforehand, in the cheapest hours before the warning.\nWhile away with hot water off only the room part applies."
       },
       "HeatPumpZoneSetbackSettings-Input": {
         "properties": {

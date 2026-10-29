@@ -50,6 +50,18 @@ class FeedInTariffCommonSettings(SettingsBaseModel):
         ),
     )
 
+    zero_at_negative_price: bool = Field(
+        default=False,
+        json_schema_extra={
+            "description": (
+                "Fork: no feed-in compensation while the raw market price is negative "
+                "(Germany: plants commissioned from 2025-02-25, § 51 EEG). The optimizer "
+                "then values feed-in in these slots at 0 and moves flexible loads there."
+            ),
+            "examples": [False, True],
+        },
+    )
+
     provider: Optional[str] = Field(
         default=None,
         json_schema_extra={

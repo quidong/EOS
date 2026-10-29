@@ -111,10 +111,28 @@ class ElecPriceProvider(PricePredictionProviderBase[ElecPriceDataRecord]):
         Returns:
             pd.Series: Gross electricity price (amount/Wh), same index as `raw_amt_wh`.
         """
-        return (
-            (raw_amt_wh + df_fee["elecfee_consumption_amt_wh"])
-            * (100.0 + df_fee["elecfee_consumption_percent_amt"])
-            / 100.0
+        fee = df_fee["elecfee_consumption_amt_wh"] + self._module3_import_delta_wh(df_fee.index)
+        return (raw_amt_wh + fee) * (100.0 + df_fee["elecfee_consumption_percent_amt"]) / 100.0
+
+    def _module3_import_delta_wh(self, index: Any) -> Any:
+        """§14a module 3 for imported fees that do not contain it (fork) [amount/Wh].
+
+        The fixed fee provider applies module 3 itself; imported fees are taken as they
+        are unless ``elecfee.elecfeeimport.module3_included`` is False.
+        """
+        elecfee = self.config.elecfee
+        grid_14a = elecfee.grid_control_14a
+        if (
+            elecfee.provider != "ElecFeeImport"
+            or elecfee.elecfeeimport.module3_included
+            or grid_14a.module != "module1_3"
+        ):
+            return 0.0
+        from akkudoktoreos.utils.datetimeutil import to_datetime
+
+        return pd.Series(
+            [grid_14a.module3_delta_amt_kwh(to_datetime(ts)) / 1000.0 for ts in index],
+            index=index,
         )
 
     # --- RL29 fork: ML forecast of the hours after the published prices ------

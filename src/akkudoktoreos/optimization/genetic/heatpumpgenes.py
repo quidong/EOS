@@ -201,6 +201,14 @@ class GeneticHeatPumpParameters(GeneticParametersBaseModel):
             "description": "Fork: highest relative humidity of the monitored rooms now [%]."
         },
     )
+    warning_start: Optional[DateTime] = Field(
+        default=None,
+        json_schema_extra={"description": "Fork: start of a weather warning; None = none."},
+    )
+    warning_end: Optional[DateTime] = Field(
+        default=None,
+        json_schema_extra={"description": "Fork: end of a weather warning."},
+    )
     reduce_locked_until: Optional[DateTime] = Field(
         default=None,
         json_schema_extra={
@@ -926,6 +934,12 @@ def build_run_plan(
     if not inputs:
         raise ValueError("Heat pump run plan needs at least one slot.")
 
+    # Rod in surplus mode (fork): the PV surplus it may use per slot.
+    if settings.dhw.rod_surplus_c is not None and settings.dhw.rod_power_w > 0 and pv_surplus_w:
+        for i, slot_input in enumerate(inputs):
+            if i < len(pv_surplus_w):
+                slot_input.pv_surplus_w = max(0.0, float(pv_surplus_w[i]))
+
     # Cooling season: cooling target and band, dew point, PV-only budget.
     cooling = settings.cooling
     cooling_season = bool(parameters.cooling_season and cooling.enabled)
@@ -989,6 +1003,8 @@ def build_run_plan(
         parameters, slot_starts, slot_hours, inputs, away_slots, pv_surplus_w
     )
     _apply_room_limits_and_humidity(parameters, slot_hours, inputs, away_slots)
+
+    _apply_weather_warning(parameters, slot_starts, inputs, system)
 
     # Manual lock of the reduction (fork): the controller holds NORMAL until then.
     lock_until = parameters.reduce_locked_until
@@ -1325,6 +1341,43 @@ def _apply_room_limits_and_humidity(
             parameters.device_id,
             value,
             humidity.max_pct,
+            count,
+        )
+
+
+def _apply_weather_warning(
+    parameters: GeneticHeatPumpParameters,
+    slot_starts: list[Any],
+    inputs: list[SlotInputs],
+    system: Any,
+) -> None:
+    """Heat reserve for the slots of a weather warning (fork)."""
+    settings = parameters.settings.weather_warning
+    start, end = parameters.warning_start, parameters.warning_end
+    if not settings.enabled or start is None or end is None:
+        return
+    begin = start.timestamp()
+    stop = min(end.timestamp(), begin + settings.max_hours * 3600.0)
+    reachable = system.reachable_dhw_c(tuple(parameters.settings.optimization.heating_modes))
+    dhw = parameters.settings.dhw
+    if dhw.rod_power_w > 0 and dhw.rod_targets_c:
+        reachable = max(reachable, max(dhw.rod_targets_c))
+    count = 0
+    for slot_start, slot_input in zip(slot_starts, inputs):
+        moment = slot_start.timestamp()
+        if moment < begin or moment >= stop or slot_input.cooling_season:
+            continue
+        low, _, high = system.comfort_band(slot_input)
+        slot_input.comfort_min_c = min(low + settings.raise_room_k, high)
+        if settings.dhw_min_c is not None and not slot_input.dhw_off:
+            slot_input.dhw_min_c = max(system.dhw.min_c, min(settings.dhw_min_c, reachable))
+        count += 1
+    if count:
+        logger.info(
+            "Heat pump {}: weather warning {} - {}, heat reserve in {} slots.",
+            parameters.device_id,
+            start.isoformat(),
+            end.isoformat(),
             count,
         )
 

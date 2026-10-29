@@ -40,7 +40,8 @@
            },
            "elecfeeimport": {
                "import_file_path": null,
-               "import_json": null
+               "import_json": null,
+               "module3_included": true
            },
            "grid_control_14a": {
                "module": "none",
@@ -83,7 +84,8 @@
            },
            "elecfeeimport": {
                "import_file_path": null,
-               "import_json": null
+               "import_json": null,
+               "module3_included": true
            },
            "grid_control_14a": {
                "module": "none",
@@ -242,6 +244,7 @@
 | ---- | ---- | --------- | ------- | ----------- |
 | import_file_path | `Union[str, pathlib.Path, NoneType]` | `rw` | `None` | Path to the file to import elecfee data from. |
 | import_json | `Optional[str]` | `rw` | `None` | JSON string, dictionary of electricity fee forecast value lists. |
+| module3_included | `bool` | `rw` | `True` | Fork: the imported consumption fees already contain the §14a module 3 network price. False = EOS adds the module 3 band price (elecfee.grid_control_14a.module3_network_amt_kwh) like the fixed provider. |
 :::
 <!-- pyml enable line-length -->
 
@@ -255,7 +258,8 @@
        "elecfee": {
            "elecfeeimport": {
                "import_file_path": null,
-               "import_json": "{\"elecfee_consumption_amt_wh\": [0.0003384, 0.0003318, 0.0003284]}"
+               "import_json": "{\"elecfee_consumption_amt_wh\": [0.0003384, 0.0003318, 0.0003284]}",
+               "module3_included": true
            }
        }
    }

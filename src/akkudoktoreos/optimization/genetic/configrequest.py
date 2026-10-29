@@ -90,6 +90,22 @@ def planned_soc_percentage(ems: Any, device_id: str, moment: Any) -> Optional[in
         return None
 
 
+def zero_tariff_at_negative_price(tariffs: list[float], raw_prices: list[float]) -> list[float]:
+    """Feed-in tariff 0 where the raw market price is negative (fork, § 51 EEG).
+
+    Slots without a raw price keep their tariff.
+    """
+    result = list(tariffs)
+    zeroed = 0
+    for i, price in enumerate(raw_prices[: len(result)]):
+        if price is not None and math.isfinite(price) and price < 0 and result[i] != 0.0:
+            result[i] = 0.0
+            zeroed += 1
+    if zeroed:
+        logger.info("Feed-in: no compensation in {} slots with negative market price.", zeroed)
+    return result
+
+
 class ConfigOptimizationRequest(
     ConfigMixin, MeasurementMixin, PredictionMixin, GeneticParametersBaseModel
 ):
@@ -274,6 +290,9 @@ class ConfigOptimizationRequest(
         load = await forecast(supplied.total_load, "loadforecast_power_w", energy=True)
         prices = await forecast(supplied.electricity_price_per_wh, "elecprice_marketprice_wh")
         tariffs = await forecast(supplied.feed_in_tariff_per_wh, "feed_in_tariff_wh")
+        if supplied.feed_in_tariff_per_wh is None and config.feedintariff.zero_at_negative_price:
+            raw = await forecast(None, "elecprice_marketprice_raw_wh")
+            tariffs = zero_tariff_at_negative_price(tariffs, raw)
         length = min(len(pv), len(load), len(prices), len(tariffs))
         if not length:
             raise ValueError("Forecast series must be nonempty.")
@@ -771,8 +790,38 @@ class ConfigOptimizationRequest(
                 device.device_id,
                 lock_until.isoformat(),
             )
+        # Weather warning (fork): start and end as Unix times, 0 = none.
+        warning_start: Optional[DateTime] = None
+        warning_end: Optional[DateTime] = None
+        if device.weather_warning.enabled:
+            begin = await self._latest_measurement(
+                device.measurement_key_warning_start, observation_time, 3 * 24 * 3600
+            )
+            stop = await self._latest_measurement(
+                device.measurement_key_warning_end, observation_time, 3 * 24 * 3600
+            )
+            if (
+                begin is not None
+                and stop is not None
+                and math.isfinite(begin)
+                and math.isfinite(stop)
+                and begin > 0
+                and stop > begin
+                and stop > observation_time.timestamp()
+            ):
+                tz = self.config.general.timezone
+                warning_start = to_datetime(begin, in_timezone=tz)
+                warning_end = to_datetime(stop, in_timezone=tz)
+                logger.info(
+                    "Heat pump {}: weather warning {} - {}.",
+                    device.device_id,
+                    warning_start.isoformat(),
+                    warning_end.isoformat(),
+                )
         return GeneticHeatPumpParameters(
             device_id=device.device_id,
+            warning_start=warning_start,
+            warning_end=warning_end,
             reduce_locked_until=lock_until,
             room_min_margin_k=min_margin,
             room_max_margin_k=max_margin,

@@ -15,7 +15,7 @@ optional: without the corresponding configuration the fork behaves like upstream
 | Forecasts | Base load from own meter and LightGBM, PV ensemble, price forecast after day-ahead | {doc}`forecasts` |
 | History | Forecasts, plans and actuals in PostgreSQL/TimescaleDB; accuracy and cost endpoints | {doc}`history` |
 | Access | Secrets never leave the REST API; MCP server with token and write allow-list | {doc}`mcp` |
-| Grid fees | §14a EnWG modules 1, 2 and 1+3 (time-variable grid fee) | {doc}`heatpump` |
+| Grid fees | §14a EnWG modules 1, 2 and 1+3 (time-variable grid fee); no feed-in tariff at negative prices | {doc}`heatpump` |
 
 ## Container image
 
