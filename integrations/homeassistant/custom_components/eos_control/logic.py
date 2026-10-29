@@ -323,8 +323,11 @@ def _room_figures(data: ControlInput, settings: Settings, decision: Decision) ->
     if considered:
         zone = _zone_active(data)
         # Margins against the limits valid now (EOS applies them until the return).
+        # While away the heat pump may cool the house down to the holiday floor
+        # (standby), so the margin is taken against that floor.
         decision.room_min_margin_k = min(
-            r.temperature - _lower_limit(r, data, settings, zone)  # type: ignore[operator]
+            r.temperature  # type: ignore[operator]
+            - (settings.holiday_floor_c if data.holiday else _lower_limit(r, data, settings, zone))
             for r in considered
         )
         decision.room_max_margin_k = min(
