@@ -759,8 +759,21 @@ class ConfigOptimizationRequest(
             )
             if value is not None and math.isfinite(value) and 0.0 <= value <= 100.0:
                 humidity = value
+        # Manual lock of the reduction (fork): Unix time, 0 or past = no lock.
+        lock_until: Optional[DateTime] = None
+        value = await self._latest_measurement(
+            device.measurement_key_reduce_lock_until, observation_time, 7 * 24 * 3600
+        )
+        if value is not None and math.isfinite(value) and value > observation_time.timestamp():
+            lock_until = to_datetime(value, in_timezone=self.config.general.timezone)
+            logger.info(
+                "Heat pump {}: reduction locked until {}.",
+                device.device_id,
+                lock_until.isoformat(),
+            )
         return GeneticHeatPumpParameters(
             device_id=device.device_id,
+            reduce_locked_until=lock_until,
             room_min_margin_k=min_margin,
             room_max_margin_k=max_margin,
             humidity_pct=humidity,

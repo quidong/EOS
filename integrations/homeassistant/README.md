@@ -57,7 +57,8 @@ Options flow: every step can be changed later; no restart needed.
 Measurements (only those that are mapped): `<id>-room-temperature` (mean), `<id>-dhw-temperature`,
 `<id>-room-min-margin`, `<id>-room-max-margin` (rooms with open windows or within the run-on left
 out), `<id>-humidity` (highest), `<id>-window-open` (share), holiday (`<id>-away`, `<id>-return-ts`,
-`<id>-away-room-temperature`, `<id>-away-min-temperature`), calibration values.
+`<id>-away-room-temperature`, `<id>-away-min-temperature`), calibration values, and the end of a manual
+lock of the reduction (`<id>-reduce-lock-until-ts`, so EOS plans NORMAL until then).
 
 ## Execution and safety
 
@@ -68,7 +69,8 @@ out), `<id>-humidity` (highest), `<id>-window-open` (share), holiday (`<id>-away
 - Watchdogs for timed contacts (hot water push, SG contact 2); time logic in the actuator stays
   recommended.
 - Emergency stop: main switch off when rooms stay too cold/warm (holiday: own limit).
-- Holiday: standby while EOS plans REDUCED without hot water; lowers the hot water setpoints
+- Holiday: standby as EOS plans it (`<id>_standby`; older EOS: REDUCED without hot water), never
+  below the holiday room floor and as a reserve when the plan is missing; lowers the hot water setpoints
   (normal must stay above reduced) and restores them before a planned charge and at the return.
 - All timestamps and counters are restored after a Home Assistant restart; restart time stamps of
   window sensors do not count as airing.

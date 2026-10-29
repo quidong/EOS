@@ -255,6 +255,9 @@ class SlotInputs:
     """Leaving standby starts a hot water charge to this temperature, which the heat
     pump does on every restart and which cannot be switched off (RL29 fork); None =
     no charge on restart."""
+    reduce_locked: bool = False
+    """The controller does not reduce in this slot (fork), e.g. a manual lock after a
+    complaint: REDUCED runs as NORMAL and the heat pump does not go into standby."""
 
 
 @dataclass
@@ -332,6 +335,8 @@ class HeatPumpSystem:
 
     def _room_target(self, mode: HeatingMode, inputs: "SlotInputs") -> float:
         low, setpoint, high = self.comfort_band(inputs)
+        if mode == HeatingMode.REDUCED and inputs.reduce_locked:
+            mode = HeatingMode.NORMAL
         if mode == HeatingMode.REDUCED:
             return min(low + REPAIR_MARGIN_K, setpoint)
         if mode == HeatingMode.NORMAL:
@@ -459,6 +464,9 @@ class HeatPumpSystem:
         """
         dt = self.dt
         notes: list[str] = []
+        if inputs.reduce_locked and heating_mode == HeatingMode.REDUCED:
+            # Reduction locked by the controller (fork): it holds NORMAL instead.
+            heating_mode = HeatingMode.NORMAL
         gains = self.slot_gains_w(inputs)
         if inputs.ventilation_w_per_k > 0:
             # Airing: an extra loss of the room node, linearised at the slot start.

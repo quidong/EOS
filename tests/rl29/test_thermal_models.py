@@ -334,7 +334,7 @@ class TestSettings:
         assert isinstance(sim, HeatPumpSystem)
         assert sim.dhw.setpoint_c == 45.0
         assert settings.measurement_key_dhw_temperature == "wbb12-dhw-temperature"
-        assert len(settings.measurement_keys) == 9  # 5 state + 4 holiday-mode keys
+        assert len(settings.measurement_keys) == 10  # 5 state + 4 holiday-mode keys + lock
 
     def test_measured_setpoint_overrides_config(self):
         sim = HeatPumpCommonSettings(device_id="x").to_system(0.25, dhw_setpoint_c=48.0)

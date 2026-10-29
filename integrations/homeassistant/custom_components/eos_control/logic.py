@@ -36,6 +36,9 @@ class PlanSlot:
     dhw_mode: Optional[float] = None
     away: bool = False
     zone_setback: bool = False
+    standby: Optional[bool] = None
+    """Heat pump in standby according to EOS (``<device>_standby``); None = older EOS
+    without the column, the standby is then derived from REDUCED without hot water."""
 
 
 @dataclass
@@ -88,6 +91,7 @@ def parse_plan(solution: dict[str, Any], device_id: str) -> Plan:
                 dhw_mode=_number(row.get(f"{device_id}_dhw_mode")),
                 away=(_number(row.get(f"{device_id}_away")) or 0.0) >= 0.5,
                 zone_setback=(_number(row.get(f"{device_id}_zone_setback")) or 0.0) >= 0.5,
+                standby=_flag(row.get(f"{device_id}_standby")),
             )
         )
     if slots and all(s.heating_mode is None for s in slots):
@@ -219,8 +223,7 @@ def decide(data: ControlInput, settings: Settings) -> Decision:
         )
     elif not data.heating_season:
         decision.reason = "NORMAL: not in heating operation"
-    else:
-        assert mode is not None
+    elif mode is not None:  # always set when fresh
         if data.holiday and mode <= NORMAL:
             sg = 1
         else:
@@ -251,6 +254,14 @@ def decide(data: ControlInput, settings: Settings) -> Decision:
         dhw_planned = bool(slot is not None and (slot.dhw_mode or 0) >= 0.5)
         if too_cold:
             decision.standby_reason = f"no standby: coldest room {min(temps):.1f} degC < {settings.holiday_floor_c:.1f} degC"
+        elif eos_ok and slot is not None and slot.standby is not None:
+            decision.standby = slot.standby
+            decision.standby_reason = (
+                "standby: EOS plans standby"
+                if decision.standby
+                else f"no standby: EOS plans {_mode_name(mode)}"
+                + (" with hot water" if dhw_planned else "")
+            )
         elif eos_ok:
             decision.standby = mode == REDUCED and not dhw_planned
             decision.standby_reason = (
@@ -370,6 +381,11 @@ def _number(value: Any) -> Optional[float]:
     except (TypeError, ValueError):
         return None
     return result if math.isfinite(result) else None
+
+
+def _flag(value: Any) -> Optional[bool]:
+    number = _number(value)
+    return None if number is None else number >= 0.5
 
 
 def _round(value: Optional[float], digits: int = 1) -> Optional[float]:

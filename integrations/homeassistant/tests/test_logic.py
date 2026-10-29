@@ -20,7 +20,9 @@ TZ = timezone(timedelta(hours=1))
 NOW = datetime(2026, 11, 2, 10, 7, tzinfo=TZ)
 
 
-def solution(modes, dhw=None, away=None, zone=None, generated=NOW - timedelta(minutes=5)):
+def solution(
+    modes, dhw=None, away=None, zone=None, standby=None, generated=NOW - timedelta(minutes=5)
+):
     start = NOW.replace(minute=0)
     data = {}
     for i, mode in enumerate(modes):
@@ -30,6 +32,8 @@ def solution(modes, dhw=None, away=None, zone=None, generated=NOW - timedelta(mi
             row["hp1_away"] = float(away[i])
         if zone is not None:
             row["hp1_zone_setback"] = float(zone[i])
+        if standby is not None:
+            row["hp1_standby"] = float(standby[i])
         data[t] = row
     return {"generated_at": generated.isoformat(), "solution": {"data": data}}
 
@@ -42,7 +46,7 @@ def rooms(*temps, lower=19.5, upper=23.5, **kw):
 
 
 def run(modes, room_list=None, settings=None, **kw):
-    plan_kw = {k: kw.pop(k) for k in ("dhw", "away", "zone", "generated") if k in kw}
+    plan_kw = {k: kw.pop(k) for k in ("dhw", "away", "zone", "standby", "generated") if k in kw}
     data = logic.ControlInput(
         now=kw.pop("now", NOW),
         plan=logic.parse_plan(solution(modes, **plan_kw), "hp1"),
@@ -193,6 +197,25 @@ def test_holiday_hot_water_charge_restores_setpoints_first():
     assert soon.standby and soon.dhw_setpoints_restore and not soon.dhw_charge
     now = holiday([0] * 4, dhw=[1] * 4)
     assert not now.standby and now.dhw_charge
+
+
+def test_holiday_standby_from_the_eos_column():
+    """EOS states the standby itself: REDUCED near the floor is no standby."""
+    d = holiday([0] * 4, standby=[1] * 4)
+    assert d.standby and d.standby_reason == "standby: EOS plans standby"
+    near_floor = holiday([0] * 4, standby=[0] * 4)
+    assert not near_floor.standby and "EOS plans REDUCED" in near_floor.standby_reason
+    # the room floor of the controller still wins over the plan
+    cold = holiday([0] * 4, standby=[1] * 4, temps=(15.8, 18.0))
+    assert not cold.standby
+    # without the column (older EOS): derived from REDUCED without hot water
+    assert holiday([0] * 4).standby_reason == "standby: EOS plans REDUCED without hot water"
+
+
+def test_parse_plan_standby_column():
+    plan = logic.parse_plan(solution([0, 0], standby=[1, 0]), "hp1")
+    assert [s.standby for s in plan.slots] == [True, False]
+    assert logic.parse_plan(solution([0]), "hp1").slots[0].standby is None
 
 
 def test_hot_water_outside_holiday():
