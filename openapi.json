@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610272087950431"
+    "version": "v0.3.0.dev2610290948644614"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -9944,6 +9944,44 @@
             ],
             "title": "Window Open Share",
             "description": "RL29 fork: share of the monitored windows open now (0..1)."
+          },
+          "room_min_margin_k": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Room Min Margin K",
+            "description": "Fork: smallest margin of a room above its own lower limit now [K]; None = not reported."
+          },
+          "room_max_margin_k": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Room Max Margin K",
+            "description": "Fork: smallest margin of a room below its own upper limit now [K]; None = not reported."
+          },
+          "humidity_pct": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Humidity Pct",
+            "description": "Fork: highest relative humidity of the monitored rooms now [%]."
           }
         },
         "additionalProperties": false,
@@ -11569,6 +11607,12 @@
           "ventilation": {
             "$ref": "#/components/schemas/HeatPumpVentilationSettings"
           },
+          "room_limits": {
+            "$ref": "#/components/schemas/HeatPumpRoomLimitsSettings"
+          },
+          "humidity": {
+            "$ref": "#/components/schemas/HeatPumpHumiditySettings"
+          },
           "power_limit_w": {
             "anyOf": [
               {
@@ -11639,6 +11683,12 @@
           },
           "ventilation": {
             "$ref": "#/components/schemas/HeatPumpVentilationSettings"
+          },
+          "room_limits": {
+            "$ref": "#/components/schemas/HeatPumpRoomLimitsSettings"
+          },
+          "humidity": {
+            "$ref": "#/components/schemas/HeatPumpHumiditySettings"
           },
           "power_limit_w": {
             "anyOf": [
@@ -11752,6 +11802,24 @@
             "title": "Measurement Key Dewpoint",
             "description": "Room dew point [degC].",
             "readOnly": true
+          },
+          "measurement_key_room_min_margin": {
+            "type": "string",
+            "title": "Measurement Key Room Min Margin",
+            "description": "Smallest margin of a room above its lower limit [K] (room limits).",
+            "readOnly": true
+          },
+          "measurement_key_room_max_margin": {
+            "type": "string",
+            "title": "Measurement Key Room Max Margin",
+            "description": "Smallest margin of a room below its upper limit [K] (room limits).",
+            "readOnly": true
+          },
+          "measurement_key_humidity": {
+            "type": "string",
+            "title": "Measurement Key Humidity",
+            "description": "Highest relative humidity of the monitored rooms [%] (humidity protection).",
+            "readOnly": true
           }
         },
         "type": "object",
@@ -11770,7 +11838,10 @@
           "measurement_key_away_min_temperature",
           "measurement_key_setback_room_temperature",
           "measurement_key_window_open",
-          "measurement_key_dewpoint"
+          "measurement_key_dewpoint",
+          "measurement_key_room_min_margin",
+          "measurement_key_room_max_margin",
+          "measurement_key_humidity"
         ],
         "title": "HeatPumpCommonSettings",
         "description": "Heat pump with building, hot water tank and heating rod (RL29 fork)."
@@ -12035,6 +12106,45 @@
         "title": "HeatPumpDhwSettings",
         "description": "Domestic hot water tank, heat pump setpoint and heating rod."
       },
+      "HeatPumpHumiditySettings": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Hold the room temperature while humidity is high.",
+            "default": false
+          },
+          "max_pct": {
+            "type": "number",
+            "maximum": 100.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Max Pct",
+            "description": "Relative humidity from which the rooms are held warm [%].",
+            "default": 65.0,
+            "examples": [
+              65.0,
+              70.0
+            ]
+          },
+          "hold_hours": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Hold Hours",
+            "description": "How long a high reading applies from now [h].",
+            "default": 2.0
+          },
+          "max_drop_k": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Max Drop K",
+            "description": "Allowed drop below the NORMAL setpoint while humidity is high [K].",
+            "default": 0.5
+          }
+        },
+        "type": "object",
+        "title": "HeatPumpHumiditySettings",
+        "description": "Humidity protection (fork).\n\nWhile the relative humidity ``<device_id>-humidity`` (the highest of the\nmonitored rooms, %) is at or above ``max_pct``, REDUCED must not cool the rooms\ndown (cold walls with high humidity grow mould): for the next ``hold_hours`` the\ncomfort minimum is at most ``max_drop_k`` below the NORMAL setpoint. A debounced\nflag from the controller (100 = high, 0 = normal) works as well."
+      },
       "HeatPumpOptimizationSettings": {
         "properties": {
           "heating_modes": {
@@ -12151,6 +12261,39 @@
         "type": "object",
         "title": "HeatPumpOptimizationSettings",
         "description": "How the optimizer may operate the heat pump and what deviations cost."
+      },
+      "HeatPumpRoomLimitsSettings": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Use the room margins reported by the controller.",
+            "default": false
+          },
+          "horizon_hours": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Horizon Hours",
+            "description": "How long the measured margins apply from now [h].",
+            "default": 6.0,
+            "examples": [
+              6.0
+            ]
+          },
+          "max_raise_k": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Max Raise K",
+            "description": "Largest increase of the comfort minimum by a cold room [K]; limits the effect of a room that is cold by design.",
+            "default": 2.0,
+            "examples": [
+              2.0
+            ]
+          }
+        },
+        "type": "object",
+        "title": "HeatPumpRoomLimitsSettings",
+        "description": "Per-room limits reported by the controller (fork).\n\nEOS models one room node, the mean of all rooms. Single rooms can be colder or\nwarmer than the mean. The controller knows the rooms and their own limits and\nreports two margins (rooms with open windows or just aired left out):\n\n- ``<device_id>-room-min-margin``: smallest ``room - lower limit of the room`` [K];\n- ``<device_id>-room-max-margin``: smallest ``upper limit of the room - room`` [K].\n\nFor the first ``horizon_hours`` the rooms are assumed to move with the mean: the\ncomfort minimum of the mean becomes at least ``room now - min margin`` (at most\n``max_raise_k`` above the band and not above the NORMAL setpoint), the comfort\nmaximum and the RAISED target at most ``room now + max margin`` (not below the\nNORMAL setpoint). Both measurements are optional."
       },
       "HeatPumpUnitSettings": {
         "properties": {

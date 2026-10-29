@@ -866,6 +866,85 @@ class HeatPumpVentilationSettings(SettingsBaseModel):
         return self.loss_w_per_k * self.open_hours(start) if self.enabled else 0.0
 
 
+class HeatPumpRoomLimitsSettings(SettingsBaseModel):
+    """Per-room limits reported by the controller (fork).
+
+    EOS models one room node, the mean of all rooms. Single rooms can be colder or
+    warmer than the mean. The controller knows the rooms and their own limits and
+    reports two margins (rooms with open windows or just aired left out):
+
+    - ``<device_id>-room-min-margin``: smallest ``room - lower limit of the room`` [K];
+    - ``<device_id>-room-max-margin``: smallest ``upper limit of the room - room`` [K].
+
+    For the first ``horizon_hours`` the rooms are assumed to move with the mean: the
+    comfort minimum of the mean becomes at least ``room now - min margin`` (at most
+    ``max_raise_k`` above the band and not above the NORMAL setpoint), the comfort
+    maximum and the RAISED target at most ``room now + max margin`` (not below the
+    NORMAL setpoint). Both measurements are optional.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        json_schema_extra={"description": "Use the room margins reported by the controller."},
+    )
+    horizon_hours: float = Field(
+        default=6.0,
+        gt=0,
+        json_schema_extra={
+            "description": "How long the measured margins apply from now [h].",
+            "examples": [6.0],
+        },
+    )
+    max_raise_k: float = Field(
+        default=2.0,
+        ge=0,
+        json_schema_extra={
+            "description": (
+                "Largest increase of the comfort minimum by a cold room [K]; limits the "
+                "effect of a room that is cold by design."
+            ),
+            "examples": [2.0],
+        },
+    )
+
+
+class HeatPumpHumiditySettings(SettingsBaseModel):
+    """Humidity protection (fork).
+
+    While the relative humidity ``<device_id>-humidity`` (the highest of the
+    monitored rooms, %) is at or above ``max_pct``, REDUCED must not cool the rooms
+    down (cold walls with high humidity grow mould): for the next ``hold_hours`` the
+    comfort minimum is at most ``max_drop_k`` below the NORMAL setpoint. A debounced
+    flag from the controller (100 = high, 0 = normal) works as well.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        json_schema_extra={"description": "Hold the room temperature while humidity is high."},
+    )
+    max_pct: float = Field(
+        default=65.0,
+        gt=0,
+        le=100,
+        json_schema_extra={
+            "description": "Relative humidity from which the rooms are held warm [%].",
+            "examples": [65.0, 70.0],
+        },
+    )
+    hold_hours: float = Field(
+        default=2.0,
+        gt=0,
+        json_schema_extra={"description": "How long a high reading applies from now [h]."},
+    )
+    max_drop_k: float = Field(
+        default=0.5,
+        ge=0,
+        json_schema_extra={
+            "description": "Allowed drop below the NORMAL setpoint while humidity is high [K]."
+        },
+    )
+
+
 class HeatPumpCalibrationSettings(SettingsBaseModel):
     """Automatic calibration of the model from measured operation (RL29 fork).
 
@@ -1088,6 +1167,8 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
     away: HeatPumpAwaySettings = Field(default_factory=HeatPumpAwaySettings)
     zone_setback: HeatPumpZoneSetbackSettings = Field(default_factory=HeatPumpZoneSetbackSettings)
     ventilation: HeatPumpVentilationSettings = Field(default_factory=HeatPumpVentilationSettings)
+    room_limits: HeatPumpRoomLimitsSettings = Field(default_factory=HeatPumpRoomLimitsSettings)
+    humidity: HeatPumpHumiditySettings = Field(default_factory=HeatPumpHumiditySettings)
     power_limit_w: Optional[ValueTimeWindowSequence] = Field(
         default=None,
         json_schema_extra={
@@ -1153,6 +1234,10 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
             keys.append(self.measurement_key_setback_room_temperature)
         if self.ventilation.enabled:
             keys.append(self.measurement_key_window_open)
+        if self.room_limits.enabled:
+            keys += [self.measurement_key_room_min_margin, self.measurement_key_room_max_margin]
+        if self.humidity.enabled:
+            keys.append(self.measurement_key_humidity)
         if self.calibration.enabled:
             keys += [k for k in self.calibration_measurement_keys.values() if k not in keys]
         return keys
@@ -1222,6 +1307,24 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
     def measurement_key_dewpoint(self) -> str:
         """Room dew point [degC]."""
         return f"{self.device_id}-dewpoint"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def measurement_key_room_min_margin(self) -> str:
+        """Smallest margin of a room above its lower limit [K] (room limits)."""
+        return f"{self.device_id}-room-min-margin"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def measurement_key_room_max_margin(self) -> str:
+        """Smallest margin of a room below its upper limit [K] (room limits)."""
+        return f"{self.device_id}-room-max-margin"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def measurement_key_humidity(self) -> str:
+        """Highest relative humidity of the monitored rooms [%] (humidity protection)."""
+        return f"{self.device_id}-humidity"
 
     # ------------------------------------------------------------------
     # Conversion
