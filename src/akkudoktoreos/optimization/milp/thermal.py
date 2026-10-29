@@ -212,7 +212,8 @@ def thermal_block(plan: "HeatPumpRunPlan") -> Optional[ThermalBlock]:
         reducible = HeatingMode.REDUCED in allowed and not slot.reduce_locked
         room_floor.append(None if reducible else min(targets))
         room_ceiling.append(max(targets) + REPAIR_MARGIN_K)
-        tank_floor.append(None if slot.dhw_off else max(system.dhw.min_c, switch_on - 0.5))
+        dhw_min = slot.dhw_min_c if slot.dhw_min_c is not None else system.dhw.min_c
+        tank_floor.append(None if slot.dhw_off else max(dhw_min, switch_on - 0.5))
         max_el.append(slot.max_electric_w)
 
     deadline = plan.legionella_deadline_slot

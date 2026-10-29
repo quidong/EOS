@@ -224,6 +224,7 @@
                            70.0
                        ],
                        "rod_max_c": 70.0,
+                       "rod_surplus_c": null,
                        "legionella_c": 60.0,
                        "legionella_interval_days": 7,
                        "draw_profile_wh": [
@@ -484,6 +485,12 @@
                        "hold_hours": 2.0,
                        "max_drop_k": 0.5
                    },
+                   "weather_warning": {
+                       "enabled": false,
+                       "raise_room_k": 1.0,
+                       "dhw_min_c": 50.0,
+                       "max_hours": 48.0
+                   },
                    "power_limit_w": null
                }
            },
@@ -507,7 +514,8 @@
            },
            "elecfeeimport": {
                "import_file_path": null,
-               "import_json": null
+               "import_json": null,
+               "module3_included": true
            },
            "grid_control_14a": {
                "module": "none",
@@ -567,11 +575,13 @@
            "replan_on_deviation": true,
            "replan_soc_deviation_pct": 10.0,
            "replan_temperature_deviation_k": 0.8,
+           "replan_pv_deviation_w": null,
            "replan_min_interval_sec": 300.0,
            "notify_url": null
        },
        "feedintariff": {
            "direct_marketing_enabled": false,
+           "zero_at_negative_price": false,
            "provider": "FeedInTariffFixed",
            "feedintarifffixed": {
                "feed_in_tariff_amt_kwh": {

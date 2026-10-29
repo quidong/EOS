@@ -286,6 +286,20 @@ class HeatPumpDhwSettings(SettingsBaseModel):
         default=70.0,
         json_schema_extra={"description": "Highest tank temperature by the rod [degC]."},
     )
+    rod_surplus_c: Optional[float] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "Fork: the rod has its own surplus controller (e.g. a PV power diverter "
+                "reading the grid meter) that heats with PV surplus up to this temperature "
+                "[degC]. EOS models it: the rod uses the forecast surplus left after the "
+                "heat pump, so EOS plans no heat pump charge the rod covers anyway. A "
+                "planned ROD slot (negative prices, legionella) is a boost from the grid "
+                "that the controller has to start. None = the rod runs only as planned."
+            ),
+            "examples": [None, 60.0],
+        },
+    )
     legionella_c: float = Field(
         default=60.0, json_schema_extra={"description": "Legionella protection temperature [degC]."}
     )
@@ -945,6 +959,51 @@ class HeatPumpHumiditySettings(SettingsBaseModel):
     )
 
 
+class HeatPumpWeatherWarningSettings(SettingsBaseModel):
+    """Heat reserve before a weather warning (fork).
+
+    A storm, ice or frost warning can mean a power cut. The controller reports the
+    warned period as ``<device_id>-warning-start-ts`` and ``<device_id>-warning-end-ts``
+    (Unix times, 0 = no warning; e.g. from the DWD warnings in Home Assistant).
+    For the slots in this period the comfort minimum rises by ``raise_room_k`` (at most
+    to the comfort maximum) and the hot water minimum to ``dhw_min_c``, so EOS charges
+    the building and the tank beforehand, in the cheapest hours before the warning.
+    While away with hot water off only the room part applies.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        json_schema_extra={"description": "Build up a heat reserve before weather warnings."},
+    )
+    raise_room_k: float = Field(
+        default=1.0,
+        ge=0,
+        le=3,
+        json_schema_extra={
+            "description": "Raise of the comfort minimum during the warning [K].",
+            "examples": [1.0],
+        },
+    )
+    dhw_min_c: Optional[float] = Field(
+        default=50.0,
+        json_schema_extra={
+            "description": (
+                "Hot water minimum during the warning [degC]; None = unchanged. At most "
+                "what the heat pump reaches."
+            ),
+            "examples": [50.0, None],
+        },
+    )
+    max_hours: float = Field(
+        default=48.0,
+        gt=0,
+        json_schema_extra={
+            "description": "Longest warning period that is applied, from its start [h].",
+            "examples": [48.0],
+        },
+    )
+
+
 class HeatPumpCalibrationSettings(SettingsBaseModel):
     """Automatic calibration of the model from measured operation (RL29 fork).
 
@@ -1169,6 +1228,9 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
     ventilation: HeatPumpVentilationSettings = Field(default_factory=HeatPumpVentilationSettings)
     room_limits: HeatPumpRoomLimitsSettings = Field(default_factory=HeatPumpRoomLimitsSettings)
     humidity: HeatPumpHumiditySettings = Field(default_factory=HeatPumpHumiditySettings)
+    weather_warning: HeatPumpWeatherWarningSettings = Field(
+        default_factory=HeatPumpWeatherWarningSettings
+    )
     power_limit_w: Optional[ValueTimeWindowSequence] = Field(
         default=None,
         json_schema_extra={
@@ -1239,6 +1301,8 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
             keys += [self.measurement_key_room_min_margin, self.measurement_key_room_max_margin]
         if self.humidity.enabled:
             keys.append(self.measurement_key_humidity)
+        if self.weather_warning.enabled:
+            keys += [self.measurement_key_warning_start, self.measurement_key_warning_end]
         if self.calibration.enabled:
             keys += [k for k in self.calibration_measurement_keys.values() if k not in keys]
         return keys
@@ -1332,6 +1396,18 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
     def measurement_key_humidity(self) -> str:
         """Highest relative humidity of the monitored rooms [%] (humidity protection)."""
         return f"{self.device_id}-humidity"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def measurement_key_warning_start(self) -> str:
+        """Unix time a weather warning starts, 0 = none (weather warning)."""
+        return f"{self.device_id}-warning-start-ts"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def measurement_key_warning_end(self) -> str:
+        """Unix time a weather warning ends, 0 = none (weather warning)."""
+        return f"{self.device_id}-warning-end-ts"
 
     # ------------------------------------------------------------------
     # Conversion
@@ -1428,6 +1504,7 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
                 min_c=dhw.min_c,
                 rod_power_w=dhw.rod_power_w,
                 rod_max_c=dhw.rod_max_c,
+                rod_surplus_c=dhw.rod_surplus_c,
                 raised_setpoint_c=dhw.raised_setpoint_c,
                 forced_setpoint_c=dhw.forced_setpoint_c,
             ),

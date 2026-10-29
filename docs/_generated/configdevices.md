@@ -204,6 +204,7 @@ config path from ``self.device_id`` without needing an external index.
                            70.0
                        ],
                        "rod_max_c": 70.0,
+                       "rod_surplus_c": null,
                        "legionella_c": 60.0,
                        "legionella_interval_days": 7,
                        "draw_profile_wh": [
@@ -463,6 +464,12 @@ config path from ``self.device_id`` without needing an external index.
                        "max_pct": 65.0,
                        "hold_hours": 2.0,
                        "max_drop_k": 0.5
+                   },
+                   "weather_warning": {
+                       "enabled": false,
+                       "raise_room_k": 1.0,
+                       "dhw_min_c": 50.0,
+                       "max_hours": 48.0
                    },
                    "power_limit_w": null
                }
@@ -684,6 +691,7 @@ config path from ``self.device_id`` without needing an external index.
                            70.0
                        ],
                        "rod_max_c": 70.0,
+                       "rod_surplus_c": null,
                        "legionella_c": 60.0,
                        "legionella_interval_days": 7,
                        "draw_profile_wh": [
@@ -944,6 +952,12 @@ config path from ``self.device_id`` without needing an external index.
                        "hold_hours": 2.0,
                        "max_drop_k": 0.5
                    },
+                   "weather_warning": {
+                       "enabled": false,
+                       "raise_room_k": 1.0,
+                       "dhw_min_c": 50.0,
+                       "max_hours": 48.0
+                   },
                    "power_limit_w": null,
                    "measurement_key_room_temperature": "wbb12-room-temperature",
                    "measurement_key_slab_temperature": "wbb12-slab-temperature",
@@ -985,7 +999,9 @@ config path from ``self.device_id`` without needing an external index.
                    "measurement_key_dewpoint": "wbb12-dewpoint",
                    "measurement_key_room_min_margin": "wbb12-room-min-margin",
                    "measurement_key_room_max_margin": "wbb12-room-max-margin",
-                   "measurement_key_humidity": "wbb12-humidity"
+                   "measurement_key_humidity": "wbb12-humidity",
+                   "measurement_key_warning_start": "wbb12-warning-start-ts",
+                   "measurement_key_warning_end": "wbb12-warning-end-ts"
                }
            },
            "max_heat_pumps": 1,

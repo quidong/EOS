@@ -15,6 +15,7 @@
 | provider | `EOS_FEEDINTARIFF__PROVIDER` | `Optional[str]` | `rw` | `None` | Feed in tariff provider id of provider to be used. |
 | providers | | `list[str]` | `ro` | `N/A` | Available feed in tariff provider ids. |
 | smard | `EOS_FEEDINTARIFF__SMARD` | `FeedInTariffSMARDCommonSettings` | `rw` | `required` | SMARD feed in tariff provider settings. |
+| zero_at_negative_price | `EOS_FEEDINTARIFF__ZERO_AT_NEGATIVE_PRICE` | `bool` | `rw` | `False` | Fork: no feed-in compensation while the raw market price is negative (Germany: plants commissioned from 2025-02-25, § 51 EEG). The optimizer then values feed-in in these slots at 0 and moves flexible loads there. |
 :::
 <!-- pyml enable line-length -->
 
@@ -27,6 +28,7 @@
    {
        "feedintariff": {
            "direct_marketing_enabled": false,
+           "zero_at_negative_price": false,
            "provider": "FeedInTariffFixed",
            "feedintarifffixed": {
                "feed_in_tariff_amt_kwh": {
@@ -59,6 +61,7 @@
    {
        "feedintariff": {
            "direct_marketing_enabled": false,
+           "zero_at_negative_price": false,
            "provider": "FeedInTariffFixed",
            "feedintarifffixed": {
                "feed_in_tariff_amt_kwh": {

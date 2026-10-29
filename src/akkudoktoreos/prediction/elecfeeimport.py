@@ -34,6 +34,18 @@ class ElecFeeImportCommonSettings(SettingsBaseModel):
         },
     )
 
+    module3_included: bool = Field(
+        default=True,
+        json_schema_extra={
+            "description": (
+                "Fork: the imported consumption fees already contain the §14a module 3 "
+                "network price. False = EOS adds the module 3 band price "
+                "(elecfee.grid_control_14a.module3_network_amt_kwh) like the fixed provider."
+            ),
+            "examples": [True, False],
+        },
+    )
+
     # Validators
     @field_validator("import_file_path", mode="after")
     @classmethod

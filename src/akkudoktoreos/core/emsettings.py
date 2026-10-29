@@ -120,6 +120,18 @@ class EnergyManagementCommonSettings(SettingsBaseModel):
         },
     )
 
+    replan_pv_deviation_w: Optional[float] = Field(
+        default=None,
+        gt=0,
+        json_schema_extra={
+            "description": (
+                "Fork: mean PV power of the last complete slot (PV production meters) "
+                "differs from the forecast by more than this [W] -> run. None = off."
+            ),
+            "examples": [None, 1500.0],
+        },
+    )
+
     replan_min_interval_sec: float = Field(
         default=300.0,
         ge=60.0,

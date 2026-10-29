@@ -62,6 +62,9 @@ EOS re-plans every `ems.interval` seconds with fresh measurements. The fork adds
 - `ems.replan_on_deviation: true`: between slot starts, re-plan at once when the battery SoC deviates by more
   than `replan_soc_deviation_pct` (10 points), the room by more than `replan_temperature_deviation_k` (0.8 K) or
   the hot water by four times that, at most every `replan_min_interval_sec` (300 s).
+- `ems.replan_pv_deviation_w` (optional, e.g. 1500 W): re-plan as well when the mean PV power of the last
+  complete slot (`measurement.pv_production_emr_keys`, interpolated meter readings) differs from the forecast
+  the plan used by more than this.
 
 ## 15-minute slots
 

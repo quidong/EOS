@@ -12,6 +12,9 @@ Checked on every poll (``ems.interval``):
   ``replan_soc_deviation_pct`` percentage points apart,
 - heat pump room and hot water temperature: more than ``replan_temperature_deviation_k``
   apart from the planned value of the current slot,
+- PV (optional, ``replan_pv_deviation_w``): mean PV power of the last complete slot from
+  the PV production meters vs. the forecast the plan used. Clouds the forecast did not
+  see (or sun it did not expect) change what should run in the next slots.
 
 New day-ahead prices need no trigger: prices are fetched in every run, and with
 ``run_on_slot_start`` that is at most one slot after their publication.
@@ -107,4 +110,79 @@ async def deviation_reasons(ems: Any, now: Any) -> list[str]:
             # Hot water swings with every draw; only a larger drop matters.
             thresholds[name] = limit if label == "room" else 4 * limit
     reasons.extend(compare(planned, measured, thresholds))
+    pv_limit = getattr(settings, "replan_pv_deviation_w", None)
+    if pv_limit is not None:
+        reasons.extend(await _pv_deviation(ems, solution, measurement, now, float(pv_limit)))
     return reasons
+
+
+async def _pv_deviation(
+    ems: Any, solution: Any, measurement: Any, now: Any, limit_w: float
+) -> list[str]:
+    """PV of the last complete slot: measured (meters) vs. planned mean power."""
+    keys = list(ems.config.measurement.pv_production_emr_keys or [])
+    if not keys:
+        return []
+    frame = solution.prediction.to_dataframe() if solution.prediction is not None else None
+    if frame is None or "pvforecast_ac_energy_wh" not in frame.columns or len(frame) < 2:
+        return []
+    step = (frame.index[1] - frame.index[0]).total_seconds()
+    if step <= 0:
+        return []
+    moment = now.timestamp()
+    slot_start = moment - (moment - frame.index[0].timestamp()) % step - step
+    planned_wh = _plan_value(frame, "pvforecast_ac_energy_wh", slot_start)
+    if planned_wh is None:
+        return []
+    start = now.subtract(seconds=moment - slot_start)
+    measured_kwh = 0.0
+    for key in keys:
+        energy = await _meter_energy_kwh(measurement, key, start, step)
+        if energy is None:
+            return []  # missing readings: do not guess
+        measured_kwh += energy
+    hours = step / 3600.0
+    planned_w = planned_wh / hours
+    measured_w = measured_kwh * 1000.0 / hours
+    return compare({"PV W": planned_w}, {"PV W": measured_w}, {"PV W": limit_w})
+
+
+async def _meter_energy_kwh(
+    measurement: Any, key: str, start: Any, seconds: float
+) -> Optional[float]:
+    """Energy of a cumulative meter [kWh] between ``start`` and ``start + seconds``.
+
+    The readings are interpolated linearly at both ends; a missing reading on either
+    side, or a meter that ran backwards, gives None.
+    """
+    t0 = start.timestamp()
+    t1 = t0 + seconds
+    try:
+        dates, values = await measurement.key_to_lists(
+            key=key,
+            start_datetime=start.subtract(seconds=seconds),
+            end_datetime=start.add(seconds=2 * seconds),
+        )
+    except Exception:
+        return None
+    points = sorted(
+        (d.timestamp(), float(v))
+        for d, v in zip(dates, values)
+        if v is not None and math.isfinite(float(v))
+    )
+    first = _interpolate(points, t0)
+    second = _interpolate(points, t1)
+    if first is None or second is None or second < first:
+        return None
+    return second - first
+
+
+def _interpolate(points: list[tuple[float, float]], moment: float) -> Optional[float]:
+    before = [p for p in points if p[0] <= moment]
+    after = [p for p in points if p[0] >= moment]
+    if not before or not after:
+        return None
+    (ta, va), (tb, vb) = before[-1], after[0]
+    if tb == ta:
+        return va
+    return va + (vb - va) * (moment - ta) / (tb - ta)

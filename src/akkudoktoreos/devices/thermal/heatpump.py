@@ -177,6 +177,10 @@ class DhwControlParameters:
     rod_max_c: float = 70.0
     """Highest tank temperature the rod may reach [degC]."""
 
+    rod_surplus_c: Optional[float] = None
+    """Fork: the rod controller (e.g. a PV power diverter) heats on its own with PV
+    surplus up to this temperature; None = the rod runs only as planned (ROD)."""
+
     raised_setpoint_c: Optional[float] = None
     """Hot water setpoint while heating is RAISED (SG Ready 3); None = unchanged."""
 
@@ -255,6 +259,12 @@ class SlotInputs:
     """Leaving standby starts a hot water charge to this temperature, which the heat
     pump does on every restart and which cannot be switched off (RL29 fork); None =
     no charge on restart."""
+    pv_surplus_w: float = 0.0
+    """Forecast PV surplus (PV minus household load) of the slot [W] (fork): what a rod
+    in surplus mode may use after the heat pump."""
+    dhw_min_c: Optional[float] = None
+    """Hot water minimum of this slot (fork, e.g. raised before a weather warning);
+    None = the tank's ``min_c``."""
     reduce_locked: bool = False
     """The controller does not reduce in this slot (fork), e.g. a manual lock after a
     complaint: REDUCED runs as NORMAL and the heat pump does not go into standby."""
@@ -632,6 +642,18 @@ class HeatPumpSystem:
         hp_el_w += cool_w / eer
         in_standby = stays_standby and hp_dhw_w <= 0 and space_w <= 0
         hp_el_w += self.off_w if in_standby else self.hp.standby_w
+        if (
+            rod_w <= 0
+            and self.dhw.rod_surplus_c is not None
+            and self.dhw.rod_power_w > 0
+            and inputs.pv_surplus_w > 0
+            and state.dhw_c < self.dhw.rod_surplus_c
+        ):
+            # Rod in surplus mode (fork): its own controller uses the PV surplus left
+            # after the heat pump, up to its temperature limit.
+            free_w = max(0.0, inputs.pv_surplus_w - hp_el_w)
+            need = self.tank.heat_to_reach(state.dhw_c, self.dhw.rod_surplus_c, inputs.draw_wh)
+            rod_w = min(self.dhw.rod_power_w, free_w, max(0.0, need))
         if cool_w > 0:
             _, flow = self._space_cool_capacity_w(state.slab_c, inputs.dewpoint_c)
 
@@ -646,7 +668,8 @@ class HeatPumpSystem:
 
         comfort_violation = max(0.0, inputs.comfort_min_c - room) * dt
         overheat = max(0.0, room - self.comfort_band(inputs)[2]) * dt
-        dhw_violation = 0.0 if inputs.dhw_off else max(0.0, self.dhw.min_c - dhw) * dt
+        dhw_min = inputs.dhw_min_c if inputs.dhw_min_c is not None else self.dhw.min_c
+        dhw_violation = 0.0 if inputs.dhw_off else max(0.0, dhw_min - dhw) * dt
 
         return SlotResult(
             state=ThermalState(
