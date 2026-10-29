@@ -245,9 +245,9 @@ def test_room_figures():
 
 
 def test_margins_use_the_limits_valid_now():
-    """Holiday: margin against the holiday limit (reduced setpoint - 1), not 19.5."""
+    """Holiday: margin against the holiday floor (standby down to it), not 19.5."""
     d = holiday([0] * 4, temps=(17.5, 18.0))
-    assert d.room_min_margin_k == pytest.approx(0.5)  # 17.5 - (18.0 - 1)
+    assert d.room_min_margin_k == pytest.approx(1.5)  # 17.5 - 16.0
     # set-back zone: rooms in the zone against the reduced setpoint - 1
     zone_rooms = rooms(18.5, lower=19.5, in_zone=True) + rooms(21.0)
     z = run([1] * 4, zone_rooms, zone=[1] * 4, reduced_setpoint_c=19.0)
