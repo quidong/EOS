@@ -251,6 +251,9 @@ boost from the grid (negative prices, legionella) that the controller has to sta
 diverter's boost or setpoint input. The MILP model plans without this rod; its final check uses the
 model above.
 
+Rods with relay stages instead of stepless control: `dhw.rod_power_steps_w` (e.g. `[1000, 2000, 3000]`).
+In surplus mode the rod then uses the highest stage the surplus covers, never a partial stage.
+
 ## Weather warnings
 
 `weather_warning` (`enabled`, `raise_room_k` 1 K, `dhw_min_c` 50 °C, `max_hours` 48): the controller

@@ -58,6 +58,11 @@ config path from ``self.device_id`` without needing an external index.
                        0.9,
                        1.0
                    ],
+                   "weather_reserve": {
+                       "enabled": false,
+                       "min_soc_percentage": 50,
+                       "max_hours": 48.0
+                   },
                    "min_soc_percentage": 0,
                    "max_soc_percentage": 100,
                    "grid_export_rates": [
@@ -95,6 +100,11 @@ config path from ``self.device_id`` without needing an external index.
                        0.9,
                        1.0
                    ],
+                   "weather_reserve": {
+                       "enabled": false,
+                       "min_soc_percentage": 50,
+                       "max_hours": 48.0
+                   },
                    "min_soc_percentage": 0,
                    "max_soc_percentage": 100,
                    "grid_export_rates": [
@@ -204,6 +214,7 @@ config path from ``self.device_id`` without needing an external index.
                            70.0
                        ],
                        "rod_max_c": 70.0,
+                       "rod_power_steps_w": null,
                        "rod_surplus_c": null,
                        "legionella_c": 60.0,
                        "legionella_interval_days": 7,
@@ -512,6 +523,11 @@ config path from ``self.device_id`` without needing an external index.
                        0.9,
                        1.0
                    ],
+                   "weather_reserve": {
+                       "enabled": false,
+                       "min_soc_percentage": 50,
+                       "max_hours": 48.0
+                   },
                    "min_soc_percentage": 0,
                    "max_soc_percentage": 100,
                    "grid_export_rates": [
@@ -527,12 +543,16 @@ config path from ``self.device_id`` without needing an external index.
                    "measurement_key_power_l2_w": "bat0-power-l2-w",
                    "measurement_key_power_l3_w": "bat0-power-l3-w",
                    "measurement_key_power_3_phase_sym_w": "bat0-power-3-phase-sym-w",
+                   "measurement_key_power_limited": "bat0-power-limited",
+                   "measurement_key_warning_start": "bat0-warning-start-ts",
+                   "measurement_key_warning_end": "bat0-warning-end-ts",
                    "measurement_keys": [
                        "bat0-soc-factor",
                        "bat0-power-l1-w",
                        "bat0-power-l2-w",
                        "bat0-power-l3-w",
-                       "bat0-power-3-phase-sym-w"
+                       "bat0-power-3-phase-sym-w",
+                       "bat0-power-limited"
                    ]
                }
            },
@@ -561,6 +581,11 @@ config path from ``self.device_id`` without needing an external index.
                        0.9,
                        1.0
                    ],
+                   "weather_reserve": {
+                       "enabled": false,
+                       "min_soc_percentage": 50,
+                       "max_hours": 48.0
+                   },
                    "min_soc_percentage": 0,
                    "max_soc_percentage": 100,
                    "grid_export_rates": [
@@ -576,12 +601,16 @@ config path from ``self.device_id`` without needing an external index.
                    "measurement_key_power_l2_w": "ev0-power-l2-w",
                    "measurement_key_power_l3_w": "ev0-power-l3-w",
                    "measurement_key_power_3_phase_sym_w": "ev0-power-3-phase-sym-w",
+                   "measurement_key_power_limited": "ev0-power-limited",
+                   "measurement_key_warning_start": "ev0-warning-start-ts",
+                   "measurement_key_warning_end": "ev0-warning-end-ts",
                    "measurement_keys": [
                        "ev0-soc-factor",
                        "ev0-power-l1-w",
                        "ev0-power-l2-w",
                        "ev0-power-l3-w",
-                       "ev0-power-3-phase-sym-w"
+                       "ev0-power-3-phase-sym-w",
+                       "ev0-power-limited"
                    ]
                }
            },
@@ -691,6 +720,7 @@ config path from ``self.device_id`` without needing an external index.
                            70.0
                        ],
                        "rod_max_c": 70.0,
+                       "rod_power_steps_w": null,
                        "rod_surplus_c": null,
                        "legionella_c": 60.0,
                        "legionella_interval_days": 7,
@@ -1011,11 +1041,13 @@ config path from ``self.device_id`` without needing an external index.
                "bat0-power-l2-w",
                "bat0-power-l3-w",
                "bat0-power-3-phase-sym-w",
+               "bat0-power-limited",
                "ev0-soc-factor",
                "ev0-power-l1-w",
                "ev0-power-l2-w",
                "ev0-power-l3-w",
                "ev0-power-3-phase-sym-w",
+               "ev0-power-limited",
                "dishwasher.cycles_completed",
                "wbb12-room-temperature",
                "wbb12-slab-temperature",

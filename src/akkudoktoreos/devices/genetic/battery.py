@@ -95,7 +95,41 @@ class BaseBatteryParameters(DeviceParameters):
     )
 
 
-class SolarPanelBatteryParameters(BaseBatteryParameters):
+class _GridControlFields(DeviceParameters):
+    """Fork: §14a dimming and weather reserve, resolved from measurements per run."""
+
+    power_limited_w: Optional[float] = Field(
+        default=None,
+        gt=0,
+        json_schema_extra={
+            "description": (
+                "Fork: §14a dimming active now - grid charging limited to this power [W] "
+                "for 'power_limited_hours'. None = not dimmed."
+            )
+        },
+    )
+    power_limited_hours: float = Field(
+        default=1.0,
+        gt=0,
+        json_schema_extra={"description": "Fork: assumed duration of the dimming from now [h]."},
+    )
+    reserve_min_soc_percentage: Optional[int] = Field(
+        default=None,
+        ge=0,
+        le=100,
+        json_schema_extra={
+            "description": "Fork: state of charge to hold during a weather warning [%]."
+        },
+    )
+    reserve_start: Optional[DateTime] = Field(
+        default=None, json_schema_extra={"description": "Fork: start of the weather warning."}
+    )
+    reserve_end: Optional[DateTime] = Field(
+        default=None, json_schema_extra={"description": "Fork: end of the weather warning."}
+    )
+
+
+class SolarPanelBatteryParameters(BaseBatteryParameters, _GridControlFields):
     """PV battery device simulation configuration."""
 
     levelized_cost_of_storage_kwh: float = Field(
@@ -112,7 +146,7 @@ class SolarPanelBatteryParameters(BaseBatteryParameters):
     max_charge_power_w: Optional[float] = max_charging_power_field()
 
 
-class ElectricVehicleParameters(BaseBatteryParameters):
+class ElectricVehicleParameters(BaseBatteryParameters, _GridControlFields):
     """Battery Electric Vehicle Device Simulation Configuration."""
 
     device_id: str = Field(

@@ -4,7 +4,6 @@ import ctypes
 import ctypes.util
 import gc
 import math
-from pathlib import Path
 import multiprocessing
 import os
 import random
@@ -14,6 +13,7 @@ from array import array
 from collections import OrderedDict, defaultdict
 from dataclasses import dataclass, field
 from functools import lru_cache
+from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
@@ -419,6 +419,19 @@ class GeneticSimulation(PydanticBaseModel):
     # set per candidate from the heat pump genes. None = no heat pump.
     heat_pump_load_wh: Optional[list[float]] = Field(default=None)
 
+    # Fork: grid connection limits per slot [Wh] (optimization.grid) and the cost of
+    # energy above the import limit [currency/Wh]. None = unlimited.
+    max_grid_export_wh: Optional[float] = Field(default=None)
+    max_grid_import_wh: Optional[float] = Field(default=None)
+    import_excess_penalty_per_wh: float = Field(default=0.001)
+
+    # Fork: §14a dimming - grid energy per slot [Wh] a dimmed battery / EV may draw,
+    # for the first ``*_dimmed_slots`` slots of the run. None = not dimmed.
+    battery_dimmed_wh: Optional[float] = Field(default=None)
+    battery_dimmed_slots: int = Field(default=0)
+    ev_dimmed_wh: Optional[float] = Field(default=None)
+    ev_dimmed_slots: int = Field(default=0)
+
     @property
     def home_appliance(self) -> Optional[HomeAppliance]:
         """Deprecated singular device accessor."""
@@ -518,6 +531,13 @@ class GeneticSimulation(PydanticBaseModel):
         inverter_fast = self.inverter
         direct_marketing_enabled_fast = self.direct_marketing_enabled
         heat_pump_load_fast = self.heat_pump_load_wh
+        max_export_wh_fast = self.max_grid_export_wh
+        max_import_wh_fast = self.max_grid_import_wh
+        import_penalty_fast = self.import_excess_penalty_per_wh
+        battery_dimmed_wh_fast = self.battery_dimmed_wh
+        battery_dimmed_slots_fast = self.battery_dimmed_slots
+        grid_limit_penalty = 0.0
+        curtailed_wh = 0.0
 
         # Check for simulation integrity (in a way that mypy understands)
         if (
@@ -655,6 +675,10 @@ class GeneticSimulation(PydanticBaseModel):
             ev_charge_hours_fast[0:start_hour] = 0
             ev_charge_hours_fast[end_hour:] = 0
             ev_fast.charge_array = ev_charge_hours_fast
+            if self.ev_dimmed_wh is not None:
+                # §14a dimming (fork): the charger may draw at most this much per slot.
+                for slot in range(start_hour, min(end_hour, self.ev_dimmed_slots)):
+                    ev_fast.limit_slot_charge(slot, self.ev_dimmed_wh)
             # Fill the discharge array of the ev
             ev_discharge_hours_fast[0:start_hour] = 0
             ev_discharge_hours_fast[end_hour:] = 0
@@ -802,6 +826,15 @@ class GeneticSimulation(PydanticBaseModel):
                 # No AC charging in this slot (the usual case): nothing to cap.
                 if inverter_fast and ac_charge_factor != 0:
                     ac_charge_factor = inverter_fast.ac_charge_factor(ac_charge_factor)
+                if (
+                    ac_charge_factor > 0.0
+                    and battery_dimmed_wh_fast is not None
+                    and hour < battery_dimmed_slots_fast
+                ):
+                    # §14a dimming (fork): grid charging capped to the dimming power.
+                    full_wh = battery_fast.max_charge_power_w * battery_fast.slot_duration_h
+                    if full_wh > 0:
+                        ac_charge_factor = min(ac_charge_factor, battery_dimmed_wh_fast / full_wh)
 
             if inverter_fast:
                 # Some inverters cap the total charge power with the AC setpoint;
@@ -850,6 +883,21 @@ class GeneticSimulation(PydanticBaseModel):
                 consumption += ac_energy
                 energy_consumption_grid_actual += ac_energy
                 slot_losses += ac_charge_losses
+
+            # Grid connection limits (fork): PV above the feed-in cap is curtailed,
+            # energy above the import cap is penalised.
+            if max_export_wh_fast is not None and energy_feedin_grid_actual > max_export_wh_fast:
+                excess = energy_feedin_grid_actual - max_export_wh_fast
+                energy_feedin_grid_actual = max_export_wh_fast
+                slot_losses += excess
+                curtailed_wh += excess
+            if (
+                max_import_wh_fast is not None
+                and energy_consumption_grid_actual > max_import_wh_fast
+            ):
+                grid_limit_penalty += (
+                    energy_consumption_grid_actual - max_import_wh_fast
+                ) * import_penalty_fast
 
             # Update hourly arrays
             if (
@@ -925,6 +973,8 @@ class GeneticSimulation(PydanticBaseModel):
             "Home_appliance_wh_per_hour": home_appliance_wh_per_hour,
             "Electricity_price": electricity_price_per_hour,
             "Feed_in_tariff": feed_in_tariff_per_hour,
+            "grid_limit_penalty_amt": grid_limit_penalty,
+            "curtailed_wh": curtailed_wh,
         }
         if heat_pump_wh_per_hour is not None:
             result["heat_pump_wh_per_hour"] = np.array(heat_pump_wh_per_hour, dtype=float)
@@ -1291,6 +1341,40 @@ class GeneticOptimization(OptimizationBase):
         start_slot = self._control_start_slot()
         horizon_slots = self._genetic_cfg.horizon_hours * self.slots_per_hour
         return min(self.control_end_slot, start_slot + horizon_slots)
+
+    def _configure_grid_control(self, parameters: GeneticOptimizationParameters) -> None:
+        """Grid connection limits, §14a dimming and weather reserve of a run (fork)."""
+        sim = self.simulation
+        slot_h = self.slot_duration_h
+        grid = self.config.optimization.grid
+        sim.max_grid_export_wh = grid.max_export_w * slot_h if grid.max_export_w else None
+        sim.max_grid_import_wh = grid.max_import_w * slot_h if grid.max_import_w else None
+        sim.import_excess_penalty_per_wh = grid.import_excess_penalty_amt_kwh / 1000.0
+        sim.battery_dimmed_wh = sim.ev_dimmed_wh = None
+        sim.battery_dimmed_slots = sim.ev_dimmed_slots = 0
+        for params, prefix in ((parameters.pv_battery, "battery"), (parameters.ev, "ev")):
+            limit_w = getattr(params, "power_limited_w", None) if params is not None else None
+            if limit_w is None:
+                continue
+            slots = max(1, math.ceil(params.power_limited_hours / slot_h - 1e-9))  # type: ignore[union-attr]
+            setattr(sim, f"{prefix}_dimmed_wh", limit_w * slot_h)
+            setattr(sim, f"{prefix}_dimmed_slots", slots)
+        self._reserve_window: Optional[tuple[int, int, float]] = None
+        battery = parameters.pv_battery
+        if (
+            battery is not None
+            and battery.reserve_min_soc_percentage is not None
+            and battery.reserve_start is not None
+            and battery.reserve_end is not None
+            and self._slot0_datetime is not None
+        ):
+            slot_s = slot_h * 3600.0
+            begin = (battery.reserve_start - self._slot0_datetime).total_seconds() / slot_s
+            end = (battery.reserve_end - self._slot0_datetime).total_seconds() / slot_s
+            first = max(0, math.floor(begin + 1e-9))
+            last = min(self.control_end_slot - 1, math.ceil(end - 1e-9) - 1)
+            if last >= first:
+                self._reserve_window = (first, last, float(battery.reserve_min_soc_percentage))
 
     def _ev_deadline_slot(self, parameters: GeneticOptimizationParameters) -> Optional[int]:
         """Slot index by which the EV has to reach ``min_soc_percentage``.
@@ -3750,6 +3834,36 @@ class GeneticOptimization(OptimizationBase):
             return ev.current_soc_percentage()
         return float(soc_per_slot[max(index, 0)])
 
+    def _reserve_penalty(self, simulation_result: dict[str, Any], start_slot: int) -> float:
+        """Penalty for a battery below its weather reserve in the warned slots (fork).
+
+        The largest shortfall over the warned slots [%] times the penalty
+        ``battery_reserve_miss`` (default 10, like ``ev_soc_miss``).
+        """
+        window = getattr(self, "_reserve_window", None)
+        if window is None:
+            return 0.0
+        first, last, reserve = window
+        soc = simulation_result.get("akku_soc_pro_stunde")
+        if soc is None:
+            return 0.0
+        shortfall = 0.0
+        # SoC at the start of each warned slot and at the end of the last one.
+        for slot in range(max(first, start_slot), last + 1):
+            index = slot - start_slot
+            if index >= len(soc):
+                break
+            value = float(soc[index])
+            if value == value:  # not NaN
+                shortfall = max(shortfall, reserve - value)
+        if shortfall <= 0.0:
+            return 0.0
+        try:
+            penalty = float(self._genetic_cfg.penalties.get("battery_reserve_miss", 10))
+        except Exception:
+            penalty = 10.0
+        return shortfall * penalty
+
     def _evaluate_uncached(
         self,
         individual: list[int],
@@ -3805,6 +3919,10 @@ class GeneticOptimization(OptimizationBase):
         # Heat pump comfort, legionella and switching penalties minus the
         # value of the heat stored at the end of the horizon (RL29 fork).
         gesamtbilanz += getattr(self, "_heat_pump_extra_cost", 0.0)
+        # Grid import above the connection limit (fork).
+        gesamtbilanz += float(simulation_result.get("grid_limit_penalty_amt", 0.0))
+        # Charge reserve during a weather warning (fork).
+        gesamtbilanz += self._reserve_penalty(simulation_result, start_hour)
 
         # New check: Activate discharge when battery SoC is 0
         # battery_soc_per_hour = np.array(
@@ -4472,6 +4590,8 @@ class GeneticOptimization(OptimizationBase):
             home_appliances=home_appliances,
             direct_marketing_enabled=direct_marketing_enabled,
         )
+
+        self._configure_grid_control(parameters)
 
         self._validate_forecast_availability()
 

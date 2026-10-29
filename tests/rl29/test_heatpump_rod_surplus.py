@@ -124,3 +124,22 @@ def test_run_plan_passes_the_surplus_and_avoids_a_heat_pump_charge():
     detail = with_rod.detail or {}
     assert sum(detail["rod_electric_wh"]) > 0
     assert max(detail["dhw_c"]) > 50.0  # the rod charged the tank with surplus
+
+
+def test_rod_power_steps_use_the_highest_covered_step():
+    settings = HeatPumpCommonSettings.model_validate(
+        {
+            "device_id": "hp1",
+            "dhw": {
+                "rod_power_w": 3000.0,
+                "rod_surplus_c": 60.0,
+                "rod_power_steps_w": [3000, 1000, 2000],
+            },
+        }
+    )
+    sys_ = settings.to_system(0.25)
+    assert sys_.dhw.rod_power_steps_w == (1000.0, 2000.0, 3000.0)
+    state = ThermalState(slab_c=22.0, room_c=22.0, dhw_c=46.0)
+    for surplus, expected_w in ((900.0, 0.0), (1500.0, 1000.0), (2600.0, 2000.0), (9000.0, 3000.0)):
+        result = sys_.step(state, slot(surplus), HeatingMode.NORMAL, DhwMode.HOLD)
+        assert result.rod_electric_wh == pytest.approx(expected_w * 0.25, abs=1.0)

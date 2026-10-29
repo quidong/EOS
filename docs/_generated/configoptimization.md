@@ -12,6 +12,7 @@
 | alternate_algorithms | `EOS_OPTIMIZATION__ALTERNATE_ALGORITHMS` | `list[akkudoktoreos.optimization.optimization.OptimizationAlgorithm]` | `rw` | `required` | RL29 fork: A/B operation - when set, the algorithm changes every local day in this order (day number modulo the list length) and `algorithm` is ignored for automatic runs. The history records which algorithm planned each run, so realised costs can be compared. |
 | genetic | `EOS_OPTIMIZATION__GENETIC` | `GeneticCommonSettings` | `rw` | `required` | GENETIC optimization algorithm configuration. |
 | genetic0 | `EOS_OPTIMIZATION__GENETIC0` | `Genetic0CommonSettings` | `rw` | `required` | GENETIC0 optimization algorithm configuration. |
+| grid | `EOS_OPTIMIZATION__GRID` | `GridConnectionSettings` | `rw` | `required` | Fork: grid connection limits (feed-in cap, import cap) for GENETIC and MILP; milp.max_grid_*_w override them for MILP. |
 | keys | | `list[str]` | `ro` | `N/A` | The keys of the solution. |
 | milp | `EOS_OPTIMIZATION__MILP` | `MilpCommonSettings` | `rw` | `required` | MILP optimization configuration (RL29 fork). MILP uses the GENETIC settings (slots, horizons, terminal value) and adds these. |
 | self_consumption_interpolator | `EOS_OPTIMIZATION__SELF_CONSUMPTION_INTERPOLATOR` | `<enum 'GridInterpolatorBackend'>` | `rw` | `scipy` | How the inverter's self-consumption probability table is evaluated [scipy | numpy]. 'scipy' (default) uses scipy.interpolate. 'numpy' gives the same values without importing SciPy, which saves about 35 MB RSS after the first optimization run (useful on devices with little RAM); a run takes about 2.5 % longer. |
@@ -69,6 +70,11 @@
                "load_scenario_spread": null,
                "max_grid_import_w": null,
                "max_grid_export_w": null
+           },
+           "grid": {
+               "max_export_w": null,
+               "max_import_w": null,
+               "import_excess_penalty_amt_kwh": 1.0
            },
            "self_consumption_interpolator": "scipy"
        }
@@ -131,6 +137,11 @@
                "max_grid_import_w": null,
                "max_grid_export_w": null
            },
+           "grid": {
+               "max_export_w": null,
+               "max_import_w": null,
+               "import_excess_penalty_amt_kwh": 1.0
+           },
            "self_consumption_interpolator": "scipy",
            "algorithms": [
                "GENETIC",
@@ -190,6 +201,48 @@
                "load_scenario_spread": null,
                "max_grid_import_w": null,
                "max_grid_export_w": null
+           }
+       }
+   }
+```
+<!-- pyml enable line-length -->
+
+### Limits of the grid connection (fork), used by GENETIC and MILP
+
+``max_export_w``: feed-in cap, e.g. 60 % of the PV peak power for plants without a
+smart meter (Germany, Solarspitzengesetz) or a dynamic export limit. PV above it is
+curtailed and earns nothing, so the optimizer charges the battery (or runs loads)
+during the peak instead of filling it in the morning.
+
+``max_import_w``: import cap (main fuse, contracted power, peak shaving). Energy
+above it costs ``import_excess_penalty_amt_kwh`` on top of the price, so the
+optimizer spreads charging and loads.
+
+<!-- pyml disable line-length -->
+:::{table} optimization::grid
+:widths: 10 10 5 5 30
+:align: left
+
+| Name | Type | Read-Only | Default | Description |
+| ---- | ---- | --------- | ------- | ----------- |
+| import_excess_penalty_amt_kwh | `float` | `rw` | `1.0` | Cost of energy above the import limit [currency/kWh] (GENETIC). |
+| max_export_w | `Optional[float]` | `rw` | `None` | Feed-in limit [W]; None = unlimited. |
+| max_import_w | `Optional[float]` | `rw` | `None` | Import limit [W]; None = unlimited. |
+:::
+<!-- pyml enable line-length -->
+
+<!-- pyml disable no-emphasis-as-heading -->
+**Example Input/Output**
+<!-- pyml enable no-emphasis-as-heading -->
+
+<!-- pyml disable line-length -->
+```json
+   {
+       "optimization": {
+           "grid": {
+               "max_export_w": null,
+               "max_import_w": null,
+               "import_excess_penalty_amt_kwh": 1.0
            }
        }
    }

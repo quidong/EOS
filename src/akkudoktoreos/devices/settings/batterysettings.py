@@ -10,7 +10,7 @@ import numpy as np
 from numpydantic import NDArray, Shape
 from pydantic import Field, computed_field, field_validator, model_validator
 
-from akkudoktoreos.config.configabc import ConfigScope
+from akkudoktoreos.config.configabc import ConfigScope, SettingsBaseModel
 from akkudoktoreos.devices.settings.devicebasesettings import DevicesBaseSettings
 from akkudoktoreos.measurement.batterycapacity import (
     BatteryCapacityEstimate,
@@ -34,6 +34,36 @@ BATTERY_DEFAULT_CHARGE_RATES: list[float] = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 
 
 
 BATTERY_DEFAULT_GRID_EXPORT_RATES: list[float] = [0.25, 0.5, 0.75, 1.0]
+
+
+class BatteryWeatherReserveSettings(SettingsBaseModel):
+    """Charge reserve before a weather warning (fork).
+
+    A storm or ice warning can mean a power cut. The controller reports the warned
+    period as ``<device_id>-warning-start-ts`` and ``<device_id>-warning-end-ts``
+    (Unix times, 0 = none). During this period the GENETIC optimizer keeps the state
+    of charge at or above ``min_soc_percentage`` (it charges beforehand, from PV or
+    in cheap hours). Useful with a backup-capable battery.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        json_schema_extra={"description": "Keep a charge reserve during weather warnings."},
+    )
+    min_soc_percentage: int = Field(
+        default=50,
+        ge=0,
+        le=100,
+        json_schema_extra={
+            "description": "State of charge held during the warning [%].",
+            "examples": [50],
+        },
+    )
+    max_hours: float = Field(
+        default=48.0,
+        gt=0,
+        json_schema_extra={"description": "Longest warning period applied, from its start [h]."},
+    )
 
 
 class BatteriesCommonSettings(DevicesBaseSettings):
@@ -108,6 +138,10 @@ class BatteriesCommonSettings(DevicesBaseSettings):
             ),
             "examples": [[0.0, 0.25, 0.5, 0.75, 1.0], None],
         },
+    )
+    weather_reserve: BatteryWeatherReserveSettings = Field(
+        default_factory=BatteryWeatherReserveSettings,
+        json_schema_extra={"description": "Fork: charge reserve during weather warnings."},
     )
     min_soc_percentage: int = Field(
         default=0,
@@ -357,12 +391,34 @@ class BatteriesCommonSettings(DevicesBaseSettings):
 
     @computed_field  # type: ignore[prop-decorator]
     @property
+    def measurement_key_power_limited(self) -> str:
+        """1 = §14a dimming active now (fork; only for controllable devices)."""
+        return f"{self.device_id}-power-limited"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def measurement_key_warning_start(self) -> str:
+        """Unix time a weather warning starts, 0 = none (fork, weather reserve)."""
+        return f"{self.device_id}-warning-start-ts"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def measurement_key_warning_end(self) -> str:
+        """Unix time a weather warning ends, 0 = none (fork, weather reserve)."""
+        return f"{self.device_id}-warning-end-ts"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
     def measurement_keys(self) -> list[str]:
         """All measurement keys for this battery."""
-        return [
+        keys = [
             self.measurement_key_soc_factor,
             self.measurement_key_power_l1_w,
             self.measurement_key_power_l2_w,
             self.measurement_key_power_l3_w,
             self.measurement_key_power_3_phase_sym_w,
+            self.measurement_key_power_limited,
         ]
+        if self.weather_reserve.enabled:
+            keys += [self.measurement_key_warning_start, self.measurement_key_warning_end]
+        return keys
