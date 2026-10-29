@@ -173,9 +173,8 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             decision.reason = f"{decision.reason} ({error})"
         reference_sg = self._int(self.option(CONF_SG_REFERENCE_ENTITY))
         reference_standby = self._standby_reference()
-        changed = self._compare(now, decision, reference_sg, reference_standby, data.holiday)
-        if changed:
-            await self._store.async_save(self.shadow.as_dict())
+        if self._compare(now, decision, reference_sg, reference_standby, data.holiday):
+            self._store.async_delay_save(self.shadow.as_dict, 30)
         return ControlData(
             decision=decision,
             plan=plan,
@@ -278,7 +277,7 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             return False
         stats = self.shadow
         stats.compared += 1
-        changed = stats.compared % 30 == 0
+        changed = True
         for name, (ours, theirs) in checks.items():
             if ours == theirs:
                 stats.pending.pop(name, None)
@@ -299,6 +298,11 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
                 stats.log = stats.log[-MISMATCH_LOG_SIZE:]
                 changed = True
         return changed
+
+    async def async_save_shadow(self) -> None:
+        """Write the comparison now (unload, restart)."""
+        if self._loaded:
+            await self._store.async_save(self.shadow.as_dict())
 
     async def async_reset_shadow(self) -> None:
         self.shadow = ShadowStats()

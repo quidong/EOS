@@ -337,3 +337,22 @@ async def test_periodic_refresh_and_diagnostics(
     diag = await async_get_config_entry_diagnostics(hass, entry)
     assert diag["entry"][CONF_URL] == "**REDACTED**"
     assert len(diag["rooms"]) == 2
+
+
+async def test_shadow_counts_survive_a_reload(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+):
+    set_rooms(hass)
+    hass.states.async_set("sensor.reference_sg", "1")
+    entry = await setup(
+        hass,
+        aioclient_mock,
+        solution(0),
+        options={CONF_SG_REFERENCE_ENTITY: "sensor.reference_sg"},
+        rooms=ROOMS,
+    )
+    await entry.runtime_data.async_refresh()
+    assert entry.runtime_data.data.shadow.compared == 2
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.runtime_data.data.shadow.compared == 3  # 2 restored + first poll
