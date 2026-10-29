@@ -33,6 +33,45 @@ def optimization_default_algorithm() -> OptimizationAlgorithm:
     return OptimizationAlgorithm.GENETIC
 
 
+class GridConnectionSettings(SettingsBaseModel):
+    """Limits of the grid connection (fork), used by GENETIC and MILP.
+
+    ``max_export_w``: feed-in cap, e.g. 60 % of the PV peak power for plants without a
+    smart meter (Germany, Solarspitzengesetz) or a dynamic export limit. PV above it is
+    curtailed and earns nothing, so the optimizer charges the battery (or runs loads)
+    during the peak instead of filling it in the morning.
+
+    ``max_import_w``: import cap (main fuse, contracted power, peak shaving). Energy
+    above it costs ``import_excess_penalty_amt_kwh`` on top of the price, so the
+    optimizer spreads charging and loads.
+    """
+
+    max_export_w: Optional[float] = Field(
+        default=None,
+        gt=0,
+        json_schema_extra={
+            "description": "Feed-in limit [W]; None = unlimited.",
+            "examples": [None, 6000],
+        },
+    )
+    max_import_w: Optional[float] = Field(
+        default=None,
+        gt=0,
+        json_schema_extra={
+            "description": "Import limit [W]; None = unlimited.",
+            "examples": [None, 11000],
+        },
+    )
+    import_excess_penalty_amt_kwh: float = Field(
+        default=1.0,
+        ge=0,
+        json_schema_extra={
+            "description": "Cost of energy above the import limit [currency/kWh] (GENETIC).",
+            "examples": [1.0],
+        },
+    )
+
+
 class OptimizationCommonSettings(SettingsBaseModel):
     """General Optimization Configuration."""
 
@@ -91,6 +130,16 @@ class OptimizationCommonSettings(SettingsBaseModel):
                 "settings (slots, horizons, terminal value) and adds these."
             ),
             "examples": [{"hp_search_seconds": 20, "polish_generations": 30}],
+        },
+    )
+
+    grid: GridConnectionSettings = Field(
+        default_factory=GridConnectionSettings,
+        json_schema_extra={
+            "description": (
+                "Fork: grid connection limits (feed-in cap, import cap) for GENETIC and MILP; "
+                "milp.max_grid_*_w override them for MILP."
+            )
         },
     )
 

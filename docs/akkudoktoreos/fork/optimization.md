@@ -78,3 +78,26 @@ GENETIC runs grow with the number of slots, reduce `genetic.generations` if need
 battery already sees the tail through its terminal value; the heat pump values stored heat at the horizon end with
 a price quantile. A longer control horizon mainly helps heat storage across days; beyond the published day-ahead
 prices it relies on the price forecast (see {doc}`forecasts`).
+
+## Grid connection limits
+
+`optimization.grid` applies to GENETIC and MILP (`milp.max_grid_*_w` override it for MILP):
+
+- `max_export_w`: feed-in cap, e.g. 60 % of the PV peak power for plants without a smart meter
+  (Germany, Solarspitzengesetz). PV above it is curtailed and earns nothing; the optimizer therefore keeps
+  room in the battery for the midday peak instead of filling it in the morning, and moves loads there.
+- `max_import_w` and `import_excess_penalty_amt_kwh` (1 €/kWh): import cap for the main fuse, contracted
+  power or peak shaving. GENETIC penalises energy above it; MILP treats it as a hard limit (and drops it when
+  the fixed load alone exceeds it).
+
+## Batteries and electric vehicles
+
+- **§14a dimming:** batteries and EVs listed in `elecfee.grid_control_14a.controllable_device_ids` read
+  `<id>-power-limited` (1 = dimmed). From now on, for `dimming_hold_hours`, the EV may draw at most
+  `dimming_power_w` and the battery may grid-charge at most that power (PV charging is not limited). GENETIC
+  only.
+- **Weather reserve:** `devices.batteries.<id>.weather_reserve` (`enabled`, `min_soc_percentage` 50,
+  `max_hours` 48) with `<id>-warning-start-ts` / `<id>-warning-end-ts` (Unix times, 0 = none): the battery
+  is kept at or above the reserve during the warning. The largest shortfall costs
+  `genetic.penalties.battery_reserve_miss` (default 10) per percentage point. GENETIC only.
+

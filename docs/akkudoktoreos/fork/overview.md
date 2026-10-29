@@ -16,6 +16,7 @@ optional: without the corresponding configuration the fork behaves like upstream
 | History | Forecasts, plans and actuals in PostgreSQL/TimescaleDB; accuracy and cost endpoints | {doc}`history` |
 | Access | Secrets never leave the REST API; MCP server with token and write allow-list | {doc}`mcp` |
 | Grid fees | §14a EnWG modules 1, 2 and 1+3 (time-variable grid fee); no feed-in tariff at negative prices | {doc}`heatpump` |
+| Grid and storage | Feed-in and import caps, §14a dimming of batteries and EVs, battery reserve before weather warnings | {doc}`optimization` |
 
 ## Container image
 

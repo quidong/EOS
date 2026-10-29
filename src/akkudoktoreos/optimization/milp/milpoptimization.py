@@ -149,19 +149,18 @@ class MilpOptimization(GeneticOptimization):
             low_load = [o * (1 - load_spread) + f for o, f in zip(base_only, fixed)]
             scenarios = [(0.5, pv, base), (0.25, low_pv, high_load), (0.25, high_pv, low_load)]
         slot_h = self.slot_duration_h
+        grid = self.config.optimization.grid
+        max_import_w = settings.max_grid_import_w or grid.max_import_w
+        max_export_w = settings.max_grid_export_w or grid.max_export_w
         return DispatchInput(
             pv_wh=pv,
             load_wh=base,
             scenarios=scenarios,
             shared_slots=settings.shared_slots,
             max_grid_import_wh=(
-                settings.max_grid_import_w * slot_h
-                if settings.max_grid_import_w and not self._ignore_import_limit
-                else None
+                max_import_w * slot_h if max_import_w and not self._ignore_import_limit else None
             ),
-            max_grid_export_wh=(
-                settings.max_grid_export_w * slot_h if settings.max_grid_export_w else None
-            ),
+            max_grid_export_wh=(max_export_w * slot_h if max_export_w else None),
             price_per_wh=[float(v) for v in sim.elect_price_hourly[:n]],
             feed_in_per_wh=[float(v) for v in sim.elect_revenue_per_hour_arr[:n]],
             battery=battery_model,
@@ -173,6 +172,11 @@ class MilpOptimization(GeneticOptimization):
         )
 
     _ignore_import_limit: bool = False
+
+    def _import_limit_w(self) -> Optional[float]:
+        """Import limit of MILP: its own setting, else optimization.grid (fork)."""
+        return self._milp.max_grid_import_w or self.config.optimization.grid.max_import_w
+
     _thermal_keys: set[tuple[int, ...]] = set()
 
     def _load_spread(self) -> float:
@@ -209,7 +213,7 @@ class MilpOptimization(GeneticOptimization):
             return cached
         result = solve_dispatch(self._dispatch_input(hp_load))
         self._milp_solves += 1
-        if not result.success and self._milp.max_grid_import_w and not self._ignore_import_limit:
+        if not result.success and self._import_limit_w() and not self._ignore_import_limit:
             # The fixed load alone exceeds the import limit: plan without it.
             logger.warning(
                 "MILP: grid import limit not feasible ({}); planning without it.", result.status
@@ -310,11 +314,7 @@ class MilpOptimization(GeneticOptimization):
             data.thermal = [block for block in blocks if block is not None]
             result = solve_dispatch(data)
             self._milp_solves += 1
-            if (
-                not result.success
-                and self._milp.max_grid_import_w
-                and not self._ignore_import_limit
-            ):
+            if not result.success and self._import_limit_w() and not self._ignore_import_limit:
                 self._ignore_import_limit = True
                 data = self._dispatch_input(None)
                 data.thermal = [block for block in blocks if block is not None]

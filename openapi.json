@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610291615605635"
+    "version": "v0.3.0.dev2610291809283053"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -3556,6 +3556,10 @@
               null
             ]
           },
+          "weather_reserve": {
+            "$ref": "#/components/schemas/BatteryWeatherReserveSettings",
+            "description": "Fork: charge reserve during weather warnings."
+          },
           "min_soc_percentage": {
             "type": "integer",
             "maximum": 100.0,
@@ -3803,6 +3807,10 @@
               null
             ]
           },
+          "weather_reserve": {
+            "$ref": "#/components/schemas/BatteryWeatherReserveSettings",
+            "description": "Fork: charge reserve during weather warnings."
+          },
           "min_soc_percentage": {
             "type": "integer",
             "maximum": 100.0,
@@ -3928,6 +3936,24 @@
             "description": "Measurement key for symmetric 3-phase power [W].",
             "readOnly": true
           },
+          "measurement_key_power_limited": {
+            "type": "string",
+            "title": "Measurement Key Power Limited",
+            "description": "1 = \u00a714a dimming active now (fork; only for controllable devices).",
+            "readOnly": true
+          },
+          "measurement_key_warning_start": {
+            "type": "string",
+            "title": "Measurement Key Warning Start",
+            "description": "Unix time a weather warning starts, 0 = none (fork, weather reserve).",
+            "readOnly": true
+          },
+          "measurement_key_warning_end": {
+            "type": "string",
+            "title": "Measurement Key Warning End",
+            "description": "Unix time a weather warning ends, 0 = none (fork, weather reserve).",
+            "readOnly": true
+          },
           "measurement_keys": {
             "items": {
               "type": "string"
@@ -3945,6 +3971,9 @@
           "measurement_key_power_l2_w",
           "measurement_key_power_l3_w",
           "measurement_key_power_3_phase_sym_w",
+          "measurement_key_power_limited",
+          "measurement_key_warning_start",
+          "measurement_key_warning_end",
           "measurement_keys"
         ],
         "title": "BatteriesCommonSettings",
@@ -4168,6 +4197,37 @@
         ],
         "title": "BatteryCapacityRequest",
         "description": "Caller attests both anchors are independent of the capacity being fitted.\n\nEnd is the first confirmed full point when using the default end SoC.\nVoltage/current anchors must be independently established for the chemistry."
+      },
+      "BatteryWeatherReserveSettings": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Keep a charge reserve during weather warnings.",
+            "default": false
+          },
+          "min_soc_percentage": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Min Soc Percentage",
+            "description": "State of charge held during the warning [%].",
+            "default": 50,
+            "examples": [
+              50
+            ]
+          },
+          "max_hours": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Max Hours",
+            "description": "Longest warning period applied, from its start [h].",
+            "default": 48.0
+          }
+        },
+        "type": "object",
+        "title": "BatteryWeatherReserveSettings",
+        "description": "Charge reserve before a weather warning (fork).\n\nA storm or ice warning can mean a power cut. The controller reports the warned\nperiod as ``<device_id>-warning-start-ts`` and ``<device_id>-warning-end-ts``\n(Unix times, 0 = none). During this period the GENETIC optimizer keeps the state\nof charge at or above ``min_soc_percentage`` (it charges beforehand, from PV or\nin cheap hours). Useful with a backup-capable battery."
       },
       "CacheCommonSettings": {
         "properties": {
@@ -5928,6 +5988,66 @@
             "examples": [
               null
             ]
+          },
+          "power_limited_w": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Power Limited W",
+            "description": "Fork: \u00a714a dimming active now - grid charging limited to this power [W] for 'power_limited_hours'. None = not dimmed."
+          },
+          "power_limited_hours": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Power Limited Hours",
+            "description": "Fork: assumed duration of the dimming from now [h].",
+            "default": 1.0
+          },
+          "reserve_min_soc_percentage": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 100.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reserve Min Soc Percentage",
+            "description": "Fork: state of charge to hold during a weather warning [%]."
+          },
+          "reserve_start": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reserve Start",
+            "description": "Fork: start of the weather warning."
+          },
+          "reserve_end": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reserve End",
+            "description": "Fork: end of the weather warning."
           },
           "capacity_wh": {
             "type": "integer",
@@ -10952,6 +11072,57 @@
         ],
         "title": "GesamtlastRequest"
       },
+      "GridConnectionSettings": {
+        "properties": {
+          "max_export_w": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Export W",
+            "description": "Feed-in limit [W]; None = unlimited.",
+            "examples": [
+              null,
+              6000
+            ]
+          },
+          "max_import_w": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Import W",
+            "description": "Import limit [W]; None = unlimited.",
+            "examples": [
+              null,
+              11000
+            ]
+          },
+          "import_excess_penalty_amt_kwh": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Import Excess Penalty Amt Kwh",
+            "description": "Cost of energy above the import limit [currency/kWh] (GENETIC).",
+            "default": 1.0,
+            "examples": [
+              1.0
+            ]
+          }
+        },
+        "type": "object",
+        "title": "GridConnectionSettings",
+        "description": "Limits of the grid connection (fork), used by GENETIC and MILP.\n\n``max_export_w``: feed-in cap, e.g. 60 % of the PV peak power for plants without a\nsmart meter (Germany, Solarspitzengesetz) or a dynamic export limit. PV above it is\ncurtailed and earns nothing, so the optimizer charges the battery (or runs loads)\nduring the peak instead of filling it in the morning.\n\n``max_import_w``: import cap (main fuse, contracted power, peak shaving). Energy\nabove it costs ``import_excess_penalty_amt_kwh`` on top of the price, so the\noptimizer spreads charging and loads."
+      },
       "GridControl14aSettings-Input": {
         "properties": {
           "module": {
@@ -12187,6 +12358,29 @@
             "title": "Rod Max C",
             "description": "Highest tank temperature by the rod [degC].",
             "default": 70.0
+          },
+          "rod_power_steps_w": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rod Power Steps W",
+            "description": "Fork: the rod switches in fixed power steps (relay stages), e.g. [1000, 2000, 3000] W. In surplus mode it uses the highest step the surplus covers. None = stepless (e.g. a PV power diverter).",
+            "examples": [
+              null,
+              [
+                1000,
+                2000,
+                3000
+              ]
+            ]
           },
           "rod_surplus_c": {
             "anyOf": [
@@ -17083,6 +17277,10 @@
               }
             ]
           },
+          "grid": {
+            "$ref": "#/components/schemas/GridConnectionSettings",
+            "description": "Fork: grid connection limits (feed-in cap, import cap) for GENETIC and MILP; milp.max_grid_*_w override them for MILP."
+          },
           "self_consumption_interpolator": {
             "$ref": "#/components/schemas/GridInterpolatorBackend",
             "description": "How the inverter's self-consumption probability table is evaluated [scipy | numpy]. 'scipy' (default) uses scipy.interpolate. 'numpy' gives the same values without importing SciPy, which saves about 35 MB RSS after the first optimization run (useful on devices with little RAM); a run takes about 2.5 % longer.",
@@ -17156,6 +17354,10 @@
                 "polish_generations": 30
               }
             ]
+          },
+          "grid": {
+            "$ref": "#/components/schemas/GridConnectionSettings",
+            "description": "Fork: grid connection limits (feed-in cap, import cap) for GENETIC and MILP; milp.max_grid_*_w override them for MILP."
           },
           "self_consumption_interpolator": {
             "$ref": "#/components/schemas/GridInterpolatorBackend",
@@ -19597,6 +19799,66 @@
             "examples": [
               null
             ]
+          },
+          "power_limited_w": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Power Limited W",
+            "description": "Fork: \u00a714a dimming active now - grid charging limited to this power [W] for 'power_limited_hours'. None = not dimmed."
+          },
+          "power_limited_hours": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Power Limited Hours",
+            "description": "Fork: assumed duration of the dimming from now [h].",
+            "default": 1.0
+          },
+          "reserve_min_soc_percentage": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 100.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reserve Min Soc Percentage",
+            "description": "Fork: state of charge to hold during a weather warning [%]."
+          },
+          "reserve_start": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reserve Start",
+            "description": "Fork: start of the weather warning."
+          },
+          "reserve_end": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reserve End",
+            "description": "Fork: end of the weather warning."
           },
           "capacity_wh": {
             "type": "integer",

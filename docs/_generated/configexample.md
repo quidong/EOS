@@ -78,6 +78,11 @@
                        0.9,
                        1.0
                    ],
+                   "weather_reserve": {
+                       "enabled": false,
+                       "min_soc_percentage": 50,
+                       "max_hours": 48.0
+                   },
                    "min_soc_percentage": 0,
                    "max_soc_percentage": 100,
                    "grid_export_rates": [
@@ -115,6 +120,11 @@
                        0.9,
                        1.0
                    ],
+                   "weather_reserve": {
+                       "enabled": false,
+                       "min_soc_percentage": 50,
+                       "max_hours": 48.0
+                   },
                    "min_soc_percentage": 0,
                    "max_soc_percentage": 100,
                    "grid_export_rates": [
@@ -224,6 +234,7 @@
                            70.0
                        ],
                        "rod_max_c": 70.0,
+                       "rod_power_steps_w": null,
                        "rod_surplus_c": null,
                        "legionella_c": 60.0,
                        "legionella_interval_days": 7,
@@ -722,6 +733,11 @@
                "load_scenario_spread": null,
                "max_grid_import_w": null,
                "max_grid_export_w": null
+           },
+           "grid": {
+               "max_export_w": null,
+               "max_import_w": null,
+               "import_excess_penalty_amt_kwh": 1.0
            },
            "self_consumption_interpolator": "scipy"
        },

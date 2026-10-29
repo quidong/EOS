@@ -211,11 +211,13 @@ class ConfigOptimizationRequest(
             device = groups["batteries"][0]
             battery = device.to_genetic_pv_bat_param()
             battery.initial_soc_percentage = await state(device)
+            await self._grid_control(device, battery, observation_time)
         ev = None
         if groups["electric_vehicles"]:
             device = groups["electric_vehicles"][0]
             ev = device.to_genetic_ev_bat_param()
             ev.initial_soc_percentage = await state(device)
+            await self._grid_control(device, ev, observation_time)
         inverter = None
         if groups["inverters"]:
             device = groups["inverters"][0]
@@ -401,6 +403,56 @@ class ConfigOptimizationRequest(
         if all(value is None for value in temperatures):
             return None
         return temperatures
+
+    async def _grid_control(self, device: Any, params: Any, observation_time: DateTime) -> None:
+        """§14a dimming and weather reserve of a battery or EV from measurements (fork)."""
+        grid_14a = self.config.elecfee.grid_control_14a
+        if grid_14a.is_controllable(device.device_id):
+            limited = await self._latest_measurement(
+                device.measurement_key_power_limited,
+                observation_time,
+                self.config.optimization.genetic.measurement_max_age_seconds,
+            )
+            if limited is not None and limited > 0.5:
+                params.power_limited_w = grid_14a.dimming_power_w
+                params.power_limited_hours = grid_14a.dimming_hold_hours
+                logger.info(
+                    "{}: §14a dimming active, grid charging limited to {} W.",
+                    device.device_id,
+                    grid_14a.dimming_power_w,
+                )
+        reserve = getattr(device, "weather_reserve", None)
+        if reserve is None or not reserve.enabled:
+            return
+        begin = await self._latest_measurement(
+            device.measurement_key_warning_start, observation_time, 3 * 24 * 3600
+        )
+        stop = await self._latest_measurement(
+            device.measurement_key_warning_end, observation_time, 3 * 24 * 3600
+        )
+        if (
+            begin is None
+            or stop is None
+            or not math.isfinite(begin)
+            or not math.isfinite(stop)
+            or begin <= 0
+            or stop <= begin
+            or stop <= observation_time.timestamp()
+        ):
+            return
+        tz = self.config.general.timezone
+        params.reserve_min_soc_percentage = reserve.min_soc_percentage
+        params.reserve_start = to_datetime(begin, in_timezone=tz)
+        params.reserve_end = to_datetime(
+            min(stop, begin + reserve.max_hours * 3600), in_timezone=tz
+        )
+        logger.info(
+            "{}: weather warning, keep {} % from {} to {}.",
+            device.device_id,
+            reserve.min_soc_percentage,
+            params.reserve_start.isoformat(),
+            params.reserve_end.isoformat(),
+        )
 
     async def _appliance_request(self, device: Any, observation_time: DateTime) -> Optional[Any]:
         """Apply a pending request to a request-driven appliance (RL29 fork).

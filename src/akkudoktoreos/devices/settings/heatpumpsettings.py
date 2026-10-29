@@ -286,6 +286,17 @@ class HeatPumpDhwSettings(SettingsBaseModel):
         default=70.0,
         json_schema_extra={"description": "Highest tank temperature by the rod [degC]."},
     )
+    rod_power_steps_w: Optional[list[float]] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "Fork: the rod switches in fixed power steps (relay stages), e.g. "
+                "[1000, 2000, 3000] W. In surplus mode it uses the highest step the "
+                "surplus covers. None = stepless (e.g. a PV power diverter)."
+            ),
+            "examples": [None, [1000, 2000, 3000]],
+        },
+    )
     rod_surplus_c: Optional[float] = Field(
         default=None,
         json_schema_extra={
@@ -1505,6 +1516,11 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
                 rod_power_w=dhw.rod_power_w,
                 rod_max_c=dhw.rod_max_c,
                 rod_surplus_c=dhw.rod_surplus_c,
+                rod_power_steps_w=(
+                    tuple(sorted(float(w) for w in dhw.rod_power_steps_w if w > 0))
+                    if dhw.rod_power_steps_w
+                    else None
+                ),
                 raised_setpoint_c=dhw.raised_setpoint_c,
                 forced_setpoint_c=dhw.forced_setpoint_c,
             ),

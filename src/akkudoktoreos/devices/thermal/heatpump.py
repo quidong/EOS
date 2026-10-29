@@ -177,6 +177,9 @@ class DhwControlParameters:
     rod_max_c: float = 70.0
     """Highest tank temperature the rod may reach [degC]."""
 
+    rod_power_steps_w: Optional[tuple[float, ...]] = None
+    """Fork: rod with fixed power steps (relay stages); None = stepless up to rod_power_w."""
+
     rod_surplus_c: Optional[float] = None
     """Fork: the rod controller (e.g. a PV power diverter) heats on its own with PV
     surplus up to this temperature; None = the rod runs only as planned (ROD)."""
@@ -652,6 +655,9 @@ class HeatPumpSystem:
             # Rod in surplus mode (fork): its own controller uses the PV surplus left
             # after the heat pump, up to its temperature limit.
             free_w = max(0.0, inputs.pv_surplus_w - hp_el_w)
+            if self.dhw.rod_power_steps_w:
+                # Relay stages: the highest stage the surplus covers, no partial power.
+                free_w = max((w for w in self.dhw.rod_power_steps_w if w <= free_w), default=0.0)
             need = self.tank.heat_to_reach(state.dhw_c, self.dhw.rod_surplus_c, inputs.draw_wh)
             rod_w = min(self.dhw.rod_power_w, free_w, max(0.0, need))
         if cool_w > 0:
