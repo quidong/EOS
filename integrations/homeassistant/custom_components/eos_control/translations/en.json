@@ -1,0 +1,152 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "EOS",
+        "data": {
+          "url": "EOS URL",
+          "device_id": "Heat pump device id in EOS",
+          "scan_interval": "Poll interval"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "EOS does not answer at this URL."
+    },
+    "abort": {
+      "already_configured": "This heat pump is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Context entities (all optional)",
+        "data": {
+          "holiday_entity": "Holiday switch",
+          "holiday_return_entity": "Return from holiday",
+          "reduced_setpoint_entity": "Reduced room setpoint of the heating circuit",
+          "heating_season_entity": "Operating mode / heating season",
+          "sg_actual_entity": "Current SG Ready state",
+          "zone_allowed_entity": "Zone set-back allowed",
+          "reduction_lock_entity": "Reduction locked until",
+          "sg_reference_entity": "Shadow comparison: SG target of the existing controller",
+          "standby_reference_entity": "Shadow comparison: operating mode of the heat pump"
+        }
+      },
+      "rules": {
+        "title": "Rules",
+        "data": {
+          "sg_reduced": "SG at REDUCED",
+          "sg_normal": "SG at NORMAL",
+          "sg_raised": "SG at RAISED",
+          "sg_preheat": "SG at PREHEAT",
+          "sg_forced": "SG at FORCED",
+          "plan_max_age_min": "Plan max age",
+          "reduction_hysteresis_k": "Hysteresis to start a reduction",
+          "min_valid_rooms": "Minimum room values",
+          "max_room_c": "No raising from (warmest room)",
+          "airing_run_on_min": "Airing run-on after closing",
+          "holiday_floor_c": "Holiday floor (coldest room)",
+          "holiday_restart_hours": "Restart before the return",
+          "holiday_dhw_lead_hours": "Restore hot water setpoints ahead of a charge",
+          "heating_season_states": "States meaning heating (comma separated)",
+          "standby_reference_state": "State meaning standby"
+        }
+      }
+    }
+  },
+  "config_subentries": {
+    "room": {
+      "entry_type": "Room",
+      "initiate_flow": {
+        "user": "Add room"
+      },
+      "step": {
+        "user": {
+          "title": "Room",
+          "data": {
+            "name": "Name",
+            "temperature_entity": "Room temperature (climate or sensor)",
+            "lower_c": "Lower limit",
+            "upper_c": "Upper limit",
+            "window_entities": "Window/door sensors (optional)",
+            "humidity_entity": "Humidity sensor (optional)",
+            "humidity_max_pct": "Humidity limit",
+            "humidity_delay_min": "Humidity delay",
+            "in_zone": "Belongs to the EOS set-back zone"
+          }
+        },
+        "reconfigure": {
+          "title": "Room",
+          "data": {
+            "name": "Name",
+            "temperature_entity": "Room temperature (climate or sensor)",
+            "lower_c": "Lower limit",
+            "upper_c": "Upper limit",
+            "window_entities": "Window/door sensors (optional)",
+            "humidity_entity": "Humidity sensor (optional)",
+            "humidity_max_pct": "Humidity limit",
+            "humidity_delay_min": "Humidity delay",
+            "in_zone": "Belongs to the EOS set-back zone"
+          }
+        }
+      },
+      "abort": {
+        "reconfigure_successful": "Room updated."
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "sg_target": {
+        "name": "SG Ready target"
+      },
+      "reason": {
+        "name": "Reason"
+      },
+      "eos_mode": {
+        "name": "EOS mode"
+      },
+      "room_mean": {
+        "name": "Room temperature mean"
+      },
+      "room_min_margin": {
+        "name": "Margin to lower limit"
+      },
+      "room_max_margin": {
+        "name": "Margin to upper limit"
+      },
+      "window_open_share": {
+        "name": "Open windows share"
+      },
+      "humidity_max": {
+        "name": "Humidity maximum"
+      },
+      "shadow_agreement": {
+        "name": "Shadow agreement"
+      }
+    },
+    "binary_sensor": {
+      "standby": {
+        "name": "Standby target"
+      },
+      "dhw_charge": {
+        "name": "Hot water charge"
+      },
+      "dhw_setpoints_restore": {
+        "name": "Restore hot water setpoints"
+      },
+      "humidity_warning": {
+        "name": "Humidity warning"
+      },
+      "eos_plan_ok": {
+        "name": "EOS plan OK"
+      }
+    },
+    "button": {
+      "reset_shadow": {
+        "name": "Reset shadow comparison"
+      }
+    }
+  }
+}
