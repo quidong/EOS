@@ -1,0 +1,152 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "EOS",
+        "data": {
+          "url": "EOS-URL",
+          "device_id": "Geräte-ID der Wärmepumpe in EOS",
+          "scan_interval": "Abfrageintervall"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "EOS antwortet unter dieser URL nicht."
+    },
+    "abort": {
+      "already_configured": "Diese Wärmepumpe ist bereits eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Kontext-Entities (alle optional)",
+        "data": {
+          "holiday_entity": "Urlaubsschalter",
+          "holiday_return_entity": "Rückkehr aus dem Urlaub",
+          "reduced_setpoint_entity": "Absenktemperatur des Heizkreises",
+          "heating_season_entity": "Betriebsart / Heizsaison",
+          "sg_actual_entity": "Aktueller SG-Ready-Zustand",
+          "zone_allowed_entity": "Zonen-Absenkung erlaubt",
+          "reduction_lock_entity": "Absenkung gesperrt bis",
+          "sg_reference_entity": "Schattenvergleich: SG-Soll der bestehenden Steuerung",
+          "standby_reference_entity": "Schattenvergleich: Betriebsart der Wärmepumpe"
+        }
+      },
+      "rules": {
+        "title": "Regeln",
+        "data": {
+          "sg_reduced": "SG bei Reduziert",
+          "sg_normal": "SG bei Normal",
+          "sg_raised": "SG bei Angehoben",
+          "sg_preheat": "SG bei Vorheizen",
+          "sg_forced": "SG bei Forciert",
+          "plan_max_age_min": "Max. Planalter",
+          "reduction_hysteresis_k": "Hysterese für den Absenkstart",
+          "min_valid_rooms": "Mindestanzahl Raumwerte",
+          "max_room_c": "Keine Anhebung ab (wärmster Raum)",
+          "airing_run_on_min": "Lüftungs-Nachlauf nach dem Schließen",
+          "holiday_floor_c": "Urlaubs-Untergrenze (kältester Raum)",
+          "holiday_restart_hours": "Wiederanlauf vor der Rückkehr",
+          "holiday_dhw_lead_hours": "WW-Sollwerte vor einer Ladung zurückstellen",
+          "heating_season_states": "Zustände für Heizen (kommagetrennt)",
+          "standby_reference_state": "Zustand für Standby"
+        }
+      }
+    }
+  },
+  "config_subentries": {
+    "room": {
+      "entry_type": "Raum",
+      "initiate_flow": {
+        "user": "Raum hinzufügen"
+      },
+      "step": {
+        "user": {
+          "title": "Raum",
+          "data": {
+            "name": "Name",
+            "temperature_entity": "Raumtemperatur (Klima oder Sensor)",
+            "lower_c": "Untergrenze",
+            "upper_c": "Obergrenze",
+            "window_entities": "Fenster-/Türkontakte (optional)",
+            "humidity_entity": "Feuchtesensor (optional)",
+            "humidity_max_pct": "Feuchtegrenze",
+            "humidity_delay_min": "Feuchte-Verzögerung",
+            "in_zone": "Gehört zur EOS-Absenkzone"
+          }
+        },
+        "reconfigure": {
+          "title": "Raum",
+          "data": {
+            "name": "Name",
+            "temperature_entity": "Raumtemperatur (Klima oder Sensor)",
+            "lower_c": "Untergrenze",
+            "upper_c": "Obergrenze",
+            "window_entities": "Fenster-/Türkontakte (optional)",
+            "humidity_entity": "Feuchtesensor (optional)",
+            "humidity_max_pct": "Feuchtegrenze",
+            "humidity_delay_min": "Feuchte-Verzögerung",
+            "in_zone": "Gehört zur EOS-Absenkzone"
+          }
+        }
+      },
+      "abort": {
+        "reconfigure_successful": "Raum aktualisiert."
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "sg_target": {
+        "name": "SG-Ready-Soll"
+      },
+      "reason": {
+        "name": "Begründung"
+      },
+      "eos_mode": {
+        "name": "EOS-Modus"
+      },
+      "room_mean": {
+        "name": "Raumtemperatur Mittel"
+      },
+      "room_min_margin": {
+        "name": "Abstand zur Untergrenze"
+      },
+      "room_max_margin": {
+        "name": "Abstand zur Obergrenze"
+      },
+      "window_open_share": {
+        "name": "Anteil offener Fenster"
+      },
+      "humidity_max": {
+        "name": "Luftfeuchte Maximum"
+      },
+      "shadow_agreement": {
+        "name": "Schattenvergleich Übereinstimmung"
+      }
+    },
+    "binary_sensor": {
+      "standby": {
+        "name": "Standby-Soll"
+      },
+      "dhw_charge": {
+        "name": "Warmwasserladung"
+      },
+      "dhw_setpoints_restore": {
+        "name": "WW-Sollwerte zurückstellen"
+      },
+      "humidity_warning": {
+        "name": "Feuchtewarnung"
+      },
+      "eos_plan_ok": {
+        "name": "EOS-Plan OK"
+      }
+    },
+    "button": {
+      "reset_shadow": {
+        "name": "Schattenvergleich zurücksetzen"
+      }
+    }
+  }
+}
