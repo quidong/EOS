@@ -1,0 +1,368 @@
+# EOS Control – example dashboard view with plan, forecast and history charts.
+#
+# Requirements: the EOS Control integration (0.4.0 or later) and the custom card
+# "apexcharts-card" (HACS: Frontend -> apexcharts-card).
+#
+# Usage: Dashboard -> edit -> three dots -> "Raw configuration editor", add this view under
+# "views:". Replace "eos_hp1" with the prefix of your entities (Settings -> Devices ->
+# EOS Control -> entities). Optional: add your own meters as "actual" series, see the
+# commented examples.
+#
+# The plan sensor keeps the slots of the last 24 hours as they were last planned
+# ("plan vs. actual"); "hourly" holds the energies per hour in kWh, "data" the slots.
+# The history sensors need EOS with the history recorder (database.history); otherwise
+# they are unavailable and the history cards stay empty.
+
+title: EOS
+path: eos-charts
+icon: mdi:chart-timeline-variant-shimmer
+type: sections
+max_columns: 3
+sections:
+  - type: grid
+    column_span: 3
+    cards:
+      - type: heading
+        heading: Plan
+        heading_style: title
+        badges:
+          - type: entity
+            entity: sensor.eos_hp1_plan
+            name: Plan from
+            show_name: true
+          - type: entity
+            entity: sensor.eos_hp1_eos_mode
+          - type: entity
+            entity: sensor.eos_hp1_sg_ready_target
+      - type: heading
+        heading: Energy per hour (last 24 h and plan)
+        heading_style: subtitle
+      - type: custom:apexcharts-card
+        graph_span: 48h
+        span:
+          start: hour
+          offset: -24h
+        now:
+          show: true
+          label: Now
+        header:
+          show: false
+        grid_options:
+          columns: full
+        apex_config:
+          chart:
+            height: 320
+          legend:
+            show: true
+            position: bottom
+          tooltip:
+            shared: true
+            x:
+              format: dd.MM. HH:mm
+        yaxis:
+          - id: kwh
+            min: 0
+            decimals: 1
+            apex_config:
+              title:
+                text: kWh per hour
+          - id: price
+            opposite: true
+            min: 0
+            decimals: 2
+            apex_config:
+              title:
+                text: €/kWh
+        series:
+          # - entity: sensor.your_house_energy_total      # actual, from a meter
+          #   name: House actual
+          #   type: column
+          #   yaxis_id: kwh
+          #   statistics: {type: change, period: hour, align: start}
+          - entity: sensor.eos_hp1_plan
+            name: House load plan
+            type: line
+            curve: stepline
+            stroke_width: 2
+            color: "#2f5fbf"
+            yaxis_id: kwh
+            data_generator: |
+              return (entity.attributes.hourly || []).map(r => [new Date(r.t).getTime(), r.load_kwh]);
+          - entity: sensor.eos_hp1_plan
+            name: Heat pump plan
+            type: line
+            curve: stepline
+            stroke_width: 2
+            color: "#c25f12"
+            yaxis_id: kwh
+            data_generator: |
+              return (entity.attributes.hourly || []).map(r => [new Date(r.t).getTime(), r.heat_pump_kwh]);
+          - entity: sensor.eos_hp1_forecast
+            name: PV forecast
+            type: area
+            curve: smooth
+            opacity: 0.25
+            stroke_width: 1
+            color: "#f2c94c"
+            yaxis_id: kwh
+            data_generator: |
+              return (entity.attributes.hourly || []).map(r => [new Date(r.t).getTime(), r.pv_kwh]);
+          - entity: sensor.eos_hp1_forecast
+            name: Electricity price
+            type: line
+            curve: stepline
+            stroke_width: 1
+            color: "#8a8a8a"
+            yaxis_id: price
+            data_generator: |
+              return (entity.attributes.data || []).map(r => [new Date(r.t).getTime(), r.price_amt_kwh]);
+      - type: heading
+        heading: Room and hot water temperature
+        heading_style: subtitle
+      - type: custom:apexcharts-card
+        graph_span: 48h
+        span:
+          start: hour
+          offset: -24h
+        now:
+          show: true
+          label: Now
+        header:
+          show: false
+        grid_options:
+          columns: full
+        apex_config:
+          chart:
+            height: 280
+          legend:
+            show: true
+            position: bottom
+          tooltip:
+            shared: true
+            x:
+              format: dd.MM. HH:mm
+        yaxis:
+          - id: room
+            decimals: 1
+            apex_config:
+              title:
+                text: Room °C
+          - id: dhw
+            opposite: true
+            decimals: 0
+            apex_config:
+              title:
+                text: Hot water °C
+        series:
+          - entity: sensor.eos_hp1_room_temperature_mean
+            name: Room actual
+            type: line
+            stroke_width: 2
+            color: "#2e9e6b"
+            yaxis_id: room
+            group_by:
+              duration: 15min
+              func: avg
+          - entity: sensor.eos_hp1_plan
+            name: Room plan
+            type: line
+            curve: smooth
+            stroke_width: 3
+            color: "#c25f12"
+            yaxis_id: room
+            data_generator: |
+              return (entity.attributes.data || []).map(r => [new Date(r.t).getTime(), r.room_c]);
+          - entity: sensor.eos_hp1_plan
+            name: Slab plan
+            type: line
+            curve: smooth
+            stroke_width: 1
+            color: "#9b6bc2"
+            yaxis_id: room
+            show:
+              hidden_by_default: true
+            data_generator: |
+              return (entity.attributes.data || []).map(r => [new Date(r.t).getTime(), r.slab_c]);
+          - entity: sensor.eos_hp1_plan
+            name: Hot water plan
+            type: line
+            curve: smooth
+            stroke_width: 2
+            color: "#d9534f"
+            yaxis_id: dhw
+            data_generator: |
+              return (entity.attributes.data || []).map(r => [new Date(r.t).getTime(), r.dhw_c]);
+      - type: heading
+        heading: Heating mode (0 reduced … 4 forced) and standby
+        heading_style: subtitle
+      - type: custom:apexcharts-card
+        graph_span: 48h
+        span:
+          start: hour
+          offset: -24h
+        now:
+          show: true
+          label: Now
+        header:
+          show: false
+        grid_options:
+          columns: full
+        apex_config:
+          chart:
+            height: 180
+          legend:
+            show: true
+            position: bottom
+        yaxis:
+          - id: mode
+            min: 0
+            max: 5
+            decimals: 0
+        series:
+          - entity: sensor.eos_hp1_plan
+            name: Heating mode
+            type: line
+            curve: stepline
+            stroke_width: 2
+            color: "#c25f12"
+            yaxis_id: mode
+            data_generator: |
+              return (entity.attributes.data || []).map(r => [new Date(r.t).getTime(), r.heating_mode]);
+          - entity: sensor.eos_hp1_plan
+            name: Standby
+            type: area
+            curve: stepline
+            opacity: 0.2
+            stroke_width: 0
+            color: "#8a8a8a"
+            yaxis_id: mode
+            data_generator: |
+              return (entity.attributes.data || []).filter(r => r.standby != null).map(r => [new Date(r.t).getTime(), r.standby]);
+  - type: grid
+    column_span: 3
+    cards:
+      - type: heading
+        heading: Forecast quality and costs
+        heading_style: title
+        badges:
+          - type: entity
+            entity: sensor.eos_hp1_history
+            name: As of
+            show_name: true
+      - type: markdown
+        content: >-
+          {% set k = state_attr('sensor.eos_hp1_history', 'kpi') or {} %}
+          {% set p = state_attr('sensor.eos_hp1_history', 'plan') or {} %}
+          **Last plan:** {{ p.get('algorithm', '–') }}, planned {{ p.get('plan_net_amt', '–') }} €
+          net, self-consumption baseline {{ p.get('baseline_net_amt', '–') }} €,
+          **saving {{ p.get('saving_vs_baseline_amt', '–') }} €**
+
+          | Series | Lead | MAE | Bias |
+          |---|---|---|---|
+          {% for key in k.keys() | select('search', '_mae_') | sort %}{% set name = key.split('_mae_')[0] %}{% set lead = key.split('_mae_')[1] %}| {{ name }} | {{ lead }} | {{ k[key] }} | {{ k.get(name ~ '_bias_' ~ lead) }} |
+          {% endfor %}
+      - type: custom:apexcharts-card
+        header:
+          show: true
+          title: "PV: forecast (6 h ahead) vs. actual"
+        graph_span: 72h
+        span:
+          end: hour
+        grid_options:
+          columns: full
+        apex_config:
+          chart:
+            height: 240
+          legend:
+            show: true
+            position: bottom
+        yaxis:
+          - id: kwh
+            min: 0
+            decimals: 1
+        series:
+          - entity: sensor.eos_hp1_history_hours
+            name: Actual
+            type: column
+            color: "#f2c94c"
+            yaxis_id: kwh
+            data_generator: |
+              return (entity.attributes.data || []).filter(r => r.pv_actual != null).map(r => [new Date(r.hour).getTime(), r.pv_actual / 1000]);
+          - entity: sensor.eos_hp1_history_hours
+            name: Forecast
+            type: line
+            curve: stepline
+            stroke_width: 2
+            color: "#c25f12"
+            yaxis_id: kwh
+            data_generator: |
+              return (entity.attributes.data || []).filter(r => r.pv_predicted != null).map(r => [new Date(r.hour).getTime(), r.pv_predicted / 1000]);
+      - type: custom:apexcharts-card
+        header:
+          show: true
+          title: "House load: forecast (6 h ahead) vs. actual"
+        graph_span: 72h
+        span:
+          end: hour
+        grid_options:
+          columns: full
+        apex_config:
+          chart:
+            height: 240
+          legend:
+            show: true
+            position: bottom
+        yaxis:
+          - id: kwh
+            min: 0
+            decimals: 1
+        series:
+          - entity: sensor.eos_hp1_history_hours
+            name: Actual
+            type: column
+            color: "#5b8def"
+            yaxis_id: kwh
+            data_generator: |
+              return (entity.attributes.data || []).filter(r => r.load_actual != null).map(r => [new Date(r.hour).getTime(), r.load_actual / 1000]);
+          - entity: sensor.eos_hp1_history_hours
+            name: Forecast
+            type: line
+            curve: stepline
+            stroke_width: 2
+            color: "#2f5fbf"
+            yaxis_id: kwh
+            data_generator: |
+              return (entity.attributes.data || []).filter(r => r.load_predicted != null).map(r => [new Date(r.hour).getTime(), r.load_predicted / 1000]);
+      - type: custom:apexcharts-card
+        header:
+          show: true
+          title: Realised net grid costs per day and algorithm
+        graph_span: 30d
+        span:
+          end: day
+        grid_options:
+          columns: full
+        apex_config:
+          chart:
+            height: 240
+          legend:
+            show: true
+            position: bottom
+        yaxis:
+          - id: eur
+            decimals: 2
+        series:
+          - entity: sensor.eos_hp1_history
+            name: GENETIC
+            type: column
+            color: "#5b8def"
+            yaxis_id: eur
+            data_generator: |
+              return (entity.attributes.days || []).filter(r => r.algorithm === 'GENETIC').map(r => [new Date(r.day + 'T12:00:00').getTime(), r.net_amt]);
+          - entity: sensor.eos_hp1_history
+            name: MILP
+            type: column
+            color: "#2e9e6b"
+            yaxis_id: eur
+            data_generator: |
+              return (entity.attributes.days || []).filter(r => r.algorithm === 'MILP').map(r => [new Date(r.day + 'T12:00:00').getTime(), r.net_amt]);

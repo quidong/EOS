@@ -129,6 +129,30 @@
       },
       "comfort_suggestions": {
         "name": "Comfort suggestions"
+      },
+      "plan": {
+        "name": "Plan"
+      },
+      "forecast": {
+        "name": "Forecast"
+      },
+      "planned_load_hour": {
+        "name": "Planned house load (hour)"
+      },
+      "planned_heat_pump_hour": {
+        "name": "Planned heat pump energy (hour)"
+      },
+      "planned_room_temperature": {
+        "name": "Planned room temperature"
+      },
+      "planned_dhw_temperature": {
+        "name": "Planned hot water temperature"
+      },
+      "history": {
+        "name": "History"
+      },
+      "history_hours": {
+        "name": "History hours"
       }
     },
     "binary_sensor": {

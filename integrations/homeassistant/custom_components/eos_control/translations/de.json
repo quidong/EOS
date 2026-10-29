@@ -129,6 +129,30 @@
       },
       "comfort_suggestions": {
         "name": "Komfort-Vorschläge"
+      },
+      "plan": {
+        "name": "Plan"
+      },
+      "forecast": {
+        "name": "Prognose"
+      },
+      "planned_load_hour": {
+        "name": "Geplante Hauslast (Stunde)"
+      },
+      "planned_heat_pump_hour": {
+        "name": "Geplante WP-Energie (Stunde)"
+      },
+      "planned_room_temperature": {
+        "name": "Geplante Raumtemperatur"
+      },
+      "planned_dhw_temperature": {
+        "name": "Geplante Warmwassertemperatur"
+      },
+      "history": {
+        "name": "Historie"
+      },
+      "history_hours": {
+        "name": "Historie Stunden"
       }
     },
     "binary_sensor": {

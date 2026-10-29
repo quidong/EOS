@@ -12,11 +12,17 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfTemperature
+from homeassistant.const import (
+    PERCENTAGE,
+    EntityCategory,
+    UnitOfEnergy,
+    UnitOfTemperature,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import EosControlConfigEntry
+from .charts import parse_time
 from .coordinator import ControlData
 from .entity import EosControlEntity
 from .logic import MODE_NAMES
@@ -26,6 +32,11 @@ from .logic import MODE_NAMES
 class EosSensorDescription(SensorEntityDescription):
     value: Callable[[ControlData], Any]
     attributes: Callable[[ControlData], dict[str, Any]] | None = None
+    available: Callable[[ControlData], bool] | None = None
+
+
+# Series for charts: large, kept out of the recorder (the state machine has them).
+CHART_ATTRIBUTES = frozenset({"data", "hourly", "kpi", "plan", "days", "ab"})
 
 
 def _agreement(data: ControlData) -> float | None:
@@ -116,13 +127,88 @@ SENSORS: tuple[EosSensorDescription, ...] = (
 )
 
 
+CHART_SENSORS: tuple[EosSensorDescription, ...] = (
+    EosSensorDescription(
+        key="plan",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value=lambda d: d.charts.generated_at,
+        attributes=lambda d: {
+            "slot_minutes": d.charts.slot_minutes,
+            "data": d.charts.plan,
+            "hourly": d.charts.plan_hourly,
+        },
+    ),
+    EosSensorDescription(
+        key="forecast",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value=lambda d: d.charts.generated_at if d.charts.forecast else None,
+        attributes=lambda d: {"data": d.charts.forecast, "hourly": d.charts.forecast_hourly},
+    ),
+    EosSensorDescription(
+        key="planned_load_hour",
+        value=lambda d: d.charts.load_hour_kwh,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=2,
+    ),
+    EosSensorDescription(
+        key="planned_heat_pump_hour",
+        value=lambda d: d.charts.heat_pump_hour_kwh,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=2,
+    ),
+    EosSensorDescription(
+        key="planned_room_temperature",
+        value=lambda d: d.charts.room_c,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+    ),
+    EosSensorDescription(
+        key="planned_dhw_temperature",
+        value=lambda d: d.charts.dhw_c,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+    ),
+    EosSensorDescription(
+        key="history",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        available=lambda d: d.history is not None,
+        value=lambda d: parse_time((d.history or {}).get("state")),
+        attributes=lambda d: {
+            key: (d.history or {}).get(key)
+            for key in ("enabled", "last_error", "kpi", "plan", "days", "ab")
+        },
+    ),
+    EosSensorDescription(
+        key="history_hours",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        available=lambda d: d.history_hours is not None,
+        value=lambda d: parse_time((d.history_hours or {}).get("state")),
+        attributes=lambda d: {
+            "data": (d.history_hours or {}).get("data") or [],
+            "last_error": (d.history_hours or {}).get("last_error"),
+        },
+    ),
+)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: EosControlConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     coordinator = entry.runtime_data
-    async_add_entities(EosSensor(coordinator, description) for description in SENSORS)
+    async_add_entities(
+        [
+            *(EosSensor(coordinator, description) for description in SENSORS),
+            *(EosChartSensor(coordinator, description) for description in CHART_SENSORS),
+        ]
+    )
 
 
 class EosSensor(EosControlEntity, SensorEntity):
@@ -141,3 +227,16 @@ class EosSensor(EosControlEntity, SensorEntity):
         if self.entity_description.attributes is None:
             return None
         return self.entity_description.attributes(self.coordinator.data)
+
+    @property
+    def available(self) -> bool:
+        if not super().available:
+            return False
+        check = self.entity_description.available
+        return check is None or check(self.coordinator.data)
+
+
+class EosChartSensor(EosSensor):
+    """Plan, forecast and history series for dashboards (series not recorded)."""
+
+    _unrecorded_attributes = CHART_ATTRIBUTES

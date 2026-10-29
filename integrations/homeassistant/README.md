@@ -92,6 +92,30 @@ the interventions + 0.3 K, in 0.5 K steps, at most 2 K above the current limit).
 automatically; adopt a suggestion in the room's settings. Events are kept for 90 days, locally in
 Home Assistant's storage; a button resets them. Interventions while away are ignored.
 
+## Charts
+
+The integration publishes what EOS planned and forecast, so dashboards need no REST or template
+sensors of their own:
+
+| Sensor | State | Attributes |
+| --- | --- | --- |
+| Plan | time the plan was made | `data`: slot rows (`t`, `load_wh`, `import_wh`, `export_wh`, `costs_amt`, `revenue_amt`, `heat_pump_wh`, `rod_wh`, `heating_mode`, `dhw_mode`, `standby`, `room_c`, `slab_c`, `dhw_c`, `<battery>_soc_pct`); `hourly`: energies per hour in kWh (`load_kwh`, `heat_pump_kwh`, …); `slot_minutes` |
+| Forecast | time of the plan | `data`: slot rows (`pv_wh`, `load_wh`, `price_amt_kwh`, `feed_in_amt_kwh`, `outdoor_c`); `hourly`: PV and load in kWh, prices as mean |
+| Planned house load / heat pump energy (hour) | kWh planned for the current hour | – (long-term statistics: plan vs. meter per hour) |
+| Planned room / hot water temperature | value of the current slot | – (long-term statistics) |
+| History | time of the summary | `kpi` (MAE and bias per series and lead time), `plan` (last run, saving against the self-consumption baseline), `days` (net grid costs per day and algorithm), `ab` |
+| History hours | time of the query | `data`: forecast/plan and actual value per hour |
+
+Passed slots keep the values of the last plan that contained them (24 hours in `data`, 48 hours
+stored, restored after a restart), so a chart shows plan and actual side by side for the last day
+and keeps showing the rest of the last plan while EOS is unreachable. The series attributes are not
+written to the recorder. The history sensors need the history endpoints of the RL29 fork
+(`/v1/energy-management/history/...`); an EOS without them is asked once, the sensors then stay
+unavailable.
+
+`dashboard/eos-charts.yaml` is an example view with these charts (needs the custom card
+`apexcharts-card` from HACS). The integration does not create dashboards itself.
+
 ## Privacy
 
 No personal data leaves Home Assistant except the measurements above, and only to the configured

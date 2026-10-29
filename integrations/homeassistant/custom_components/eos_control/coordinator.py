@@ -61,6 +61,7 @@ from .const import (
     MISMATCH_LOG_SIZE,
     SUBENTRY_ROOM,
 )
+from .charts import Charts, PlanMemory, build_charts
 from .learning import (
     KIND_LOCK,
     KIND_SETPOINT,
@@ -76,6 +77,9 @@ from .logic import ControlInput, Decision, Plan, RoomState, Settings, decide, pa
 _LOGGER = logging.getLogger(__name__)
 STORAGE_VERSION = 1
 RESTART_STAMP_S = 60.0
+HISTORY_INTERVAL = timedelta(minutes=15)
+HISTORY_SUMMARY_PATH = "/v1/energy-management/history/summary"
+HISTORY_HOURS_PATH = "/v1/energy-management/history/hours"
 
 
 @dataclass
@@ -112,6 +116,10 @@ class ControlData:
     reference_standby: Optional[bool] = None
     suggestions: list[Suggestion] = field(default_factory=list)
     comfort_events: int = 0
+    charts: Charts = field(default_factory=Charts)
+    history: Optional[dict[str, Any]] = None
+    """``/history/summary`` of EOS (key figures); None = not available (e.g. upstream EOS)."""
+    history_hours: Optional[dict[str, Any]] = None
 
 
 class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
@@ -134,6 +142,12 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
         )
         self.shadow = ShadowStats()
         self.learning = ComfortLearning()
+        self.memory = PlanMemory()
+        self._memory_generated: Optional[datetime] = None
+        self._history: Optional[dict[str, Any]] = None
+        self._history_hours: Optional[dict[str, Any]] = None
+        self._history_at: Optional[datetime] = None
+        self._history_supported = True
         self._humidity_since: dict[str, datetime] = {}
         self._setpoints: dict[str, Optional[float]] = {}
         self._presets: dict[str, Optional[str]] = {}
@@ -170,9 +184,24 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             stored = await self._store.async_load() or {}
             self.shadow = ShadowStats.from_dict(stored)
             self.learning = ComfortLearning.from_list(stored.get("comfort_events"))
+            self.memory = PlanMemory.from_list(stored.get("plan_memory"))
             self._loaded = True
         now = dt_util.now()
-        plan, error = await self._fetch_plan()
+        plan, solution, error = await self._fetch_plan()
+        charts = build_charts(
+            solution,
+            self.entry.data[CONF_DEVICE_ID],
+            self.memory,
+            now,
+            dt_util.get_default_time_zone(),
+        )
+        memory_changed = charts.generated_at is not None and charts.generated_at != (
+            self._memory_generated
+        )
+        if memory_changed:
+            self._memory_generated = charts.generated_at
+        if solution is not None:  # EOS down: no further requests that would time out
+            await self._update_history(now)
         data = ControlInput(
             now=now,
             plan=plan,
@@ -195,7 +224,8 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             decision.reason = f"{decision.reason} ({error})"
         reference_sg = self._int(self.option(CONF_SG_REFERENCE_ENTITY))
         reference_standby = self._standby_reference()
-        if self._compare(now, decision, reference_sg, reference_standby, data.holiday) or learned:
+        compared = self._compare(now, decision, reference_sg, reference_standby, data.holiday)
+        if compared or learned or memory_changed:
             self._store.async_delay_save(self._stored, 30)
         return ControlData(
             decision=decision,
@@ -206,25 +236,76 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             reference_standby=reference_standby,
             suggestions=self.learning.suggestions(self._lower_limits()),
             comfort_events=len(self.learning.events),
+            charts=charts,
+            history=self._history,
+            history_hours=self._history_hours,
         )
 
     def _stored(self) -> dict[str, Any]:
-        return {**self.shadow.as_dict(), "comfort_events": self.learning.as_list()}
+        return {
+            **self.shadow.as_dict(),
+            "comfort_events": self.learning.as_list(),
+            "plan_memory": self.memory.as_list(),
+        }
 
-    async def _fetch_plan(self) -> tuple[Optional[Plan], Optional[str]]:
+    async def _fetch_plan(
+        self,
+    ) -> tuple[Optional[Plan], Optional[dict[str, Any]], Optional[str]]:
         url = f"{self.entry.data[CONF_URL]}/v1/energy-management/optimization/solution"
         session = async_get_clientsession(self.hass)
         try:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
                 if resp.status != 200:
-                    return None, f"EOS HTTP {resp.status}"
+                    return None, None, f"EOS HTTP {resp.status}"
                 solution = await resp.json()
         except (aiohttp.ClientError, TimeoutError, ValueError) as exc:
-            return None, f"EOS unreachable: {type(exc).__name__}"
+            return None, None, f"EOS unreachable: {type(exc).__name__}"
+        if not isinstance(solution, dict):
+            return None, None, "EOS solution is no object"
         try:
-            return parse_plan(solution, self.entry.data[CONF_DEVICE_ID]), None
+            return parse_plan(solution, self.entry.data[CONF_DEVICE_ID]), solution, None
         except ValueError as exc:
-            return None, str(exc)
+            return None, solution, str(exc)
+
+    # ------------------------------------------------------------------
+    # History (EOS RL29 fork: /v1/energy-management/history/...)
+    # ------------------------------------------------------------------
+
+    async def _update_history(self, now: datetime) -> None:
+        """Fetch the history key figures every ``HISTORY_INTERVAL``.
+
+        An EOS without the history endpoints (404) is asked once; the history sensors
+        then stay unavailable. Other errors keep the last values until the next try.
+        """
+        if not self._history_supported:
+            return
+        if self._history_at is not None and now - self._history_at < HISTORY_INTERVAL:
+            return
+        self._history_at = now
+        summary, status = await self._get_json(HISTORY_SUMMARY_PATH)
+        if status == 404:
+            self._history_supported = False
+            self._history = self._history_hours = None
+            return
+        if summary is not None:
+            self._history = summary
+        hours, _ = await self._get_json(HISTORY_HOURS_PATH)
+        if hours is not None:
+            self._history_hours = hours
+
+    async def _get_json(self, path: str) -> tuple[Optional[dict[str, Any]], Optional[int]]:
+        session = async_get_clientsession(self.hass)
+        try:
+            async with session.get(
+                f"{self.entry.data[CONF_URL]}{path}", timeout=aiohttp.ClientTimeout(total=30)
+            ) as resp:
+                if resp.status != 200:
+                    return None, resp.status
+                data = await resp.json()
+        except (aiohttp.ClientError, TimeoutError, ValueError) as exc:
+            _LOGGER.debug("EOS %s: %s", path, exc)
+            return None, None
+        return (data if isinstance(data, dict) else None), 200
 
     # ------------------------------------------------------------------
     # Rooms

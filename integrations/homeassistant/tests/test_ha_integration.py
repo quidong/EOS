@@ -34,6 +34,8 @@ def auto_enable_custom_integrations(enable_custom_integrations):
 
 URL = "http://eos.test:8503"
 SOLUTION_URL = f"{URL}/v1/energy-management/optimization/solution"
+SUMMARY_URL = f"{URL}/v1/energy-management/history/summary"
+HOURS_URL = f"{URL}/v1/energy-management/history/hours"
 
 
 def solution(mode: int, dhw: int = 0, away: int = 0, age_min: int = 5) -> dict:
@@ -67,8 +69,17 @@ def room(name: str, entity: str, windows=None, **extra) -> ConfigSubentryData:
     return ConfigSubentryData(data=data, subentry_type="room", title=name, unique_id=None)
 
 
-async def setup(hass, aioclient_mock, sol, options=None, rooms=None) -> MockConfigEntry:
+async def setup(
+    hass, aioclient_mock, sol, options=None, rooms=None, history=None
+) -> MockConfigEntry:
+    """``history`` = (summary, hours) of the EOS history; None = upstream EOS (404)."""
     aioclient_mock.get(SOLUTION_URL, json=sol)
+    if history is None:
+        aioclient_mock.get(SUMMARY_URL, status=404)
+        aioclient_mock.get(HOURS_URL, status=404)
+    else:
+        aioclient_mock.get(SUMMARY_URL, json=history[0])
+        aioclient_mock.get(HOURS_URL, json=history[1])
     entry = MockConfigEntry(
         domain=DOMAIN,
         title="EOS hp1",
@@ -448,3 +459,145 @@ async def test_comfort_learning_ignores_holiday_and_the_return(
     hass.states.async_set("climate.living_controller", "heat", {"temperature": 22.0})
     await coordinator.async_refresh()
     assert coordinator.data.comfort_events == 0
+
+
+# ----------------------------------------------------------------------
+# Chart sensors (plan, forecast, history)
+# ----------------------------------------------------------------------
+
+
+def chart_solution(age_min: int = 5) -> dict:
+    """Solution with house, heat pump and forecast columns, 8 slots from the current hour."""
+    now = dt_util.now()
+    start = now.replace(minute=0, second=0, microsecond=0)
+    plan, prediction = {}, {}
+    for i in range(8):
+        t = (start + timedelta(minutes=15 * i)).isoformat()
+        plan[t] = {
+            "load_energy_wh": 100.0,
+            "grid_consumption_energy_wh": 100.0,
+            "hp1_heating_mode": 1.0,
+            "hp1_dhw_mode": 0.0,
+            "hp1_energy_wh": 250.0,
+            "hp1_room_temperature_c": 21.25,
+            "hp1_dhw_temperature_c": 48.0,
+        }
+        prediction[t] = {"pvforecast_ac_energy_wh": 300.0, "elec_price_amt_kwh": 0.3}
+    return {
+        "generated_at": (now - timedelta(minutes=age_min)).isoformat(),
+        "solution": {"data": plan},
+        "prediction": {"data": prediction},
+    }
+
+
+async def test_chart_sensors(hass: HomeAssistant, aioclient_mock: AiohttpClientMocker):
+    set_rooms(hass)
+    await setup(hass, aioclient_mock, chart_solution(), rooms=ROOMS)
+    plan = hass.states.get("sensor.eos_hp1_plan")
+    assert plan is not None and plan.state not in ("unknown", "unavailable")
+    assert plan.attributes["slot_minutes"] == 15
+    assert len(plan.attributes["data"]) == 8
+    assert plan.attributes["data"][0]["heat_pump_wh"] == 250.0
+    assert plan.attributes["hourly"][0]["heat_pump_kwh"] == pytest.approx(1.0)
+    forecast = hass.states.get("sensor.eos_hp1_forecast")
+    assert forecast.attributes["hourly"][0]["pv_kwh"] == pytest.approx(1.2)
+    assert float(hass.states.get("sensor.eos_hp1_planned_house_load_hour").state) == 0.4
+    assert float(hass.states.get("sensor.eos_hp1_planned_heat_pump_energy_hour").state) == 1.0
+    room = hass.states.get("sensor.eos_hp1_planned_room_temperature")
+    assert float(room.state) == 21.25
+    assert room.attributes["state_class"] == "measurement"
+    assert float(hass.states.get("sensor.eos_hp1_planned_hot_water_temperature").state) == 48.0
+    # upstream EOS without history endpoints
+    assert hass.states.get("sensor.eos_hp1_history").state == "unavailable"
+    assert hass.states.get("sensor.eos_hp1_history_hours").state == "unavailable"
+
+
+async def test_chart_series_are_not_recorded(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+):
+    from custom_components.eos_control.sensor import CHART_ATTRIBUTES, EosChartSensor
+
+    assert {"data", "hourly"} <= CHART_ATTRIBUTES
+    assert EosChartSensor._unrecorded_attributes == CHART_ATTRIBUTES
+
+
+async def test_history_sensors(hass: HomeAssistant, aioclient_mock: AiohttpClientMocker):
+    set_rooms(hass)
+    summary = {
+        "state": "2026-10-29T20:25:04+00:00",
+        "enabled": True,
+        "last_error": None,
+        "kpi": {"pv_mae_6h": 120.0},
+        "plan": {"algorithm": "GENETIC", "saving_vs_baseline_amt": 0.1},
+        "days": [{"day": "2026-10-28", "algorithm": "MILP", "net_amt": 1.2}],
+        "ab": {"MILP": {"mean_net_amt": 1.2, "days": 1}},
+    }
+    hours = {
+        "state": "2026-10-29T20:25:17+00:00",
+        "data": [{"hour": "2026-10-29T19:00:00+00:00", "pv_actual": 0.0, "pv_predicted": 5.0}],
+    }
+    await setup(hass, aioclient_mock, chart_solution(), rooms=ROOMS, history=(summary, hours))
+    state = hass.states.get("sensor.eos_hp1_history")
+    assert state.state == "2026-10-29T20:25:04+00:00"
+    assert state.attributes["kpi"] == {"pv_mae_6h": 120.0}
+    assert state.attributes["ab"]["MILP"]["days"] == 1
+    hourly = hass.states.get("sensor.eos_hp1_history_hours")
+    assert hourly.attributes["data"][0]["pv_predicted"] == 5.0
+    calls = [str(c[1]) for c in aioclient_mock.mock_calls]
+    # fetched once, not on every poll
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=61))
+    await hass.async_block_till_done()
+    calls_after = [str(c[1]) for c in aioclient_mock.mock_calls]
+    assert calls_after.count(SUMMARY_URL) == calls.count(SUMMARY_URL) == 1
+    assert calls_after.count(SOLUTION_URL) > calls.count(SOLUTION_URL)
+
+
+async def test_upstream_eos_is_asked_for_history_once(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+):
+    set_rooms(hass)
+    await setup(hass, aioclient_mock, chart_solution(), rooms=ROOMS)
+    for minutes in (16, 32):
+        async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=minutes))
+        await hass.async_block_till_done()
+    calls = [str(c[1]) for c in aioclient_mock.mock_calls]
+    assert calls.count(SUMMARY_URL) == 1
+    assert HOURS_URL not in calls
+
+
+async def test_plan_memory_survives_a_reload(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+):
+    set_rooms(hass)
+    entry = await setup(hass, aioclient_mock, chart_solution(), rooms=ROOMS)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    coordinator = entry.runtime_data
+    assert len(coordinator.memory.series()) == 8
+    # EOS down after the reload: the remembered plan still feeds the charts
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(SOLUTION_URL, status=503)
+    aioclient_mock.get(SUMMARY_URL, status=404)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert len(hass.states.get("sensor.eos_hp1_plan").attributes["data"]) == 8
+    assert float(hass.states.get("sensor.eos_hp1_planned_room_temperature").state) == 21.25
+
+
+async def test_example_dashboard_uses_existing_entities(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+):
+    """dashboard/eos-charts.yaml only refers to entities the integration creates."""
+    import re
+    from pathlib import Path
+
+    import yaml
+
+    text = (Path(__file__).resolve().parents[1] / "dashboard" / "eos-charts.yaml").read_text()
+    yaml.safe_load(text)
+    referenced = set(re.findall(r"sensor\.eos_hp1_[a-z_]+", text))
+    assert "sensor.eos_hp1_plan" in referenced and "sensor.eos_hp1_history_hours" in referenced
+    set_rooms(hass)
+    await setup(hass, aioclient_mock, chart_solution(), rooms=ROOMS)
+    missing = {e for e in referenced if hass.states.get(e) is None}
+    assert not missing
