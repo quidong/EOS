@@ -244,6 +244,18 @@ def test_room_figures():
     assert attrs["eos_mode"] == "NORMAL" and attrs["room_mean_c"] == 21.0
 
 
+def test_margins_use_the_limits_valid_now():
+    """Holiday: margin against the holiday limit (reduced setpoint - 1), not 19.5."""
+    d = holiday([0] * 4, temps=(17.5, 18.0))
+    assert d.room_min_margin_k == pytest.approx(0.5)  # 17.5 - (18.0 - 1)
+    # set-back zone: rooms in the zone against the reduced setpoint - 1
+    zone_rooms = rooms(18.5, lower=19.5, in_zone=True) + rooms(21.0)
+    z = run([1] * 4, zone_rooms, zone=[1] * 4, reduced_setpoint_c=19.0)
+    assert z.room_min_margin_k == pytest.approx(0.5)  # 18.5 - 18.0
+    no_zone = run([1] * 4, zone_rooms, zone=[0] * 4, reduced_setpoint_c=19.0)
+    assert no_zone.room_min_margin_k == pytest.approx(-1.0)  # 18.5 - 19.5
+
+
 def test_holiday_without_reduced_setpoint_uses_the_holiday_floor():
     d = run([0] * 4, rooms(16.5, 17.0), holiday=True, away=[1] * 4)
     assert d.sg_target == 1  # floor 16 instead of the room limit 19.5
