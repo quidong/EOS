@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610290948644614"
+    "version": "v0.3.0.dev2610291295146898"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -9982,6 +9982,19 @@
             ],
             "title": "Humidity Pct",
             "description": "Fork: highest relative humidity of the monitored rooms now [%]."
+          },
+          "reduce_locked_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reduce Locked Until",
+            "description": "Fork: the controller does not reduce before this time (manual lock); REDUCED runs as NORMAL and there is no standby until then. None = no lock."
           }
         },
         "additionalProperties": false,
@@ -11785,6 +11798,12 @@
             "description": "Room temperature floor while away with the heat pump in standby [degC].",
             "readOnly": true
           },
+          "measurement_key_reduce_lock_until": {
+            "type": "string",
+            "title": "Measurement Key Reduce Lock Until",
+            "description": "Unix time until which the controller does not reduce, 0 = no lock (fork).",
+            "readOnly": true
+          },
           "measurement_key_setback_room_temperature": {
             "type": "string",
             "title": "Measurement Key Setback Room Temperature",
@@ -11836,6 +11855,7 @@
           "measurement_key_return_ts",
           "measurement_key_away_room_temperature",
           "measurement_key_away_min_temperature",
+          "measurement_key_reduce_lock_until",
           "measurement_key_setback_room_temperature",
           "measurement_key_window_open",
           "measurement_key_dewpoint",

@@ -201,6 +201,15 @@ class GeneticHeatPumpParameters(GeneticParametersBaseModel):
             "description": "Fork: highest relative humidity of the monitored rooms now [%]."
         },
     )
+    reduce_locked_until: Optional[DateTime] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "Fork: the controller does not reduce before this time (manual lock); "
+                "REDUCED runs as NORMAL and there is no standby until then. None = no lock."
+            )
+        },
+    )
 
 
 def _nearest(allowed: Sequence[int], wanted: int) -> int:
@@ -440,6 +449,7 @@ class HeatPumpRunPlan:
                 "zone_setback",
                 "ventilate",
                 "ventilation_w_per_k",
+                "standby",
             ):
                 rows[name] = []
         for slot, inputs in enumerate(self.inputs):
@@ -466,7 +476,10 @@ class HeatPumpRunPlan:
             if deadline is not None and slot < deadline and state.dhw_c >= self.legionella_c - 0.5:
                 reached_by_deadline = True
             if detail:
-                rows["heating_mode"].append(heating[period].name)
+                mode = heating[period]
+                if inputs.reduce_locked and mode == HeatingMode.REDUCED:
+                    mode = HeatingMode.NORMAL  # what the controller runs (fork)
+                rows["heating_mode"].append(mode.name)
                 rows["dhw_mode"].append(option.label)
                 rows["rod_target_c"].append(
                     float(option.rod_target_c)
@@ -494,6 +507,7 @@ class HeatPumpRunPlan:
                 rows["zone_setback"].append(1.0 if slot < len(zone) and zone[slot] else 0.0)
                 rows["ventilate"].append(1.0 if slot < len(vent) and vent[slot] else 0.0)
                 rows["ventilation_w_per_k"].append(float(inputs.ventilation_w_per_k))
+                rows["standby"].append(1.0 if state.standby else 0.0)
 
         # Mode changes between consecutive gene periods.
         n = self.n_periods
@@ -976,6 +990,23 @@ def build_run_plan(
     )
     _apply_room_limits_and_humidity(parameters, slot_hours, inputs, away_slots)
 
+    # Manual lock of the reduction (fork): the controller holds NORMAL until then.
+    lock_until = parameters.reduce_locked_until
+    if lock_until is not None:
+        locked = 0
+        for start, slot_input in zip(slot_starts, inputs):
+            if start.timestamp() >= lock_until.timestamp():
+                break
+            slot_input.reduce_locked = True
+            locked += 1
+        if locked:
+            logger.info(
+                "Heat pump {}: reduction locked until {} ({} slots).",
+                parameters.device_id,
+                lock_until.isoformat(),
+                locked,
+            )
+
     # Active §14a dimming: limit the first slots.
     if parameters.power_limited_w is not None:
         limited_slots = max(1, math.ceil(parameters.power_limited_hours / slot_hours))
@@ -1016,7 +1047,9 @@ def build_run_plan(
     )
     # In standby at the start when the controller's rule holds (RL29 fork): the
     # restart charge of the next non-REDUCED slot is then part of the plan.
-    standby0 = bool(first.standby_possible and room > first.comfort_min_c + 0.3)
+    standby0 = bool(
+        first.standby_possible and not first.reduce_locked and room > first.comfort_min_c + 0.3
+    )
     initial = ThermalState(slab_c=slab, room_c=room, dhw_c=dhw, standby=standby0)
 
     # Allowed modes; one rod option per configured target, only with a rod.

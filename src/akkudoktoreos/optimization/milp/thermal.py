@@ -209,7 +209,8 @@ def thermal_block(plan: "HeatPumpRunPlan") -> Optional[ThermalBlock]:
         room_min.append(low)
         room_max.append(high)
         targets = [system._room_target(m, slot) for m in allowed]
-        room_floor.append(None if HeatingMode.REDUCED in allowed else min(targets))
+        reducible = HeatingMode.REDUCED in allowed and not slot.reduce_locked
+        room_floor.append(None if reducible else min(targets))
         room_ceiling.append(max(targets) + REPAIR_MARGIN_K)
         tank_floor.append(None if slot.dhw_off else max(system.dhw.min_c, switch_on - 0.5))
         max_el.append(slot.max_electric_w)

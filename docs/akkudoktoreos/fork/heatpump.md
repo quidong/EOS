@@ -75,6 +75,7 @@ Solution keys (Home Assistant: `sensor.eos_<key>`), per slot:
 | `<id>_energy_wh`, `<id>_rod_energy_wh` | planned electric energy (heat pump + rod, rod alone) |
 | `<id>_room_temperature_c`, `<id>_slab_temperature_c`, `<id>_dhw_temperature_c` | expected temperatures |
 | `<id>_away`, `<id>_zone_setback`, `<id>_ventilate` | holiday slot, set-back zone, airing recommendation |
+| `<id>_standby` | 1 = heat pump in its standby operating mode (holiday, see below) |
 | `<id>_kpi_*` | plan vs actual and calibration figures (see below) |
 
 Additionally FRBC instructions per actuator: `<id>_space_heating` (mode) and `<id>_dhw` (`HOLD`,
@@ -93,6 +94,7 @@ Measurements EOS reads (via `adapter.homeassistant.device_measurement_entity_ids
 | `<id>-setback-room-temperature`, `<id>-window-open` | zone set-back temperature, share of open windows |
 | `<id>-room-min-margin`, `<id>-room-max-margin` | optional: closest room to its own lower / upper limit [K] |
 | `<id>-humidity` | optional: highest relative humidity of the monitored rooms [%] |
+| `<id>-reduce-lock-until-ts` | optional: Unix time until which the controller does not reduce, 0 = no lock |
 | `<id>-outdoor-temperature`, `<id>-heat-power`, `<id>-electric-power`, `<id>-flow-temperature` | calibration |
 
 Use a power meter that sees all consumers of the heat pump (pumps, controller, cooling) for
@@ -186,6 +188,10 @@ protection) while EOS plans REDUCED, set the room floor `away.standby_min_c` (or
 - if the unit charges hot water on every restart, set `away.standby_exit_dhw_c` to that temperature
   (empty = no charge, e.g. when the controller lowers the hot water setpoints while away).
 
+The solution key `<id>_standby` states per slot whether the unit is in standby under this rule, so
+the controller switches standby on and off from the plan instead of deriving it from the modes. It
+should still keep its own room floor as a safety net and leave standby when the plan is missing.
+
 `away.internal_gains_share` scales the internal gains while nobody is home (people, cooking and most
 devices are missing). Tank heat has no value at the horizon end while still away with hot water off.
 
@@ -231,6 +237,13 @@ their own lower limit in the controller instead of raising the whole house.
 is at or above `max_pct`, the comfort minimum for the next `hold_hours` is at most `max_drop_k`
 below the NORMAL setpoint – REDUCED then does not cool damp rooms. The controller may send its own
 debounced flag instead (100 = high, 0 = normal).
+
+## Lock of the reduction
+
+A controller may block reducing for a while, e.g. after somebody felt cold. It reports the end as
+`<id>-reduce-lock-until-ts` (Unix time; 0 or a past time = no lock). Until then EOS plans what the
+controller will run: REDUCED counts as NORMAL (room target, energy, no standby), and the plan shows
+NORMAL in these slots. Plans therefore no longer count on savings that will not happen.
 
 ## Cooling
 

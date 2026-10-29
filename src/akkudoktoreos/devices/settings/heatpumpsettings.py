@@ -1229,6 +1229,7 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
             self.measurement_key_return_ts,
             self.measurement_key_away_room_temperature,
             self.measurement_key_away_min_temperature,
+            self.measurement_key_reduce_lock_until,
         ]
         if self.zone_setback.enabled:
             keys.append(self.measurement_key_setback_room_temperature)
@@ -1289,6 +1290,12 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
     def measurement_key_away_min_temperature(self) -> str:
         """Room temperature floor while away with the heat pump in standby [degC]."""
         return f"{self.device_id}-away-min-temperature"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def measurement_key_reduce_lock_until(self) -> str:
+        """Unix time until which the controller does not reduce, 0 = no lock (fork)."""
+        return f"{self.device_id}-reduce-lock-until-ts"
 
     @computed_field  # type: ignore[prop-decorator]
     @property
