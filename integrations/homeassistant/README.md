@@ -81,6 +81,17 @@ Main switch, holiday switch and return date, transport and mapping as select ent
 for the current EOS mode, the target and actual SG state, the reason of the last decision
 ("NORMAL: plan older than 45 min"), counters, and diagnostic attributes.
 
+## Comfort learning
+
+Each room can name its setpoint entity (the wall controller's climate entity or a number). A
+setpoint raised by hand (not by an automation) and a newly set lock of the reduction are recorded
+with the room temperature at that moment; a lock counts for the room closest to its lower limit.
+After three such events in one period of the day (night, morning, afternoon, evening) the sensor
+"Comfort suggestions" proposes a higher lower limit for that room and period (median temperature at
+the interventions + 0.3 K, in 0.5 K steps, at most 2 K above the current limit). Nothing is changed
+automatically; adopt a suggestion in the room's settings. Events are kept for 90 days, locally in
+Home Assistant's storage; a button resets them. Interventions while away are ignored.
+
 ## Privacy
 
 No personal data leaves Home Assistant except the measurements above, and only to the configured

@@ -360,3 +360,58 @@ async def test_shadow_counts_survive_a_reload(
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
     assert entry.runtime_data.data.shadow.compared == 3  # 2 restored + first poll
+
+
+async def test_comfort_learning_from_setpoints_and_lock(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+):
+    from homeassistant.core import Context
+
+    set_rooms(hass, living=19.8, bath=20.8)
+    hass.states.async_set("climate.living_controller", "heat", {"temperature": 21.0})
+    hass.states.async_set("input_datetime.lock", "2026-01-01 00:00:00")
+    rooms = [
+        room("Living", "sensor.living", setpoint_entity="climate.living_controller"),
+        room("Bath", "climate.bath"),
+    ]
+    entry = await setup(
+        hass,
+        aioclient_mock,
+        solution(1),
+        options={"reduction_lock_entity": "input_datetime.lock"},
+        rooms=rooms,
+    )
+    coordinator = entry.runtime_data
+    assert coordinator.data.comfort_events == 0
+    # raised at the wall (no automation context): recorded
+    hass.states.async_set("climate.living_controller", "heat", {"temperature": 22.0})
+    await coordinator.async_refresh()
+    assert coordinator.data.comfort_events == 1
+    assert coordinator.learning.events[-1].room == "Living"
+    assert coordinator.learning.events[-1].temperature_c == pytest.approx(19.8)
+    # raised by an automation: ignored
+    hass.states.async_set(
+        "climate.living_controller",
+        "heat",
+        {"temperature": 23.0},
+        context=Context(parent_id="automation-run"),
+    )
+    await coordinator.async_refresh()
+    assert coordinator.data.comfort_events == 1
+    # lock set into the future: attributed to the room closest to its limit
+    future = dt_util.now() + timedelta(hours=3)
+    hass.states.async_set("input_datetime.lock", future.strftime("%Y-%m-%d %H:%M:%S"))
+    await coordinator.async_refresh()
+    assert coordinator.data.comfort_events == 2
+    assert coordinator.learning.events[-1].kind == "lock"
+    assert coordinator.learning.events[-1].room == "Living"
+    # stored across a reload, reset by the button
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.runtime_data.data.comfort_events == 2
+    state = hass.states.get("sensor.eos_hp1_comfort_suggestions")
+    assert state.state == "0" and state.attributes["events"] == 2
+    await hass.services.async_call(
+        "button", "press", {"entity_id": "button.eos_hp1_reset_comfort_learning"}, blocking=True
+    )
+    assert entry.runtime_data.data.comfort_events == 0

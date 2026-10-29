@@ -51,6 +51,7 @@ CONF_HUMIDITY_ENTITY = "humidity_entity"
 CONF_HUMIDITY_MAX = "humidity_max_pct"
 CONF_HUMIDITY_DELAY = "humidity_delay_min"
 CONF_IN_ZONE = "in_zone"
+CONF_SETPOINT_ENTITY = "setpoint_entity"
 
 DEFAULTS = {
     CONF_SCAN_INTERVAL: 60,

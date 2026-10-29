@@ -40,6 +40,7 @@ from .const import (
     CONF_REDUCED_SETPOINT_ENTITY,
     CONF_REDUCTION_LOCK_ENTITY,
     CONF_SCAN_INTERVAL,
+    CONF_SETPOINT_ENTITY,
     CONF_SG_ACTUAL_ENTITY,
     CONF_SG_FORCED,
     CONF_SG_NORMAL,
@@ -59,6 +60,16 @@ from .const import (
     MISMATCH_CONFIRM_POLLS,
     MISMATCH_LOG_SIZE,
     SUBENTRY_ROOM,
+)
+from .learning import (
+    KIND_LOCK,
+    KIND_SETPOINT,
+    ComfortEvent,
+    ComfortLearning,
+    Suggestion,
+    lock_room,
+    lock_set,
+    setpoint_raised,
 )
 from .logic import ControlInput, Decision, Plan, RoomState, Settings, decide, parse_plan
 
@@ -99,6 +110,8 @@ class ControlData:
     shadow: ShadowStats
     reference_sg: Optional[int] = None
     reference_standby: Optional[bool] = None
+    suggestions: list[Suggestion] = field(default_factory=list)
+    comfort_events: int = 0
 
 
 class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
@@ -120,7 +133,11 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}"
         )
         self.shadow = ShadowStats()
+        self.learning = ComfortLearning()
         self._humidity_since: dict[str, datetime] = {}
+        self._setpoints: dict[str, Optional[float]] = {}
+        self._lock: Optional[datetime] = None
+        self._lock_seen = False
         self._loaded = False
 
     # ------------------------------------------------------------------
@@ -148,7 +165,9 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
 
     async def _async_update_data(self) -> ControlData:
         if not self._loaded:
-            self.shadow = ShadowStats.from_dict(await self._store.async_load())
+            stored = await self._store.async_load() or {}
+            self.shadow = ShadowStats.from_dict(stored)
+            self.learning = ComfortLearning.from_list(stored.get("comfort_events"))
             self._loaded = True
         now = dt_util.now()
         plan, error = await self._fetch_plan()
@@ -169,12 +188,13 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             reduction_locked_until=self._datetime(self.option(CONF_REDUCTION_LOCK_ENTITY)),
         )
         decision = decide(data, self.settings())
+        learned = self._learn(now, data)
         if error and not decision.reason.startswith("NORMAL: EOS"):
             decision.reason = f"{decision.reason} ({error})"
         reference_sg = self._int(self.option(CONF_SG_REFERENCE_ENTITY))
         reference_standby = self._standby_reference()
-        if self._compare(now, decision, reference_sg, reference_standby, data.holiday):
-            self._store.async_delay_save(self.shadow.as_dict, 30)
+        if self._compare(now, decision, reference_sg, reference_standby, data.holiday) or learned:
+            self._store.async_delay_save(self._stored, 30)
         return ControlData(
             decision=decision,
             plan=plan,
@@ -182,7 +202,12 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             shadow=self.shadow,
             reference_sg=reference_sg,
             reference_standby=reference_standby,
+            suggestions=self.learning.suggestions(self._lower_limits()),
+            comfort_events=len(self.learning.events),
         )
+
+    def _stored(self) -> dict[str, Any]:
+        return {**self.shadow.as_dict(), "comfort_events": self.learning.as_list()}
 
     async def _fetch_plan(self) -> tuple[Optional[Plan], Optional[str]]:
         url = f"{self.entry.data[CONF_URL]}/v1/energy-management/optimization/solution"
@@ -300,14 +325,79 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
         return changed
 
     async def async_save_shadow(self) -> None:
-        """Write the comparison now (unload, restart)."""
+        """Write the comparison and the comfort events now (unload, restart)."""
         if self._loaded:
-            await self._store.async_save(self.shadow.as_dict())
+            await self._store.async_save(self._stored())
 
     async def async_reset_shadow(self) -> None:
         self.shadow = ShadowStats()
-        await self._store.async_save(self.shadow.as_dict())
+        await self._store.async_save(self._stored())
         await self.async_request_refresh()
+
+    async def async_reset_comfort(self) -> None:
+        self.learning = ComfortLearning()
+        await self._store.async_save(self._stored())
+        await self.async_request_refresh()
+
+    # ------------------------------------------------------------------
+    # Comfort learning
+    # ------------------------------------------------------------------
+
+    def _room_configs(self) -> list[Mapping[str, Any]]:
+        return [s.data for s in self.entry.subentries.values() if s.subentry_type == SUBENTRY_ROOM]
+
+    def _lower_limits(self) -> dict[str, float]:
+        return {
+            str(cfg.get(CONF_NAME)): float(cfg.get(CONF_LOWER, DEFAULTS[CONF_LOWER]))
+            for cfg in self._room_configs()
+        }
+
+    def _learn(self, now: datetime, data: ControlInput) -> bool:
+        """Record manual setpoint raises and newly set locks; True = something recorded."""
+        recorded = False
+        temps = {r.name: r.temperature for r in data.rooms}
+        lowers = {r.name: r.lower_c for r in data.rooms}
+        for cfg in self._room_configs():
+            name = str(cfg.get(CONF_NAME))
+            state = self._state(cfg.get(CONF_SETPOINT_ENTITY))
+            current = self._setpoint(state)
+            previous = self._setpoints.get(name)
+            self._setpoints[name] = current
+            temperature = temps.get(name)
+            if (
+                setpoint_raised(previous, current)
+                and not data.holiday
+                and state is not None
+                and state.context.parent_id is None  # not changed by an automation
+                and temperature is not None
+            ):
+                self.learning.record(
+                    ComfortEvent(now, name, KIND_SETPOINT, temperature, lowers[name])
+                )
+                recorded = True
+        lock = data.reduction_locked_until
+        if self._lock_seen and not data.holiday and lock_set(self._lock, lock, now):
+            room = lock_room(
+                [(r.name, r.temperature, r.lower_c) for r in data.rooms if not r.airing]
+            )
+            if room is not None:
+                self.learning.record(ComfortEvent(now, room[0], KIND_LOCK, room[1], room[2]))
+                recorded = True
+        self._lock = lock
+        self._lock_seen = True
+        return recorded
+
+    @staticmethod
+    def _setpoint(state: Optional[State]) -> Optional[float]:
+        if state is None:
+            return None
+        if state.domain == "climate":
+            value = state.attributes.get("temperature")
+            return float(value) if isinstance(value, (int, float)) else None
+        try:
+            return float(state.state)
+        except ValueError:
+            return None
 
     # ------------------------------------------------------------------
     # State helpers

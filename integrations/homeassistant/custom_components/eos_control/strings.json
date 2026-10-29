@@ -73,7 +73,8 @@
             "humidity_entity": "Humidity sensor (optional)",
             "humidity_max_pct": "Humidity limit",
             "humidity_delay_min": "Humidity delay",
-            "in_zone": "Belongs to the EOS set-back zone"
+            "in_zone": "Belongs to the EOS set-back zone",
+            "setpoint_entity": "Room setpoint for comfort learning (optional)"
           }
         },
         "reconfigure": {
@@ -87,7 +88,8 @@
             "humidity_entity": "Humidity sensor (optional)",
             "humidity_max_pct": "Humidity limit",
             "humidity_delay_min": "Humidity delay",
-            "in_zone": "Belongs to the EOS set-back zone"
+            "in_zone": "Belongs to the EOS set-back zone",
+            "setpoint_entity": "Room setpoint for comfort learning (optional)"
           }
         }
       },
@@ -124,6 +126,9 @@
       },
       "shadow_agreement": {
         "name": "Shadow agreement"
+      },
+      "comfort_suggestions": {
+        "name": "Comfort suggestions"
       }
     },
     "binary_sensor": {
@@ -146,6 +151,9 @@
     "button": {
       "reset_shadow": {
         "name": "Reset shadow comparison"
+      },
+      "reset_comfort": {
+        "name": "Reset comfort learning"
       }
     }
   }

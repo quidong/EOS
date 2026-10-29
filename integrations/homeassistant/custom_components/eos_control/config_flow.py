@@ -30,6 +30,7 @@ from .const import (
     CONF_HOLIDAY_RETURN_ENTITY,
     CONF_HUMIDITY_DELAY,
     CONF_HUMIDITY_ENTITY,
+    CONF_SETPOINT_ENTITY,
     CONF_HUMIDITY_MAX,
     CONF_HYSTERESIS,
     CONF_IN_ZONE,
@@ -320,6 +321,8 @@ def _room_data(user_input: dict[str, Any]) -> dict[str, Any]:
     }
     if user_input.get(CONF_HUMIDITY_ENTITY):
         data[CONF_HUMIDITY_ENTITY] = user_input[CONF_HUMIDITY_ENTITY]
+    if user_input.get(CONF_SETPOINT_ENTITY):
+        data[CONF_SETPOINT_ENTITY] = user_input[CONF_SETPOINT_ENTITY]
     return data
 
 
@@ -345,5 +348,8 @@ def _room_schema(current: dict[str, Any]) -> vol.Schema:
             0, 480, 5, "min"
         ),
         vol.Required(CONF_IN_ZONE, default=default(CONF_IN_ZONE)): bool,
+        _optional_entity(CONF_SETPOINT_ENTITY, current): _entity(
+            ["climate", "number", "input_number"]
+        ),
     }
     return vol.Schema(fields)
