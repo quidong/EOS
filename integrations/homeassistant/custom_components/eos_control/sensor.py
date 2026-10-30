@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -20,12 +21,14 @@ from homeassistant.const import (
     UnitOfTemperature,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import EosControlConfigEntry
 from .charts import parse_time
-from .const import CONF_EOS_DEVICE, CONF_HOLIDAY_FLOOR, CONF_KIND
-from .coordinator import ControlData
+from .const import CONF_EOS_DEVICE, CONF_HOLIDAY_FLOOR, CONF_KIND, CONF_PLAN_ENTITIES, DEFAULTS
+from .coordinator import ControlData, EosControlCoordinator
 from .devices import (
     KIND_APPLIANCE,
     KIND_BATTERY,
@@ -34,8 +37,10 @@ from .devices import (
     OPERATION_MODES,
     DeviceState,
 )
-from .entity import EosControlEntity, EosDeviceEntity, EosRoomEntity
+from .entity import EosControlEntity, EosDeviceEntity, EosRoomEntity, eos_device, hub_device
 from .logic import MODE_NAMES
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -199,6 +204,7 @@ CHART_SENSORS: tuple[EosSensorDescription, ...] = (
     EosSensorDescription(
         key="history",
         heat_pump=False,
+        entity_category=EntityCategory.DIAGNOSTIC,
         device_class=SensorDeviceClass.TIMESTAMP,
         available=lambda d: d.history is not None,
         value=lambda d: parse_time((d.history or {}).get("state")),
@@ -210,6 +216,7 @@ CHART_SENSORS: tuple[EosSensorDescription, ...] = (
     EosSensorDescription(
         key="history_hours",
         heat_pump=False,
+        entity_category=EntityCategory.DIAGNOSTIC,
         device_class=SensorDeviceClass.TIMESTAMP,
         available=lambda d: d.history_hours is not None,
         value=lambda d: parse_time((d.history_hours or {}).get("state")),
@@ -242,6 +249,7 @@ DEVICE_SENSORS: tuple[EosDeviceSensorDescription, ...] = (
     EosDeviceSensorDescription(
         key="mode_factor",
         kinds=(KIND_BATTERY, KIND_EV),
+        entity_registry_enabled_default=False,
         native_unit_of_measurement=PERCENTAGE,
         value=lambda s: round(s.factor * 100.0, 1) if s.factor is not None else None,
     ),
@@ -274,6 +282,7 @@ DEVICE_SENSORS: tuple[EosDeviceSensorDescription, ...] = (
     EosDeviceSensorDescription(
         key="device_plan",
         kinds=(KIND_BATTERY, KIND_EV, KIND_APPLIANCE),
+        entity_registry_enabled_default=False,
         device_class=SensorDeviceClass.TIMESTAMP,
         value=lambda s: parse_time(s.rows[0]["t"]) if s.rows else None,
         attributes=lambda s: {"data": s.rows},
@@ -350,6 +359,8 @@ async def async_setup_entry(
 ) -> None:
     coordinator = entry.runtime_data
     async_add_entities(EosChartSensor(coordinator, d) for d in CHART_SENSORS if not d.heat_pump)
+    if entry.options.get(CONF_PLAN_ENTITIES, DEFAULTS[CONF_PLAN_ENTITIES]):
+        _setup_columns(coordinator, async_add_entities)
     for subentry in coordinator.device_subentries(KIND_HEAT_PUMP)[:1]:
         async_add_entities(
             [
@@ -452,3 +463,119 @@ class EosRoomSensor(EosRoomEntity, SensorEntity):
         if self.entity_description.attributes is None:
             return None
         return self.entity_description.attributes(self)
+
+
+# ----------------------------------------------------------------------
+# Plan columns as entities (sensor.eos_<column>, as EOS's own adapter named them)
+# ----------------------------------------------------------------------
+
+COLUMN_UNITS: tuple[tuple[str, str, SensorDeviceClass | None], ...] = (
+    ("_energy_wh", UnitOfEnergy.WATT_HOUR, None),
+    ("_temperature_c", UnitOfTemperature.CELSIUS, SensorDeviceClass.TEMPERATURE),
+    ("_target_c", UnitOfTemperature.CELSIUS, SensorDeviceClass.TEMPERATURE),
+    ("_soc_factor", "", None),
+)
+
+
+def column_object_id(column: str) -> str:
+    return "eos_" + "".join(c if c.isalnum() else "_" for c in column.lower())
+
+
+def _setup_columns(coordinator, async_add_entities) -> None:
+    """Entities for the plan columns; columns that appear later are added then."""
+    known: set[str] = set()
+    skipped: set[str] = set()
+    subentries = {str(s.data[CONF_EOS_DEVICE]): s for s in coordinator.device_subentries()}
+
+    def add_new() -> None:
+        data = coordinator.data
+        columns = data.columns if data is not None and data.columns else {}
+        registry = er.async_get(coordinator.hass)
+        new = []
+        for column in columns:
+            if column in known or not isinstance(columns[column], (int, float)):
+                continue
+            entity_id = f"sensor.{column_object_id(column)}"
+            if (
+                coordinator.hass.states.get(entity_id) is not None
+                and registry.async_get(entity_id) is None
+            ):
+                # Published by someone else (EOS's own Home Assistant adapter): no
+                # entity "<id>_2"; it is added after the next restart without it.
+                if column not in skipped:
+                    skipped.add(column)
+                    _LOGGER.warning(
+                        "%s is published by another source (EOS adapter?): not taken over",
+                        entity_id,
+                    )
+                continue
+            new.append(column)
+        if not new:
+            return
+        by_subentry: dict[str | None, list[EosColumnSensor]] = {}
+        for column in new:
+            known.add(column)
+            owner = next(
+                (
+                    d
+                    for d in sorted(subentries, key=len, reverse=True)
+                    if column.startswith(f"{d}_")
+                ),
+                None,
+            )
+            sub = subentries.get(owner) if owner else None
+            by_subentry.setdefault(sub.subentry_id if sub else None, []).append(
+                EosColumnSensor(
+                    coordinator,
+                    column,
+                    eos_device(coordinator, str(owner), str(sub.data[CONF_KIND]))
+                    if sub is not None
+                    else hub_device(coordinator),
+                )
+            )
+        for subentry_id, entities in by_subentry.items():
+            async_add_entities(entities, config_subentry_id=subentry_id)
+
+    add_new()
+    coordinator.async_add_listener(add_new)
+
+
+class EosColumnSensor(CoordinatorEntity[EosControlCoordinator], SensorEntity):
+    """One column of the EOS plan, value of the current slot; unavailable without plan."""
+
+    _attr_has_entity_name = False
+    _attr_state_class: SensorStateClass | None = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator, column: str, device_info) -> None:
+        super().__init__(coordinator)
+        self.column = column
+        object_id = column_object_id(column)
+        self.entity_id = f"sensor.{object_id}"
+        self._attr_unique_id = f"{coordinator.entry.entry_id}_column_{column}"
+        self._attr_name = "EOS " + column.replace("_", " ")
+        self._attr_device_info = device_info
+        for suffix, unit, device_class in COLUMN_UNITS:
+            if column.endswith(suffix):
+                self._attr_native_unit_of_measurement = unit or None
+                self._attr_device_class = device_class
+                break
+        if "_kpi_" in column:
+            self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        if column.endswith("_ts"):
+            self._attr_state_class = None  # a point in time (Unix time), no statistics
+
+    @property
+    def available(self) -> bool:
+        data = self.coordinator.data
+        return (
+            super().available
+            and data is not None
+            and data.columns is not None
+            and isinstance(data.columns.get(self.column), (int, float))
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        data = self.coordinator.data
+        value = data.columns.get(self.column) if data is not None and data.columns else None
+        return float(value) if isinstance(value, (int, float)) else None

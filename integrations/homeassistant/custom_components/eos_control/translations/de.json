@@ -67,8 +67,16 @@
           "holiday_dhw_lead_hours": "WW-Sollwerte vor einer Ladung zurückstellen",
           "heating_season_states": "Zustände für Heizen (kommagetrennt)",
           "standby_reference_state": "Zustand für Standby",
-          "settle_seconds": "Neue Entscheidung erst übernehmen nach"
+          "settle_seconds": "Neue Entscheidung erst übernehmen nach",
+          "send_measurements": "Messwerte an EOS senden",
+          "measurement_interval_min": "Messwerte senden alle",
+          "plan_entities": "Plan-Spalten als Entitäten (sensor.eos_…)"
         }
+      },
+      "measurements": {
+        "title": "Messwerte für EOS",
+        "description": "Entitäten für die EOS-Messwerte, die zu keinem eingebundenen Gerät gehören (Zähler u. a.). Leer = nicht senden.",
+        "data": {}
       }
     }
   },
@@ -125,12 +133,18 @@
           "data": {
             "eos_device_id": "Gerät"
           }
+        },
+        "reconfigure": {
+          "title": "Messwerte des Geräts",
+          "description": "Entitäten für die EOS-Messwerte dieses Geräts. Werte, die die Integration selbst berechnet (Räume, Urlaub, Sperre), fehlen hier.",
+          "data": {}
         }
       },
       "abort": {
         "cannot_read_devices": "Die Geräteliste von EOS (/v1/config/devices) konnte nicht gelesen werden.",
         "no_devices": "EOS hat keine weiteren Geräte, die sich hinzufügen lassen.",
-        "device_not_found": "Das Gerät ist nicht mehr in der EOS-Konfiguration."
+        "device_not_found": "Das Gerät ist nicht mehr in der EOS-Konfiguration.",
+        "reconfigure_successful": "Gespeichert."
       }
     }
   },
@@ -275,6 +289,140 @@
       "reset_comfort": {
         "name": "Komfort-Lernen zurücksetzen"
       }
+    },
+    "calendar": {
+      "plan_calendar": {
+        "name": "Plan"
+      }
+    }
+  },
+  "issues": {
+    "eos_unreachable": {
+      "title": "EOS nicht erreichbar",
+      "description": "EOS antwortet seit mehr als {minutes} Minuten nicht unter {url}. Die Integration nutzt den letzten Plan, solange er gültig ist, und fällt danach auf NORMAL zurück."
+    },
+    "plan_stale": {
+      "title": "EOS-Plan veraltet",
+      "description": "EOS ist erreichbar, aber der Plan ist älter als {minutes} Minuten. Läuft die Optimierung in EOS?"
+    },
+    "device_missing": {
+      "title": "EOS-Gerät {device} fehlt",
+      "description": "Das Gerät {device} ist nicht mehr in der EOS-Konfiguration. Gerät in EOS wieder anlegen oder in der Integration entfernen."
+    },
+    "measurements_failed": {
+      "title": "Messwerte erreichen EOS nicht",
+      "description": "Seit mehr als {minutes} Minuten nimmt EOS die Messwerte nicht an: {error}."
+    }
+  },
+  "services": {
+    "lock_reduction": {
+      "name": "Absenkung sperren",
+      "description": "Keine Absenkung bis zu einer Uhrzeit oder für eine Dauer (EOS plant bis dahin NORMAL).",
+      "fields": {
+        "config_entry_id": {
+          "name": "EOS-Eintrag",
+          "description": "Nur nötig bei mehreren EOS-Instanzen."
+        },
+        "until": {
+          "name": "Bis",
+          "description": "Ende der Sperre."
+        },
+        "duration": {
+          "name": "Dauer",
+          "description": "Sperre ab jetzt für diese Dauer."
+        }
+      }
+    },
+    "clear_reduction_lock": {
+      "name": "Absenk-Sperre aufheben",
+      "description": "Hebt die per Aktion gesetzte Sperre auf.",
+      "fields": {
+        "config_entry_id": {
+          "name": "EOS-Eintrag",
+          "description": "Nur nötig bei mehreren EOS-Instanzen."
+        }
+      }
+    },
+    "set_holiday": {
+      "name": "Urlaub setzen",
+      "description": "Urlaub von/bis: EOS plant mit Abwesenheit und heizt zur Rückkehr wieder auf.",
+      "fields": {
+        "config_entry_id": {
+          "name": "EOS-Eintrag",
+          "description": "Nur nötig bei mehreren EOS-Instanzen."
+        },
+        "start": {
+          "name": "Beginn",
+          "description": "Leer = ab jetzt."
+        },
+        "return_at": {
+          "name": "Rückkehr",
+          "description": "Zeitpunkt der Rückkehr."
+        }
+      }
+    },
+    "end_holiday": {
+      "name": "Urlaub beenden",
+      "description": "Beendet den per Aktion gesetzten Urlaub.",
+      "fields": {
+        "config_entry_id": {
+          "name": "EOS-Eintrag",
+          "description": "Nur nötig bei mehreren EOS-Instanzen."
+        }
+      }
+    },
+    "request_run": {
+      "name": "Gerätelauf anfordern",
+      "description": "Ein Haushaltsgerät soll bis zu einer Uhrzeit fertig sein; EOS plant den günstigsten Start.",
+      "fields": {
+        "config_entry_id": {
+          "name": "EOS-Eintrag",
+          "description": "Nur nötig bei mehreren EOS-Instanzen."
+        },
+        "device": {
+          "name": "Gerät",
+          "description": "EOS-Geräte-ID des Haushaltsgeräts."
+        },
+        "finish_by": {
+          "name": "Fertig bis",
+          "description": "Spätestes Ende."
+        },
+        "duration": {
+          "name": "Dauer",
+          "description": "Programmdauer (leer = Wert aus EOS)."
+        }
+      }
+    },
+    "cancel_run": {
+      "name": "Gerätelauf abbrechen",
+      "description": "Nimmt die Anforderung zurück.",
+      "fields": {
+        "config_entry_id": {
+          "name": "EOS-Eintrag",
+          "description": "Nur nötig bei mehreren EOS-Instanzen."
+        },
+        "device": {
+          "name": "Gerät",
+          "description": "EOS-Geräte-ID des Haushaltsgeräts."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "entry_ambiguous": {
+      "message": "Mehrere EOS-Einträge: bitte den Eintrag angeben."
+    },
+    "entry_not_found": {
+      "message": "Kein geladener EOS-Eintrag gefunden."
+    },
+    "return_before_start": {
+      "message": "Die Rückkehr muss nach dem Beginn liegen."
+    },
+    "unknown_appliance": {
+      "message": "{device} ist kein Haushaltsgerät in EOS."
+    },
+    "finish_in_the_past": {
+      "message": "„Fertig bis“ liegt in der Vergangenheit."
     }
   }
 }

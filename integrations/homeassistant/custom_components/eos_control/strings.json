@@ -67,8 +67,16 @@
           "holiday_dhw_lead_hours": "Restore hot water setpoints ahead of a charge",
           "heating_season_states": "States meaning heating (comma separated)",
           "standby_reference_state": "State meaning standby",
-          "settle_seconds": "Accept a changed decision after"
+          "settle_seconds": "Accept a changed decision after",
+          "send_measurements": "Send measurements to EOS",
+          "measurement_interval_min": "Send measurements every",
+          "plan_entities": "Plan columns as entities (sensor.eos_…)"
         }
+      },
+      "measurements": {
+        "title": "Measurements for EOS",
+        "description": "Entities for the EOS measurements that belong to no added device (meters etc.). Empty = not sent.",
+        "data": {}
       }
     }
   },
@@ -125,12 +133,18 @@
           "data": {
             "eos_device_id": "Device"
           }
+        },
+        "reconfigure": {
+          "title": "Measurements of the device",
+          "description": "Entities for the EOS measurements of this device. Values the integration computes itself (rooms, holiday, lock) are not listed.",
+          "data": {}
         }
       },
       "abort": {
         "cannot_read_devices": "Could not read the device list of EOS (/v1/config/devices).",
         "no_devices": "EOS has no further devices that can be added.",
-        "device_not_found": "The device is no longer in the EOS configuration."
+        "device_not_found": "The device is no longer in the EOS configuration.",
+        "reconfigure_successful": "Saved."
       }
     }
   },
@@ -275,6 +289,140 @@
       "reset_comfort": {
         "name": "Reset comfort learning"
       }
+    },
+    "calendar": {
+      "plan_calendar": {
+        "name": "Plan"
+      }
+    }
+  },
+  "issues": {
+    "eos_unreachable": {
+      "title": "EOS unreachable",
+      "description": "EOS has not answered at {url} for more than {minutes} minutes. The integration uses the last plan while it is valid and then falls back to NORMAL."
+    },
+    "plan_stale": {
+      "title": "EOS plan outdated",
+      "description": "EOS answers, but its plan is older than {minutes} minutes. Is the optimisation running in EOS?"
+    },
+    "device_missing": {
+      "title": "EOS device {device} missing",
+      "description": "The device {device} is no longer in the EOS configuration. Add it in EOS again or remove it from the integration."
+    },
+    "measurements_failed": {
+      "title": "Measurements do not reach EOS",
+      "description": "EOS has not accepted the measurements for more than {minutes} minutes: {error}."
+    }
+  },
+  "services": {
+    "lock_reduction": {
+      "name": "Lock the reduction",
+      "description": "No reduction until a time or for a duration (EOS plans NORMAL until then).",
+      "fields": {
+        "config_entry_id": {
+          "name": "EOS entry",
+          "description": "Only needed with several EOS instances."
+        },
+        "until": {
+          "name": "Until",
+          "description": "End of the lock."
+        },
+        "duration": {
+          "name": "Duration",
+          "description": "Lock from now for this duration."
+        }
+      }
+    },
+    "clear_reduction_lock": {
+      "name": "Clear the reduction lock",
+      "description": "Clears the lock set by action.",
+      "fields": {
+        "config_entry_id": {
+          "name": "EOS entry",
+          "description": "Only needed with several EOS instances."
+        }
+      }
+    },
+    "set_holiday": {
+      "name": "Set holiday",
+      "description": "Holiday from/until: EOS plans with absence and heats up for the return.",
+      "fields": {
+        "config_entry_id": {
+          "name": "EOS entry",
+          "description": "Only needed with several EOS instances."
+        },
+        "start": {
+          "name": "Start",
+          "description": "Empty = from now."
+        },
+        "return_at": {
+          "name": "Return",
+          "description": "Time of the return."
+        }
+      }
+    },
+    "end_holiday": {
+      "name": "End holiday",
+      "description": "Ends the holiday set by action.",
+      "fields": {
+        "config_entry_id": {
+          "name": "EOS entry",
+          "description": "Only needed with several EOS instances."
+        }
+      }
+    },
+    "request_run": {
+      "name": "Request an appliance run",
+      "description": "A home appliance shall be done by a time; EOS plans the cheapest start.",
+      "fields": {
+        "config_entry_id": {
+          "name": "EOS entry",
+          "description": "Only needed with several EOS instances."
+        },
+        "device": {
+          "name": "Device",
+          "description": "EOS device id of the home appliance."
+        },
+        "finish_by": {
+          "name": "Finish by",
+          "description": "Latest end."
+        },
+        "duration": {
+          "name": "Duration",
+          "description": "Program duration (empty = value of EOS)."
+        }
+      }
+    },
+    "cancel_run": {
+      "name": "Cancel an appliance run",
+      "description": "Withdraws the request.",
+      "fields": {
+        "config_entry_id": {
+          "name": "EOS entry",
+          "description": "Only needed with several EOS instances."
+        },
+        "device": {
+          "name": "Device",
+          "description": "EOS device id of the home appliance."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "entry_ambiguous": {
+      "message": "Several EOS entries: please name the entry."
+    },
+    "entry_not_found": {
+      "message": "No loaded EOS entry found."
+    },
+    "return_before_start": {
+      "message": "The return must be after the start."
+    },
+    "unknown_appliance": {
+      "message": "{device} is no home appliance in EOS."
+    },
+    "finish_in_the_past": {
+      "message": "'Finish by' is in the past."
     }
   }
 }

@@ -124,6 +124,41 @@ automation can fall back to a safe default.
 Migration from 0.4 (entry = one heat pump): the heat pump becomes a device subentry, the entry is
 renamed "EOS". All entity ids stay as they were.
 
+## Data flow between Home Assistant and EOS
+
+| Direction | How |
+| --- | --- |
+| HA → EOS | The integration sends the measurements itself (`PUT /v1/measurement/data`, every 5 min by default): the heat pump values it computes (room mean, margins, humidity, share of open windows, holiday, return time, reduced setpoint, holiday floor, lock of the reduction) and every other EOS measurement key mapped to an entity — per device in the device's settings ("Configure"), energy meters and keys of devices not added in the options of EOS. The mapping of EOS's own Home Assistant adapter is offered as suggestion. EOS then needs no access to Home Assistant. |
+| EOS → HA | The integration reads the plan (`/optimization/solution`) and publishes targets, charts, the plan columns as entities `sensor.eos_<column>` (value of the current slot, unavailable without a valid plan; option "plan columns as entities") and a calendar. A `sensor.eos_<column>` already published by EOS's adapter is not taken over (no `_2`); switch the adapter's `solution_entity_ids` off and restart Home Assistant. |
+
+### Repairs
+
+Settings → System → Repairs shows: EOS unreachable for more than 30 minutes, plan older than the plan
+age limit while EOS answers, an added device missing in the EOS configuration, measurements not
+accepted by EOS for more than 30 minutes.
+
+### Long-term statistics of the plan
+
+For every completed hour the integration writes the planned values (last plan for each slot) as
+external statistics: `eos_control:plan_house_load`, `plan_grid_import`, `plan_grid_export` (kWh per
+hour) and for the heat pump `plan_<id>_heat_pump_energy`, `plan_<id>_room_temperature`,
+`plan_<id>_dhw_temperature`. A statistics graph shows them next to the meters (stat type mean).
+
+### Actions
+
+| Action | Effect |
+| --- | --- |
+| `eos_control.lock_reduction` (`until` or `duration`) / `clear_reduction_lock` | no reduction until then (combined with the lock entity: the later one counts) |
+| `eos_control.set_holiday` (`return_at`, optional `start`) / `end_holiday` | holiday without helper entities (or-combined with the holiday entity) |
+| `eos_control.request_run` (`device`, `finish_by`, optional `duration`) / `cancel_run` | a home appliance run: EOS gets `<id>-requested`, `-deadline`, `-duration` and plans the cheapest start |
+
+State set by actions is stored and survives restarts; with several EOS entries name the entry.
+
+### Calendar
+
+`calendar.eos_plan`: raised heating, preheating, forced heating, standby, hot water charges (heat pump
+or rod), appliance runs, charging from the grid and battery export.
+
 ## Charts
 
 The integration publishes what EOS planned and forecast, so dashboards need no REST or template

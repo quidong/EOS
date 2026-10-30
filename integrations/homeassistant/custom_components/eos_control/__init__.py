@@ -12,18 +12,30 @@ from types import MappingProxyType
 
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.typing import ConfigType
 
 from .const import (
     CONF_DEVICE_ID,
     CONF_EOS_DEVICE,
     CONF_KIND,
+    CONF_PLAN_ENTITIES,
     CONF_URL,
+    DOMAIN,
     PLATFORMS,
     SUBENTRY_DEVICE,
 )
 from .coordinator import EosControlCoordinator
+from .services import async_setup_services
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 type EosControlConfigEntry = ConfigEntry[EosControlCoordinator]
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    async_setup_services(hass)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: EosControlConfigEntry) -> bool:
@@ -56,8 +68,15 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if entry.version == 1:
         device_id = str(entry.data.get(CONF_DEVICE_ID) or "")
         data = {k: v for k, v in entry.data.items() if k != CONF_DEVICE_ID}
+        # EOS's own adapter may still publish sensor.eos_<column>: the plan column
+        # entities stay off until that is switched off (options).
         hass.config_entries.async_update_entry(
-            entry, data=data, title="EOS", unique_id=entry.data.get(CONF_URL), version=2
+            entry,
+            data=data,
+            options={**entry.options, CONF_PLAN_ENTITIES: False},
+            title="EOS",
+            unique_id=entry.data.get(CONF_URL),
+            version=2,
         )
         present = {
             s.data.get(CONF_EOS_DEVICE)

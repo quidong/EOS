@@ -59,12 +59,17 @@ from .const import (
     CONF_ZONE_ALLOWED_ENTITY,
     CONF_EOS_DEVICE,
     CONF_KIND,
+    CONF_MEASUREMENTS,
+    CONF_MEASUREMENT_INTERVAL,
+    CONF_PLAN_ENTITIES,
+    CONF_SEND_MEASUREMENTS,
     DEFAULTS,
     DOMAIN,
     SUBENTRY_DEVICE,
     SUBENTRY_ROOM,
 )
 from .devices import DEVICE_KINDS, KIND_HEAT_PUMP, EosDevice, parse_devices
+from .measurements import computed_keys, device_keys, emr_keys
 
 CONF_DEVICES = "devices"
 
@@ -109,6 +114,67 @@ async def _check_eos(hass, url: str) -> str | None:
     except (aiohttp.ClientError, TimeoutError):
         return "cannot_connect"
     return None
+
+
+async def fetch_json(hass, url: str, path: str) -> Any:
+    """GET ``path`` of EOS as JSON; None = no answer."""
+    session = async_get_clientsession(hass)
+    try:
+        async with session.get(
+            f"{url.rstrip('/')}{path}", timeout=aiohttp.ClientTimeout(total=10)
+        ) as resp:
+            if resp.status != 200:
+                return None
+            return await resp.json()
+    except (aiohttp.ClientError, TimeoutError, ValueError):
+        return None
+
+
+ADAPTER = "/v1/config/adapter/homeassistant"
+EMR_ADAPTER_SECTIONS = (
+    "load_emr_entity_ids",
+    "grid_import_emr_entity_ids",
+    "grid_export_emr_entity_ids",
+    "pv_production_emr_entity_ids",
+)
+
+
+async def measurement_catalog(hass, url: str) -> tuple[list[str], dict[str, str]]:
+    """All EOS measurement keys and the mapping of EOS's own Home Assistant adapter.
+
+    The adapter mapping only serves as suggestion (taking over from EOS); EOS's
+    energy meters use the entity id as key.
+    """
+    devices = await fetch_json(hass, url, "/v1/config/devices") or {}
+    measurement = await fetch_json(hass, url, "/v1/config/measurement") or {}
+    keys = [k for k in devices.get("measurement_keys") or [] if isinstance(k, str)]
+    keys += [k for k in emr_keys(measurement) if k not in keys]
+    suggested: dict[str, str] = {}
+    mapping = await fetch_json(hass, url, f"{ADAPTER}/device_measurement_entity_ids")
+    if isinstance(mapping, dict):
+        suggested.update({str(k): str(v) for k, v in mapping.items() if v})
+    for section in EMR_ADAPTER_SECTIONS:
+        for entity_id in await fetch_json(hass, url, f"{ADAPTER}/{section}") or []:
+            if isinstance(entity_id, str):
+                suggested.setdefault(entity_id, entity_id)
+    return keys, suggested
+
+
+def _mapping_schema(keys: list[str], current: dict[str, str]) -> vol.Schema:
+    fields: dict[Any, Any] = {}
+    for key in keys:
+        value = current.get(key)
+        marker = (
+            vol.Optional(key, description={"suggested_value": value})
+            if value
+            else vol.Optional(key)
+        )
+        fields[marker] = selector.EntitySelector(selector.EntitySelectorConfig())
+    return vol.Schema(fields)
+
+
+def _mapping(user_input: dict[str, Any], keys: list[str]) -> dict[str, str]:
+    return {k: str(user_input[k]) for k in keys if user_input.get(k)}
 
 
 async def fetch_devices(hass, url: str) -> list[EosDevice] | None:
@@ -294,6 +360,9 @@ RULE_KEYS = (
     CONF_SETTLE,
     CONF_HEATING_SEASON_STATES,
     CONF_STANDBY_REFERENCE_STATE,
+    CONF_SEND_MEASUREMENTS,
+    CONF_MEASUREMENT_INTERVAL,
+    CONF_PLAN_ENTITIES,
 )
 
 
@@ -309,6 +378,8 @@ class EosControlOptionsFlow(OptionsFlow):
 
     def __init__(self) -> None:
         self._entities: dict[str, Any] = {}
+        self._rules: dict[str, Any] = {}
+        self._keys: list[str] = []
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         options = dict(self.config_entry.options)
@@ -359,10 +430,12 @@ class EosControlOptionsFlow(OptionsFlow):
                 CONF_MIN_VALID_ROOMS,
                 CONF_PLAN_MAX_AGE,
                 CONF_AIRING_RUN_ON,
+                CONF_MEASUREMENT_INTERVAL,
             ):
                 if key in rules:
                     rules[key] = int(rules[key])
-            return self.async_create_entry(data={**rules, **self._entities})
+            self._rules = rules
+            return await self.async_step_measurements()
         sg = _number(1, 4, 1)
         schema = vol.Schema(
             {
@@ -402,9 +475,42 @@ class EosControlOptionsFlow(OptionsFlow):
                 vol.Required(
                     CONF_STANDBY_REFERENCE_STATE, default=options[CONF_STANDBY_REFERENCE_STATE]
                 ): str,
+                vol.Required(CONF_SEND_MEASUREMENTS, default=options[CONF_SEND_MEASUREMENTS]): bool,
+                vol.Required(
+                    CONF_MEASUREMENT_INTERVAL, default=options[CONF_MEASUREMENT_INTERVAL]
+                ): _number(1, 60, 1, "min"),
+                vol.Required(CONF_PLAN_ENTITIES, default=options[CONF_PLAN_ENTITIES]): bool,
             }
         )
         return self.async_show_form(step_id="rules", data_schema=schema)
+
+    async def async_step_measurements(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Entities for the EOS measurements that belong to no added device."""
+        if user_input is not None:
+            return self.async_create_entry(
+                data={
+                    **self._rules,
+                    **self._entities,
+                    CONF_MEASUREMENTS: _mapping(user_input, self._keys),
+                }
+            )
+        url = self.config_entry.data[CONF_URL]
+        keys, suggested = await measurement_catalog(self.hass, url)
+        added = [
+            str(s.data.get(CONF_EOS_DEVICE))
+            for s in self.config_entry.subentries.values()
+            if s.subentry_type == SUBENTRY_DEVICE
+        ]
+        own = {k for d in added for k in device_keys(keys, d)}
+        self._keys = [k for k in keys if k not in own]
+        current = self.config_entry.options.get(CONF_MEASUREMENTS)
+        if current is None:
+            current = {k: v for k, v in suggested.items() if k in self._keys}
+        return self.async_show_form(
+            step_id="measurements", data_schema=_mapping_schema(self._keys, current)
+        )
 
 
 class DeviceSubentryFlow(ConfigSubentryFlow):
@@ -422,8 +528,11 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
             if device is None:
                 return self.async_abort(reason="device_not_found")
             sub = _device_subentry(device)
+            keys, suggested = await measurement_catalog(self.hass, entry.data[CONF_URL])
+            data = dict(sub["data"])
+            data[CONF_MEASUREMENTS] = _device_mapping(device, keys, suggested)
             return self.async_create_entry(
-                title=sub["title"], data=sub["data"], unique_id=sub["unique_id"]
+                title=sub["title"], data=data, unique_id=sub["unique_id"]
             )
         devices = await fetch_devices(self.hass, entry.data[CONF_URL])
         if devices is None:
@@ -447,6 +556,41 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
             }
         )
         return self.async_show_form(step_id="user", data_schema=schema)
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """Entities for the measurements of this device."""
+        entry = self._get_entry()
+        subentry = self._get_reconfigure_subentry()
+        device = EosDevice(str(subentry.data[CONF_EOS_DEVICE]), str(subentry.data[CONF_KIND]))
+        keys, suggested = await measurement_catalog(self.hass, entry.data[CONF_URL])
+        own = _own_keys(device, keys)
+        if user_input is not None:
+            return self.async_update_and_abort(
+                entry,
+                subentry,
+                data={**subentry.data, CONF_MEASUREMENTS: _mapping(user_input, own)},
+            )
+        current = subentry.data.get(CONF_MEASUREMENTS)
+        if current is None:
+            current = _device_mapping(device, keys, suggested)
+        return self.async_show_form(
+            step_id="reconfigure", data_schema=_mapping_schema(own, current)
+        )
+
+
+def _own_keys(device: EosDevice, keys: list[str]) -> list[str]:
+    """Measurement keys of the device the user maps (not those computed for it)."""
+    computed = computed_keys(device.device_id) if device.kind == KIND_HEAT_PUMP else set()
+    return [k for k in device_keys(keys, device.device_id) if k not in computed]
+
+
+def _device_mapping(
+    device: EosDevice, keys: list[str], suggested: dict[str, str]
+) -> dict[str, str]:
+    own = set(_own_keys(device, keys))
+    return {k: v for k, v in suggested.items() if k in own}
 
 
 class RoomSubentryFlow(ConfigSubentryFlow):

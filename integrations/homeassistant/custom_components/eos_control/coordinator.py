@@ -44,6 +44,10 @@ from .const import (
     CONF_SETTLE,
     CONF_EOS_DEVICE,
     CONF_KIND,
+    CONF_MEASUREMENT_INTERVAL,
+    CONF_MEASUREMENTS,
+    CONF_SEND_MEASUREMENTS,
+    ISSUE_AFTER_MIN,
     CONF_SG_ACTUAL_ENTITY,
     CONF_SG_FORCED,
     CONF_SG_NORMAL,
@@ -75,6 +79,10 @@ from .devices import (
     parse_devices,
 )
 from .charts import Charts, PlanMemory, build_charts, parse_time
+from .manual import ManualState
+from .measurements import heat_pump_values, payload, state_value
+from .plan_statistics import PLAN_STATISTICS, completed_hours, statistic_id
+from .repairs import set_issue
 from .learning import (
     KIND_LOCK,
     KIND_SETPOINT,
@@ -103,6 +111,8 @@ HISTORY_INTERVAL = timedelta(minutes=15)
 HISTORY_SUMMARY_PATH = "/v1/energy-management/history/summary"
 HISTORY_HOURS_PATH = "/v1/energy-management/history/hours"
 DEVICES_PATH = "/v1/config/devices"
+MEASUREMENT_PATH = "/v1/measurement/data"
+HEALTH_PATH = "/v1/health"
 
 
 @dataclass
@@ -148,6 +158,8 @@ class ControlData:
     eos_devices: list[EosDevice] = field(default_factory=list)
     rooms: dict[str, RoomState] = field(default_factory=dict)
     """Rooms by subentry id, as the decision saw them."""
+    columns: Optional[dict[str, Any]] = None
+    """Plan columns of the current slot (``<device>_heating_mode`` ...); None = no valid plan."""
     holiday: bool = False
 
 
@@ -179,6 +191,14 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
         self.hold = Hold(seconds=float(self.option(CONF_SETTLE)))
         self.eos_devices: list[EosDevice] = []
         self._devices_at: Optional[datetime] = None
+        self.manual = ManualState()
+        self.last_input: Optional[ControlInput] = None
+        self._measured_at: Optional[datetime] = None
+        self._eos_ok_at: Optional[datetime] = None
+        self._push_ok_at: Optional[datetime] = None
+        self._push_error: Optional[str] = None
+        self._stats_until: Optional[datetime] = None
+        self.eos_version: Optional[str] = None
         self._memory_generated: Optional[datetime] = None
         self._history: Optional[dict[str, Any]] = None
         self._history_hours: Optional[dict[str, Any]] = None
@@ -222,8 +242,11 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             self.learning = ComfortLearning.from_list(stored.get("comfort_events"))
             self.memory = PlanMemory.from_list(stored.get("plan_memory"))
             self.memory.generated_at = parse_time(stored.get("plan_generated_at"))
+            self.manual = ManualState.from_dict(stored.get("manual"))
+            self._stats_until = parse_time(stored.get("statistics_until"))
             self._loaded = True
         now = dt_util.now()
+        manual_changed = self.manual.expire(now)
         plan, solution, error = await self._fetch_plan()
         if plan is not None:
             self._last_plan = plan
@@ -233,6 +256,7 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             plan = self._last_plan
         if solution is not None:
             self._last_solution = solution
+            self._eos_ok_at = now
             await self._update_devices(now)
         heat_pump = self.heat_pump_id
         if heat_pump and self.eos_devices and find(self.eos_devices, heat_pump) is None:
@@ -256,8 +280,13 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             plan=plan,
             rooms=self._rooms(now),
             heating_season=self._heating_season(),
-            holiday=self._is_on(self.option(CONF_HOLIDAY_ENTITY)),
-            holiday_return=self._datetime(self.option(CONF_HOLIDAY_RETURN_ENTITY)),
+            holiday=self._is_on(self.option(CONF_HOLIDAY_ENTITY))
+            or self.manual.holiday_active(now),
+            holiday_return=(
+                self.manual.holiday_end
+                if self.manual.holiday_active(now)
+                else self._datetime(self.option(CONF_HOLIDAY_RETURN_ENTITY))
+            ),
             reduced_setpoint_c=self._float(self.option(CONF_REDUCED_SETPOINT_ENTITY)),
             zone_setback_allowed=(
                 self._is_on(self.option(CONF_ZONE_ALLOWED_ENTITY))
@@ -265,8 +294,9 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
                 else True
             ),
             sg_actual=self._int(self.option(CONF_SG_ACTUAL_ENTITY)),
-            reduction_locked_until=self._datetime(self.option(CONF_REDUCTION_LOCK_ENTITY)),
+            reduction_locked_until=self._lock_until(now),
         )
+        self.last_input = data
         raw = decide(data, self.settings())
         if error and not raw.reason.startswith("NORMAL: EOS"):
             raw.reason = f"{raw.reason} ({error})"
@@ -275,10 +305,14 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
         waits = [w for w in (wait, device_wait) if w is not None]
         self._schedule_settle(min(waits) if waits else None)
         learned = self._learn(now, data)
+        if solution is not None:
+            await self._send_measurements(now, data, raw)
+        self._write_statistics(now, charts)
+        self._update_issues(now, charts)
         reference_sg = self._int(self.option(CONF_SG_REFERENCE_ENTITY))
         reference_standby = self._standby_reference()
         compared = self._compare(now, decision, reference_sg, reference_standby, data.holiday)
-        if compared or learned or memory_changed:
+        if compared or learned or memory_changed or manual_changed:
             self._store.async_delay_save(self._stored, 30)
         return ControlData(
             decision=decision,
@@ -296,6 +330,7 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             eos_devices=self.eos_devices,
             rooms={r.key: r for r in data.rooms},
             holiday=data.holiday,
+            columns=self._columns(now),
         )
 
     def cancel_settle(self) -> None:
@@ -327,7 +362,200 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             "plan_generated_at": (
                 self.memory.generated_at.isoformat() if self.memory.generated_at else None
             ),
+            "manual": self.manual.as_dict(),
+            "statistics_until": self._stats_until.isoformat() if self._stats_until else None,
         }
+
+    # ------------------------------------------------------------------
+    # Actions (services)
+    # ------------------------------------------------------------------
+
+    async def async_manual_changed(self) -> None:
+        """An action changed the manual state: store, send at once, re-evaluate."""
+        self._measured_at = None
+        await self._store.async_save(self._stored())
+        await self.async_refresh()
+
+    def _lock_until(self, now: datetime) -> Optional[datetime]:
+        locks = [
+            t
+            for t in (
+                self._datetime(self.option(CONF_REDUCTION_LOCK_ENTITY)),
+                self.manual.lock_active(now),
+            )
+            if t is not None
+        ]
+        return max(locks) if locks else None
+
+    # ------------------------------------------------------------------
+    # Measurements to EOS
+    # ------------------------------------------------------------------
+
+    def measurement_values(
+        self, now: datetime, data: ControlInput, decision: Decision
+    ) -> dict[str, Optional[float]]:
+        """All values for EOS: mapped entities, computed heat pump values, run requests."""
+        values: dict[str, Optional[float]] = {}
+        mappings = [self.entry.options.get(CONF_MEASUREMENTS) or {}]
+        mappings += [s.data.get(CONF_MEASUREMENTS) or {} for s in self.device_subentries()]
+        for mapping in mappings:
+            for key, entity_id in mapping.items():
+                state = self.hass.states.get(entity_id) if entity_id else None
+                values[key] = state_value(key, state.state if state is not None else None)
+        heat_pump = self.heat_pump_id
+        if heat_pump:
+            values.update(
+                heat_pump_values(
+                    heat_pump,
+                    room_mean_c=decision.room_mean_c,
+                    min_margin_k=decision.room_min_margin_k,
+                    max_margin_k=decision.room_max_margin_k,
+                    humidity_warning=decision.humidity_warning,
+                    window_open_share=decision.window_open_share,
+                    holiday=data.holiday,
+                    holiday_return=data.holiday_return,
+                    reduced_setpoint_c=data.reduced_setpoint_c,
+                    holiday_floor_c=float(self.option(CONF_HOLIDAY_FLOOR)),
+                    reduction_locked_until=data.reduction_locked_until,
+                    now=now,
+                )
+            )
+        values.update(self.manual.run_measurements())
+        return values
+
+    async def _send_measurements(
+        self, now: datetime, data: ControlInput, decision: Decision
+    ) -> None:
+        if not self.option(CONF_SEND_MEASUREMENTS):
+            return
+        interval = timedelta(minutes=float(self.option(CONF_MEASUREMENT_INTERVAL)))
+        if self._measured_at is not None and now - self._measured_at < interval:
+            return
+        self._measured_at = now
+        body = payload(self.measurement_values(now, data, decision), now)
+        if body is None:
+            return
+        session = async_get_clientsession(self.hass)
+        try:
+            async with session.put(
+                f"{self.entry.data[CONF_URL]}{MEASUREMENT_PATH}",
+                json=body,
+                timeout=aiohttp.ClientTimeout(total=20),
+            ) as resp:
+                if resp.status >= 300:
+                    self._push_error = f"EOS HTTP {resp.status}"
+                    return
+        except (aiohttp.ClientError, TimeoutError) as exc:
+            self._push_error = f"EOS unreachable: {type(exc).__name__}"
+            return
+        self._push_ok_at = now
+        self._push_error = None
+        if self.manual.ended_runs:
+            self.manual.sent()
+            self._store.async_delay_save(self._stored, 30)
+
+    # ------------------------------------------------------------------
+    # Long-term statistics of the plan
+    # ------------------------------------------------------------------
+
+    def _write_statistics(self, now: datetime, charts: Charts) -> None:
+        if "recorder" not in self.hass.config.components:
+            return
+        hours = completed_hours(
+            self.memory.series(),
+            dt_util.get_default_time_zone(),
+            charts.slot_minutes,
+            now,
+            self._stats_until,
+        )
+        if not hours:
+            return
+        from homeassistant.components.recorder.models import (
+            StatisticData,
+            StatisticMeanType,
+            StatisticMetaData,
+        )
+        from homeassistant.components.recorder.statistics import async_add_external_statistics
+
+        heat_pump = self.heat_pump_id
+        for stat in PLAN_STATISTICS:
+            if stat.heat_pump and not heat_pump:
+                continue
+            rows = [
+                StatisticData(
+                    start=h["start"],
+                    mean=h[stat.column],
+                    min=h[stat.column],
+                    max=h[stat.column],
+                )
+                for h in hours
+                if isinstance(h.get(stat.column), (int, float))
+            ]
+            if not rows:
+                continue
+            name = f"EOS {heat_pump} {stat.name}" if stat.heat_pump else f"EOS {stat.name}"
+            metadata = StatisticMetaData(
+                mean_type=StatisticMeanType.ARITHMETIC,
+                has_sum=False,
+                name=name,
+                source=DOMAIN,
+                statistic_id=statistic_id(DOMAIN, stat, heat_pump),
+                unit_class=stat.unit_class,
+                unit_of_measurement=stat.unit,
+            )
+            async_add_external_statistics(self.hass, metadata, rows)
+        self._stats_until = max(h["start"] for h in hours)
+        self._store.async_delay_save(self._stored, 30)
+
+    # ------------------------------------------------------------------
+    # Repairs
+    # ------------------------------------------------------------------
+
+    def _update_issues(self, now: datetime, charts: Charts) -> None:
+        limit = timedelta(minutes=ISSUE_AFTER_MIN)
+        since = self._eos_ok_at or self.started
+        set_issue(
+            self.hass,
+            self.entry,
+            "eos_unreachable",
+            now - since > limit,
+            {"url": self.entry.data[CONF_URL], "minutes": str(ISSUE_AFTER_MIN)},
+        )
+        max_age = timedelta(minutes=float(self.option(CONF_PLAN_MAX_AGE)))
+        stale = (
+            self._eos_ok_at is not None
+            and now - self._eos_ok_at <= limit
+            and charts.generated_at is not None
+            and now - charts.generated_at > max_age
+        )
+        set_issue(
+            self.hass,
+            self.entry,
+            "plan_stale",
+            stale,
+            {"minutes": str(int(max_age.total_seconds() // 60))},
+        )
+        known = {d.device_id for d in self.eos_devices}
+        for subentry in self.device_subentries():
+            device_id = str(subentry.data[CONF_EOS_DEVICE])
+            set_issue(
+                self.hass,
+                self.entry,
+                f"device_missing_{device_id}",
+                bool(self.eos_devices) and device_id not in known,
+                {"device": device_id},
+                translation_key="device_missing",
+            )
+        push_since = self._push_ok_at or self.started
+        set_issue(
+            self.hass,
+            self.entry,
+            "measurements_failed",
+            bool(self.option(CONF_SEND_MEASUREMENTS))
+            and self._push_error is not None
+            and now - push_since > limit,
+            {"error": self._push_error or "", "minutes": str(ISSUE_AFTER_MIN)},
+        )
 
     # ------------------------------------------------------------------
     # EOS devices (batteries, electric vehicles, home appliances)
@@ -359,6 +587,9 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
         config, _ = await self._get_json(DEVICES_PATH)
         if config is not None:
             self.eos_devices = parse_devices(config)
+        health, _ = await self._get_json(HEALTH_PATH)
+        if health is not None and health.get("version"):
+            self.eos_version = str(health["version"])
 
     def _plan_solution(self, now: datetime) -> Optional[dict[str, Any]]:
         """Latest solution while it is younger than the plan age limit."""
@@ -370,6 +601,22 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
         if generated is None or now - generated > max_age:
             return None
         return solution
+
+    def _columns(self, now: datetime) -> Optional[dict[str, Any]]:
+        """Values of all plan columns in the slot that contains ``now``."""
+        solution = self._plan_solution(now)
+        frame = (solution or {}).get("solution") or {}
+        rows = frame.get("data") if isinstance(frame, dict) else None
+        if not isinstance(rows, dict):
+            return None
+        current: Optional[dict[str, Any]] = None
+        for stamp in sorted(rows, key=lambda t: parse_time(t) or now):
+            start = parse_time(stamp)
+            if start is not None and start <= now and isinstance(rows[stamp], dict):
+                current = rows[stamp]
+        if current is None:
+            return None
+        return {k: v for k, v in current.items() if k != "date_time"}
 
     def _device_states(
         self, now: datetime

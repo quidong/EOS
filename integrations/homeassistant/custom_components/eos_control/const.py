@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 DOMAIN = "eos_control"
-PLATFORMS = ["sensor", "binary_sensor"]
+PLATFORMS = ["sensor", "binary_sensor", "calendar"]
 
 SUBENTRY_ROOM = "room"
 SUBENTRY_DEVICE = "device"
@@ -42,6 +42,10 @@ CONF_HOLIDAY_FLOOR = "holiday_floor_c"
 CONF_HOLIDAY_RESTART = "holiday_restart_hours"
 CONF_HOLIDAY_DHW_LEAD = "holiday_dhw_lead_hours"
 CONF_SETTLE = "settle_seconds"
+CONF_SEND_MEASUREMENTS = "send_measurements"
+CONF_MEASUREMENT_INTERVAL = "measurement_interval_min"
+CONF_PLAN_ENTITIES = "plan_entities"
+CONF_MEASUREMENTS = "measurements"
 
 # Device subentry (battery, electric vehicle, home appliance from EOS)
 CONF_EOS_DEVICE = "eos_device_id"
@@ -77,6 +81,9 @@ DEFAULTS = {
     CONF_HOLIDAY_RESTART: 1.0,
     CONF_HOLIDAY_DHW_LEAD: 3.0,
     CONF_SETTLE: 10,
+    CONF_SEND_MEASUREMENTS: True,
+    CONF_MEASUREMENT_INTERVAL: 5,
+    CONF_PLAN_ENTITIES: True,
     CONF_LOWER: 19.5,
     CONF_UPPER: 23.5,
     CONF_HUMIDITY_MAX: 65.0,
@@ -87,3 +94,6 @@ DEFAULTS = {
 # Consecutive polls with a different result before the shadow comparison counts a mismatch
 MISMATCH_CONFIRM_POLLS = 2
 MISMATCH_LOG_SIZE = 30
+
+# Repairs: EOS unreachable / measurements not accepted for longer than this
+ISSUE_AFTER_MIN = 30
