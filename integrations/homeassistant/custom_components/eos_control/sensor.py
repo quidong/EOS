@@ -482,57 +482,67 @@ def column_object_id(column: str) -> str:
 
 
 def _setup_columns(coordinator, async_add_entities) -> None:
-    """Entities for the plan columns; columns that appear later are added then."""
+    """Entities for the plan columns and the active instructions of EOS.
+
+    Columns or resources that appear in a later plan are added then. An entity id
+    that another source (EOS's own Home Assistant adapter) already publishes is not
+    taken over: no "<id>_2"; it is added after a restart without that source.
+    """
     known: set[str] = set()
     skipped: set[str] = set()
     subentries = {str(s.data[CONF_EOS_DEVICE]): s for s in coordinator.device_subentries()}
 
+    def owner_of(name: str):
+        owner = next(
+            (
+                d
+                for d in sorted(subentries, key=len, reverse=True)
+                if name == d or name.startswith(f"{d}_")
+            ),
+            None,
+        )
+        sub = subentries.get(owner) if owner else None
+        info = (
+            eos_device(coordinator, str(owner), str(sub.data[CONF_KIND]))
+            if sub is not None
+            else hub_device(coordinator)
+        )
+        return (sub.subentry_id if sub else None), info
+
     def add_new() -> None:
         data = coordinator.data
-        columns = data.columns if data is not None and data.columns else {}
+        if data is None:
+            return
+        candidates: list[tuple[str, str]] = [
+            ("column", c) for c, v in (data.columns or {}).items() if isinstance(v, (int, float))
+        ]
+        candidates += [("instruction", r) for r in (data.instructions or {})]
         registry = er.async_get(coordinator.hass)
-        new = []
-        for column in columns:
-            if column in known or not isinstance(columns[column], (int, float)):
+        by_subentry: dict[str | None, list[SensorEntity]] = {}
+        for kind, name in candidates:
+            key = f"{kind}:{name}"
+            if key in known:
                 continue
-            entity_id = f"sensor.{column_object_id(column)}"
+            entity_id = f"sensor.{column_object_id(name)}"
             if (
                 coordinator.hass.states.get(entity_id) is not None
                 and registry.async_get(entity_id) is None
             ):
-                # Published by someone else (EOS's own Home Assistant adapter): no
-                # entity "<id>_2"; it is added after the next restart without it.
-                if column not in skipped:
-                    skipped.add(column)
+                if key not in skipped:
+                    skipped.add(key)
                     _LOGGER.warning(
                         "%s is published by another source (EOS adapter?): not taken over",
                         entity_id,
                     )
                 continue
-            new.append(column)
-        if not new:
-            return
-        by_subentry: dict[str | None, list[EosColumnSensor]] = {}
-        for column in new:
-            known.add(column)
-            owner = next(
-                (
-                    d
-                    for d in sorted(subentries, key=len, reverse=True)
-                    if column.startswith(f"{d}_")
-                ),
-                None,
+            known.add(key)
+            subentry_id, info = owner_of(name)
+            entity: SensorEntity = (
+                EosColumnSensor(coordinator, name, info)
+                if kind == "column"
+                else EosInstructionSensor(coordinator, name, info)
             )
-            sub = subentries.get(owner) if owner else None
-            by_subentry.setdefault(sub.subentry_id if sub else None, []).append(
-                EosColumnSensor(
-                    coordinator,
-                    column,
-                    eos_device(coordinator, str(owner), str(sub.data[CONF_KIND]))
-                    if sub is not None
-                    else hub_device(coordinator),
-                )
-            )
+            by_subentry.setdefault(subentry_id, []).append(entity)
         for subentry_id, entities in by_subentry.items():
             async_add_entities(entities, config_subentry_id=subentry_id)
 
@@ -579,3 +589,44 @@ class EosColumnSensor(CoordinatorEntity[EosControlCoordinator], SensorEntity):
         data = self.coordinator.data
         value = data.columns.get(self.column) if data is not None and data.columns else None
         return float(value) if isinstance(value, (int, float)) else None
+
+
+class EosInstructionSensor(CoordinatorEntity[EosControlCoordinator], SensorEntity):
+    """Active instruction of an EOS resource: operation mode (lower case) and factor."""
+
+    _attr_has_entity_name = False
+
+    def __init__(self, coordinator, resource: str, device_info) -> None:
+        super().__init__(coordinator)
+        self.resource = resource
+        self.entity_id = f"sensor.{column_object_id(resource)}"
+        self._attr_unique_id = f"{coordinator.entry.entry_id}_instruction_{resource}"
+        self._attr_name = "EOS " + resource.replace("_", " ")
+        self._attr_device_info = device_info
+
+    def _current(self) -> dict[str, Any] | None:
+        data = self.coordinator.data
+        if data is None or data.instructions is None:
+            return None
+        return data.instructions.get(self.resource)
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._current() is not None
+
+    @property
+    def native_value(self) -> str | None:
+        current = self._current()
+        return current["mode"] if current else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        current = self._current()
+        if current is None:
+            return None
+        return {
+            "operation_mode_factor": current["factor"],
+            "since": current["since"].isoformat() if current["since"] else None,
+            "next_mode": current["next_mode"],
+            "next_change": current["next_change"].isoformat() if current["next_change"] else None,
+        }

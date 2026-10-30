@@ -46,6 +46,7 @@ from .const import (
     CONF_KIND,
     CONF_MEASUREMENT_INTERVAL,
     CONF_MEASUREMENTS,
+    CONF_PLAN_ENTITIES,
     CONF_SEND_MEASUREMENTS,
     ISSUE_AFTER_MIN,
     CONF_SG_ACTUAL_ENTITY,
@@ -79,6 +80,7 @@ from .devices import (
     parse_devices,
 )
 from .charts import Charts, PlanMemory, build_charts, parse_time
+from .instructions import active_instructions
 from .manual import ManualState
 from .measurements import heat_pump_values, payload, state_value
 from .plan_statistics import PLAN_STATISTICS, completed_hours, statistic_id
@@ -111,6 +113,7 @@ HISTORY_INTERVAL = timedelta(minutes=15)
 HISTORY_SUMMARY_PATH = "/v1/energy-management/history/summary"
 HISTORY_HOURS_PATH = "/v1/energy-management/history/hours"
 DEVICES_PATH = "/v1/config/devices"
+PLAN_PATH = "/v1/energy-management/plan"
 MEASUREMENT_PATH = "/v1/measurement/data"
 HEALTH_PATH = "/v1/health"
 
@@ -158,6 +161,8 @@ class ControlData:
     eos_devices: list[EosDevice] = field(default_factory=list)
     rooms: dict[str, RoomState] = field(default_factory=dict)
     """Rooms by subentry id, as the decision saw them."""
+    instructions: Optional[dict[str, dict[str, Any]]] = None
+    """Active EOS instructions per resource; None = no valid plan."""
     columns: Optional[dict[str, Any]] = None
     """Plan columns of the current slot (``<device>_heating_mode`` ...); None = no valid plan."""
     holiday: bool = False
@@ -188,6 +193,7 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
         self._settle_unsub: Optional[Callable[[], None]] = None
         self._last_plan: Optional[Plan] = None
         self._last_solution: Optional[dict[str, Any]] = None
+        self._ems_plan: Optional[dict[str, Any]] = None
         self.hold = Hold(seconds=float(self.option(CONF_SETTLE)))
         self.eos_devices: list[EosDevice] = []
         self._devices_at: Optional[datetime] = None
@@ -258,6 +264,10 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             self._last_solution = solution
             self._eos_ok_at = now
             await self._update_devices(now)
+            if self.option(CONF_PLAN_ENTITIES):
+                ems_plan, _ = await self._get_json(PLAN_PATH)
+                if ems_plan is not None:
+                    self._ems_plan = ems_plan
         heat_pump = self.heat_pump_id
         if heat_pump and self.eos_devices and find(self.eos_devices, heat_pump) is None:
             error = f"heat pump '{heat_pump}' not in the EOS configuration"
@@ -331,6 +341,7 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             rooms={r.key: r for r in data.rooms},
             holiday=data.holiday,
             columns=self._columns(now),
+            instructions=self._instructions(now),
         )
 
     def cancel_settle(self) -> None:
@@ -601,6 +612,17 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
         if generated is None or now - generated > max_age:
             return None
         return solution
+
+    def _instructions(self, now: datetime) -> Optional[dict[str, dict[str, Any]]]:
+        """Active instructions of the energy management plan while it is valid."""
+        plan = self._ems_plan
+        if plan is None:
+            return None
+        generated = parse_time(plan.get("generated_at"))
+        max_age = timedelta(minutes=float(self.option(CONF_PLAN_MAX_AGE)))
+        if generated is None or now - generated > max_age:
+            return None
+        return active_instructions(plan, now)
 
     def _columns(self, now: datetime) -> Optional[dict[str, Any]]:
         """Values of all plan columns in the slot that contains ``now``."""

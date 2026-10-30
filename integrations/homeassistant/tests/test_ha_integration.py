@@ -124,9 +124,16 @@ async def setup(
 ADAPTER = f"{URL}/v1/config/adapter/homeassistant"
 
 
-def eos_extras(aioclient_mock, measurement=None, adapter=None) -> None:
-    """Health, measurement upload and the catalogue for the measurement mapping."""
+PLAN_URL = f"{URL}/v1/energy-management/plan"
+
+
+def eos_extras(aioclient_mock, measurement=None, adapter=None, plan=None) -> None:
+    """Health, measurement upload, the energy management plan and the catalogue."""
     aioclient_mock.get(HEALTH_URL, json={"status": "alive", "version": "0.3.0"})
+    if plan is None:
+        aioclient_mock.get(PLAN_URL, status=404)
+    else:
+        aioclient_mock.get(PLAN_URL, json=plan)
     aioclient_mock.put(MEASURE_URL, status=204)
     aioclient_mock.get(f"{URL}/v1/config/measurement", json=measurement or {})
     adapter = adapter or {}
@@ -823,6 +830,7 @@ async def test_changed_decision_is_accepted_after_the_settle_time(
     aioclient_mock.clear_requests()
     aioclient_mock.get(SOLUTION_URL, json=solution(0))
     aioclient_mock.get(SUMMARY_URL, status=404)
+    aioclient_mock.get(PLAN_URL, status=404)
     await entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     state = hass.states.get("sensor.eos_hp1_sg_ready_target")
@@ -849,6 +857,7 @@ async def test_settle_time_zero(hass: HomeAssistant, aioclient_mock: AiohttpClie
     aioclient_mock.clear_requests()
     aioclient_mock.get(SOLUTION_URL, json=solution(0))
     aioclient_mock.get(SUMMARY_URL, status=404)
+    aioclient_mock.get(PLAN_URL, status=404)
     await entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     assert hass.states.get("sensor.eos_hp1_sg_ready_target").state == "1"
@@ -982,6 +991,7 @@ async def test_device_mode_change_settles(
     aioclient_mock.clear_requests()
     aioclient_mock.get(SOLUTION_URL, json=device_solution(["FORCED_CHARGE"]))
     aioclient_mock.get(SUMMARY_URL, status=404)
+    aioclient_mock.get(PLAN_URL, status=404)
     await entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     state = hass.states.get("sensor.eos_bat1_operation_mode")
@@ -1525,3 +1535,80 @@ async def test_diagnostics_with_eos_version(
     diag = await async_get_config_entry_diagnostics(hass, entry)
     assert diag["eos_version"] == "0.3.0"
     assert "measurements" in diag and "hp1-away" in diag["measurements"]
+
+
+async def test_instruction_entities(hass: HomeAssistant, aioclient_mock: AiohttpClientMocker):
+    """Active instructions of the EOS plan as sensor.eos_<resource> (mode, factor)."""
+    set_rooms(hass)
+    now = dt_util.now()
+    plan = {
+        "generated_at": (now - timedelta(minutes=5)).isoformat(),
+        "instructions": [
+            {
+                "type": "FRBCInstruction",
+                "resource_id": "hp1_space_heating",
+                "execution_time": (now - timedelta(minutes=30)).isoformat(),
+                "operation_mode_id": "REDUCED",
+                "operation_mode_factor": 1.0,
+            },
+            {
+                "type": "FRBCInstruction",
+                "resource_id": "hp1_space_heating",
+                "execution_time": (now - timedelta(minutes=10)).isoformat(),
+                "operation_mode_id": "NORMAL",
+                "operation_mode_factor": 1.0,
+            },
+            {
+                "type": "FRBCInstruction",
+                "resource_id": "hp1_space_heating",
+                "execution_time": (now + timedelta(hours=2)).isoformat(),
+                "operation_mode_id": "PREHEAT",
+                "operation_mode_factor": 0.5,
+            },
+            {
+                "type": "OMBCInstruction",
+                "resource_id": "washer",
+                "execution_time": (now - timedelta(hours=1)).isoformat(),
+                "operation_mode_id": "OFF",
+                "operation_mode_factor": 0.0,
+            },
+            {"type": "PEBCPowerConstraints", "resource_id": "x", "execution_time": now.isoformat()},
+        ],
+    }
+    eos_extras(aioclient_mock, plan=plan)
+    entry = await setup(hass, aioclient_mock, chart_solution(), rooms=ROOMS)
+    heating = hass.states.get("sensor.eos_hp1_space_heating")
+    assert heating.state == "normal"
+    assert heating.attributes["operation_mode_factor"] == 1.0
+    assert heating.attributes["next_mode"] == "preheat"
+    assert hass.states.get("sensor.eos_washer").state == "off"
+    assert hass.states.get("sensor.eos_x") is None
+    registry = er.async_get(hass)
+    hp_sub = next(s for s in entry.subentries.values() if s.data.get("kind") == "heat_pump")
+    assert registry.async_get("sensor.eos_hp1_space_heating").config_subentry_id == (
+        hp_sub.subentry_id
+    )
+    assert registry.async_get("sensor.eos_washer").config_subentry_id is None
+
+
+async def test_instructions_from_another_source_not_taken_over(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+):
+    set_rooms(hass)
+    hass.states.async_set("sensor.eos_hp1_space_heating", "normal")  # EOS adapter
+    now = dt_util.now()
+    plan = {
+        "generated_at": now.isoformat(),
+        "instructions": [
+            {
+                "resource_id": "hp1_space_heating",
+                "execution_time": (now - timedelta(minutes=1)).isoformat(),
+                "operation_mode_id": "NORMAL",
+                "operation_mode_factor": 1.0,
+            }
+        ],
+    }
+    eos_extras(aioclient_mock, plan=plan)
+    await setup(hass, aioclient_mock, chart_solution(), rooms=ROOMS)
+    assert er.async_get(hass).async_get("sensor.eos_hp1_space_heating") is None
+    assert hass.states.get("sensor.eos_hp1_space_heating_2") is None

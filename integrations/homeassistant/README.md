@@ -129,7 +129,7 @@ renamed "EOS". All entity ids stay as they were.
 | Direction | How |
 | --- | --- |
 | HA → EOS | The integration sends the measurements itself (`PUT /v1/measurement/data`, every 5 min by default): the heat pump values it computes (room mean, margins, humidity, share of open windows, holiday, return time, reduced setpoint, holiday floor, lock of the reduction) and every other EOS measurement key mapped to an entity — per device in the device's settings ("Configure"), energy meters and keys of devices not added in the options of EOS. The mapping of EOS's own Home Assistant adapter is offered as suggestion. EOS then needs no access to Home Assistant. |
-| EOS → HA | The integration reads the plan (`/optimization/solution`) and publishes targets, charts, the plan columns as entities `sensor.eos_<column>` (value of the current slot, unavailable without a valid plan; option "plan columns as entities") and a calendar. A `sensor.eos_<column>` already published by EOS's adapter is not taken over (no `_2`); switch the adapter's `solution_entity_ids` off and restart Home Assistant. |
+| EOS → HA | The integration reads the plan (`/optimization/solution`, `/energy-management/plan`) and publishes targets, charts, the active instructions per resource as `sensor.eos_<resource>` (operation mode in lower case, attribute `operation_mode_factor`, next change), the plan columns as entities `sensor.eos_<column>` (value of the current slot, unavailable without a valid plan; option "plan columns as entities") and a calendar. A `sensor.eos_<column>` already published by EOS's adapter is not taken over (no `_2`); switch the adapter's `solution_entity_ids` and `device_instruction_entity_ids` off and restart Home Assistant. |
 
 ### Repairs
 

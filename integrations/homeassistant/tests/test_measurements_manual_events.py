@@ -200,3 +200,35 @@ def test_device_events_and_gaps():
         {"t": NOW.replace(minute=30).isoformat(), "standby": 1},
     ]
     assert len(plan_events.plan_events(gap, [], 15, "xx")) == 2  # unknown language: English
+
+
+instructions = _load("instructions")
+
+
+def test_active_instructions():
+    def item(resource, minutes, mode, factor=1.0):
+        return {
+            "resource_id": resource,
+            "execution_time": (NOW + timedelta(minutes=minutes)).isoformat(),
+            "operation_mode_id": mode,
+            "operation_mode_factor": factor,
+        }
+
+    plan = {
+        "instructions": [
+            item("hp_dhw", -60, "HOLD"),
+            item("hp_dhw", -5, "HEAT_PUMP", 0.8),
+            item("hp_dhw", 30, "HEAT_PUMP", 0.5),  # same mode: no change
+            item("hp_dhw", 90, "HOLD"),
+            item("later", 10, "RUN"),  # not started yet
+            {"resource_id": "power", "execution_time": NOW.isoformat()},  # no mode
+        ]
+    }
+    active = instructions.active_instructions(plan, NOW)
+    assert set(active) == {"hp_dhw"}
+    dhw = active["hp_dhw"]
+    assert dhw["mode"] == "heat_pump" and dhw["factor"] == 0.8
+    assert dhw["since"] == NOW - timedelta(minutes=5)
+    assert dhw["next_mode"] == "hold" and dhw["next_change"] == NOW + timedelta(minutes=90)
+    assert instructions.active_instructions(None, NOW) == {}
+    assert instructions.active_instructions({"instructions": [{"x": 1}]}, NOW) == {}
