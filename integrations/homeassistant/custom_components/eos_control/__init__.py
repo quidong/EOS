@@ -14,6 +14,7 @@ from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.typing import ConfigType
 
 from .const import (
@@ -23,6 +24,7 @@ from .const import (
     CONF_PLAN_ENTITIES,
     CONF_URL,
     DOMAIN,
+    OBSOLETE_OPTIONS,
     PLATFORMS,
     SUBENTRY_DEVICE,
 )
@@ -40,6 +42,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: EosControlConfigEntry) -> bool:
+    _remove_shadow_comparison(hass, entry)
     coordinator = EosControlCoordinator(hass, entry)
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
@@ -48,6 +51,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: EosControlConfigEntry) -
     _link_devices(hass, entry)
     entry.async_on_unload(entry.add_update_listener(_async_reload))
     return True
+
+
+# Entities of the shadow comparison (removed in 0.6)
+OBSOLETE_ENTITY_KEYS = (("sensor", "shadow_agreement"), ("button", "reset_shadow"))
+
+
+def _remove_shadow_comparison(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Drop the options and entities of the shadow comparison (before 0.6)."""
+    if any(key in entry.options for key in OBSOLETE_OPTIONS):
+        hass.config_entries.async_update_entry(
+            entry, options={k: v for k, v in entry.options.items() if k not in OBSOLETE_OPTIONS}
+        )
+    registry = er.async_get(hass)
+    for platform, key in OBSOLETE_ENTITY_KEYS:
+        entity_id = registry.async_get_entity_id(platform, DOMAIN, f"{entry.entry_id}_{key}")
+        if entity_id is not None:
+            registry.async_remove(entity_id)
 
 
 def _link_devices(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -62,7 +82,7 @@ def _link_devices(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: EosControlConfigEntry) -> bool:
-    await entry.runtime_data.async_save_shadow()
+    await entry.runtime_data.async_save()
     return await hass.config_entries.async_unload_platforms(entry, [*PLATFORMS, "button"])
 
 

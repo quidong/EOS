@@ -2,8 +2,8 @@
 
 The coordinator collects the state (plan, rooms, holiday, ...) into a
 ``ControlInput`` and calls :func:`decide`. The result says what the heat pump
-should do and why. In shadow mode nothing is written; the result is only
-published and compared with a reference.
+should do and why. Nothing is written here; Home Assistant automations switch
+the devices from the published targets.
 """
 
 from __future__ import annotations

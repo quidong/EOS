@@ -63,13 +63,6 @@ class EosDeviceSensorDescription(SensorEntityDescription):
 CHART_ATTRIBUTES = frozenset({"data", "hourly", "kpi", "plan", "days", "ab"})
 
 
-def _agreement(data: ControlData) -> float | None:
-    stats = data.shadow
-    if stats.compared == 0:
-        return None
-    return round(100.0 * (stats.compared - stats.mismatches) / stats.compared, 1)
-
-
 SENSORS: tuple[EosSensorDescription, ...] = (
     EosSensorDescription(
         key="sg_target",
@@ -125,19 +118,6 @@ SENSORS: tuple[EosSensorDescription, ...] = (
         native_unit_of_measurement=PERCENTAGE,
         device_class=SensorDeviceClass.HUMIDITY,
         state_class=SensorStateClass.MEASUREMENT,
-    ),
-    EosSensorDescription(
-        key="shadow_agreement",
-        value=_agreement,
-        native_unit_of_measurement=PERCENTAGE,
-        entity_category=EntityCategory.DIAGNOSTIC,
-        attributes=lambda d: {
-            "compared": d.shadow.compared,
-            "mismatches": d.shadow.mismatches,
-            "reference_sg": d.reference_sg,
-            "reference_standby": d.reference_standby,
-            "last_mismatches": d.shadow.log[-10:],
-        },
     ),
     EosSensorDescription(
         key="comfort_suggestions",

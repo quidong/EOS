@@ -1,4 +1,4 @@
-"""EOS Control in Home Assistant: config flow, rooms, coordinator, shadow comparison."""
+"""EOS Control in Home Assistant: config flow, rooms, coordinator, entities."""
 
 from __future__ import annotations
 
@@ -9,8 +9,6 @@ import pytest
 from custom_components.eos_control.const import (
     CONF_HOLIDAY_ENTITY,
     CONF_SCAN_INTERVAL,
-    CONF_SG_REFERENCE_ENTITY,
-    CONF_STANDBY_REFERENCE_ENTITY,
     CONF_URL,
     DEFAULTS,
     DOMAIN,
@@ -497,52 +495,43 @@ async def test_humidity_warning(hass: HomeAssistant, aioclient_mock: AiohttpClie
     assert float(hass.states.get("sensor.eos_hp1_humidity_maximum").state) == 72.0
 
 
-async def test_shadow_comparison_counts_confirmed_mismatches(
+async def test_shadow_comparison_is_removed(
     hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
 ):
+    """Options and entities of the shadow comparison (before 0.6) are dropped on setup."""
     set_rooms(hass)
-    hass.states.async_set("sensor.reference_sg", "2")
-    entry = await setup(
-        hass,
-        aioclient_mock,
-        solution(0),
-        options={CONF_SG_REFERENCE_ENTITY: "sensor.reference_sg"},
-        rooms=ROOMS,
-    )
-    coordinator = entry.runtime_data
-    assert coordinator.data.shadow.compared == 1 and coordinator.data.shadow.mismatches == 0
-    await coordinator.async_refresh()
-    assert coordinator.data.shadow.mismatches == 1  # confirmed on the second poll
-    assert coordinator.data.shadow.log[-1]["integration"] == 1
-    hass.states.async_set("sensor.reference_sg", "1")
-    await coordinator.async_refresh()
-    agreement = hass.states.get("sensor.eos_hp1_shadow_agreement")
-    assert agreement.attributes["compared"] == 3 and agreement.attributes["mismatches"] == 1
-    await hass.services.async_call(
-        "button", "press", {"entity_id": "button.eos_hp1_reset_shadow_comparison"}, blocking=True
-    )
-    assert coordinator.data.shadow.mismatches == 0
-
-
-async def test_standby_reference(hass: HomeAssistant, aioclient_mock: AiohttpClientMocker):
-    set_rooms(hass, living=17.5, bath=17.2)
-    hass.states.async_set("input_boolean.away", "on")
-    hass.states.async_set("select.heat_pump_mode", "automatic")
-    entry = await setup(
-        hass,
-        aioclient_mock,
-        solution(0, away=1),
+    aioclient_mock.get(SOLUTION_URL, json=solution(0))
+    aioclient_mock.get(DEVICES_URL, json=HP_DEVICES)
+    aioclient_mock.get(SUMMARY_URL, status=404)
+    aioclient_mock.get(HOURS_URL, status=404)
+    eos_extras(aioclient_mock)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="EOS",
+        data={CONF_URL: URL, CONF_SCAN_INTERVAL: 60},
         options={
-            CONF_HOLIDAY_ENTITY: "input_boolean.away",
-            CONF_STANDBY_REFERENCE_ENTITY: "select.heat_pump_mode",
+            **DEFAULTS,
+            "sg_reference_entity": "sensor.reference_sg",
+            "standby_reference_entity": "select.heat_pump_mode",
             "standby_reference_state": "standby",
         },
-        rooms=ROOMS,
+        subentries_data=[heat_pump_entry("hp1"), *ROOMS],
+        version=2,
     )
-    coordinator = entry.runtime_data
-    assert coordinator.data.reference_standby is False
-    await coordinator.async_refresh()
-    assert coordinator.data.shadow.log[-1]["check"] == "standby"
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    for domain, key in (("sensor", "shadow_agreement"), ("button", "reset_shadow")):
+        registry.async_get_or_create(domain, DOMAIN, f"{entry.entry_id}_{key}", config_entry=entry)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert not {"sg_reference_entity", "standby_reference_entity", "standby_reference_state"} & set(
+        entry.options
+    )
+    assert entry.options["heating_season_states"] == DEFAULTS["heating_season_states"]
+    for domain, key in (("sensor", "shadow_agreement"), ("button", "reset_shadow")):
+        assert registry.async_get_entity_id(domain, DOMAIN, f"{entry.entry_id}_{key}") is None
+    assert hass.states.get("button.eos_hp1_reset_comfort_learning") is not None
+    assert hass.states.get("sensor.eos_hp1_sg_ready_target") is not None
 
 
 async def test_periodic_refresh_and_diagnostics(
@@ -561,25 +550,6 @@ async def test_periodic_refresh_and_diagnostics(
     diag = await async_get_config_entry_diagnostics(hass, entry)
     assert diag["entry"][CONF_URL] == "**REDACTED**"
     assert len(diag["rooms"]) == 2
-
-
-async def test_shadow_counts_survive_a_reload(
-    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
-):
-    set_rooms(hass)
-    hass.states.async_set("sensor.reference_sg", "1")
-    entry = await setup(
-        hass,
-        aioclient_mock,
-        solution(0),
-        options={CONF_SG_REFERENCE_ENTITY: "sensor.reference_sg"},
-        rooms=ROOMS,
-    )
-    await entry.runtime_data.async_refresh()
-    assert entry.runtime_data.data.shadow.compared == 2
-    assert await hass.config_entries.async_reload(entry.entry_id)
-    await hass.async_block_till_done()
-    assert entry.runtime_data.data.shadow.compared == 3  # 2 restored + first poll
 
 
 async def test_comfort_learning_from_setpoints_and_lock(
@@ -1195,7 +1165,7 @@ async def test_migration_from_version_1_keeps_entity_ids(
         "plan": ("sensor", "eos_hp1_plan"),
         "planned_room_temperature": ("sensor", "eos_hp1_planned_room_temperature"),
         "standby": ("binary_sensor", "eos_hp1_standby_target"),
-        "reset_shadow": ("button", "eos_hp1_reset_shadow_comparison"),
+        "reset_comfort": ("button", "eos_hp1_reset_comfort_learning"),
     }
     for key, (domain, object_id) in old.items():
         registry.async_get_or_create(

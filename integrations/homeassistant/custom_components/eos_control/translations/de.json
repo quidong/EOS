@@ -44,9 +44,7 @@
           "heating_season_entity": "Betriebsart / Heizsaison",
           "sg_actual_entity": "Aktueller SG-Ready-Zustand",
           "zone_allowed_entity": "Zonen-Absenkung erlaubt",
-          "reduction_lock_entity": "Absenkung gesperrt bis",
-          "sg_reference_entity": "Schattenvergleich: SG-Soll der bestehenden Steuerung",
-          "standby_reference_entity": "Schattenvergleich: Betriebsart der Wärmepumpe"
+          "reduction_lock_entity": "Absenkung gesperrt bis"
         }
       },
       "rules": {
@@ -66,7 +64,6 @@
           "holiday_restart_hours": "Wiederanlauf vor der Rückkehr",
           "holiday_dhw_lead_hours": "WW-Sollwerte vor einer Ladung zurückstellen",
           "heating_season_states": "Zustände für Heizen (kommagetrennt)",
-          "standby_reference_state": "Zustand für Standby",
           "settle_seconds": "Neue Entscheidung erst übernehmen nach",
           "send_measurements": "Messwerte an EOS senden",
           "measurement_interval_min": "Messwerte senden alle",
@@ -174,9 +171,6 @@
       "humidity_max": {
         "name": "Luftfeuchte Maximum"
       },
-      "shadow_agreement": {
-        "name": "Schattenvergleich Übereinstimmung"
-      },
       "comfort_suggestions": {
         "name": "Komfort-Vorschläge"
       },
@@ -283,9 +277,6 @@
       }
     },
     "button": {
-      "reset_shadow": {
-        "name": "Schattenvergleich zurücksetzen"
-      },
       "reset_comfort": {
         "name": "Komfort-Lernen zurücksetzen"
       }

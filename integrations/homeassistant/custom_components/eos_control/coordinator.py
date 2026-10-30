@@ -1,4 +1,4 @@
-"""Coordinator: reads EOS and Home Assistant states, decides, compares (shadow mode)."""
+"""Coordinator: reads EOS and Home Assistant states and decides."""
 
 from __future__ import annotations
 
@@ -55,9 +55,6 @@ from .const import (
     CONF_SG_PREHEAT,
     CONF_SG_RAISED,
     CONF_SG_REDUCED,
-    CONF_SG_REFERENCE_ENTITY,
-    CONF_STANDBY_REFERENCE_ENTITY,
-    CONF_STANDBY_REFERENCE_STATE,
     CONF_TEMPERATURE_ENTITY,
     CONF_UPPER,
     CONF_URL,
@@ -65,8 +62,6 @@ from .const import (
     CONF_ZONE_ALLOWED_ENTITY,
     DEFAULTS,
     DOMAIN,
-    MISMATCH_CONFIRM_POLLS,
-    MISMATCH_LOG_SIZE,
     SUBENTRY_DEVICE,
     SUBENTRY_ROOM,
 )
@@ -119,37 +114,12 @@ HEALTH_PATH = "/v1/health"
 
 
 @dataclass
-class ShadowStats:
-    """Comparison of the integration's decision with the existing controller."""
-
-    compared: int = 0
-    mismatches: int = 0
-    pending: dict[str, int] = field(default_factory=dict)
-    log: list[dict[str, Any]] = field(default_factory=list)
-
-    def as_dict(self) -> dict[str, Any]:
-        return {"compared": self.compared, "mismatches": self.mismatches, "log": self.log}
-
-    @classmethod
-    def from_dict(cls, data: Optional[dict[str, Any]]) -> "ShadowStats":
-        data = data or {}
-        return cls(
-            compared=int(data.get("compared", 0)),
-            mismatches=int(data.get("mismatches", 0)),
-            log=list(data.get("log", []))[-MISMATCH_LOG_SIZE:],
-        )
-
-
-@dataclass
 class ControlData:
     """Result of one poll."""
 
     decision: Decision
     plan: Optional[Plan]
     eos_error: Optional[str]
-    shadow: ShadowStats
-    reference_sg: Optional[int] = None
-    reference_standby: Optional[bool] = None
     suggestions: list[Suggestion] = field(default_factory=list)
     comfort_events: int = 0
     charts: Charts = field(default_factory=Charts)
@@ -169,7 +139,7 @@ class ControlData:
 
 
 class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
-    """Polls EOS, evaluates the rules and compares them with a reference (shadow mode)."""
+    """Polls EOS and evaluates the rules."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         super().__init__(
@@ -186,7 +156,6 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
         self._store: Store[dict[str, Any]] = Store(
             hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}"
         )
-        self.shadow = ShadowStats()
         self.learning = ComfortLearning()
         self.memory = PlanMemory()
         self.settle = Settle(seconds=float(self.option(CONF_SETTLE)))
@@ -244,7 +213,6 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
     async def _async_update_data(self) -> ControlData:
         if not self._loaded:
             stored = await self._store.async_load() or {}
-            self.shadow = ShadowStats.from_dict(stored)
             self.learning = ComfortLearning.from_list(stored.get("comfort_events"))
             self.memory = PlanMemory.from_list(stored.get("plan_memory"))
             self.memory.generated_at = parse_time(stored.get("plan_generated_at"))
@@ -319,18 +287,12 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             await self._send_measurements(now, data, raw)
         self._write_statistics(now, charts)
         self._update_issues(now, charts)
-        reference_sg = self._int(self.option(CONF_SG_REFERENCE_ENTITY))
-        reference_standby = self._standby_reference()
-        compared = self._compare(now, decision, reference_sg, reference_standby, data.holiday)
-        if compared or learned or memory_changed or manual_changed:
+        if learned or memory_changed or manual_changed:
             self._store.async_delay_save(self._stored, 30)
         return ControlData(
             decision=decision,
             plan=plan,
             eos_error=error,
-            shadow=self.shadow,
-            reference_sg=reference_sg,
-            reference_standby=reference_standby,
             suggestions=self.learning.suggestions(self._lower_limits()),
             comfort_events=len(self.learning.events),
             charts=charts,
@@ -367,7 +329,6 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
 
     def _stored(self) -> dict[str, Any]:
         return {
-            **self.shadow.as_dict(),
             "comfort_events": self.learning.as_list(),
             "plan_memory": self.memory.as_list(),
             "plan_generated_at": (
@@ -783,58 +744,10 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
         )
         return now - since >= delay
 
-    # ------------------------------------------------------------------
-    # Shadow comparison
-    # ------------------------------------------------------------------
-
-    def _compare(
-        self,
-        now: datetime,
-        decision: Decision,
-        reference_sg: Optional[int],
-        reference_standby: Optional[bool],
-        holiday: bool,
-    ) -> bool:
-        checks: dict[str, tuple[Any, Any]] = {}
-        if reference_sg is not None:
-            checks["sg"] = (decision.sg_target, reference_sg)
-        if reference_standby is not None and holiday:
-            checks["standby"] = (decision.standby, reference_standby)
-        if not checks:
-            return False
-        stats = self.shadow
-        stats.compared += 1
-        changed = True
-        for name, (ours, theirs) in checks.items():
-            if ours == theirs:
-                stats.pending.pop(name, None)
-                continue
-            count = stats.pending.get(name, 0) + 1
-            stats.pending[name] = count
-            if count == MISMATCH_CONFIRM_POLLS:
-                stats.mismatches += 1
-                stats.log.append(
-                    {
-                        "time": now.isoformat(timespec="minutes"),
-                        "check": name,
-                        "integration": ours,
-                        "reference": theirs,
-                        "reason": decision.standby_reason if name == "standby" else decision.reason,
-                    }
-                )
-                stats.log = stats.log[-MISMATCH_LOG_SIZE:]
-                changed = True
-        return changed
-
-    async def async_save_shadow(self) -> None:
-        """Write the comparison and the comfort events now (unload, restart)."""
+    async def async_save(self) -> None:
+        """Write the stored state now (unload, restart)."""
         if self._loaded:
             await self._store.async_save(self._stored())
-
-    async def async_reset_shadow(self) -> None:
-        self.shadow = ShadowStats()
-        await self._store.async_save(self._stored())
-        await self.async_request_refresh()
 
     async def async_reset_comfort(self) -> None:
         self.learning = ComfortLearning()
@@ -972,9 +885,3 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             s.strip().lower() for s in str(self.option(CONF_HEATING_SEASON_STATES)).split(",")
         }
         return state.state.lower() in allowed
-
-    def _standby_reference(self) -> Optional[bool]:
-        state = self._state(self.option(CONF_STANDBY_REFERENCE_ENTITY))
-        if state is None:
-            return None
-        return state.state == str(self.option(CONF_STANDBY_REFERENCE_STATE))

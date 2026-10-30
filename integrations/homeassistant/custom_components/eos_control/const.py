@@ -22,10 +22,8 @@ CONF_HEATING_SEASON_STATES = "heating_season_states"
 CONF_SG_ACTUAL_ENTITY = "sg_actual_entity"
 CONF_ZONE_ALLOWED_ENTITY = "zone_allowed_entity"
 CONF_REDUCTION_LOCK_ENTITY = "reduction_lock_entity"
-# Options: shadow comparison (all optional)
-CONF_SG_REFERENCE_ENTITY = "sg_reference_entity"
-CONF_STANDBY_REFERENCE_ENTITY = "standby_reference_entity"
-CONF_STANDBY_REFERENCE_STATE = "standby_reference_state"
+# Options of the removed shadow comparison (before 0.6), dropped on setup
+OBSOLETE_OPTIONS = ("sg_reference_entity", "standby_reference_entity", "standby_reference_state")
 
 # Options: rules
 CONF_SG_REDUCED = "sg_reduced"
@@ -66,7 +64,6 @@ CONF_SETPOINT_ENTITY = "setpoint_entity"
 DEFAULTS = {
     CONF_SCAN_INTERVAL: 60,
     CONF_HEATING_SEASON_STATES: "on, heat, heating",
-    CONF_STANDBY_REFERENCE_STATE: "standby",
     CONF_SG_REDUCED: 1,
     CONF_SG_NORMAL: 2,
     CONF_SG_RAISED: 3,
@@ -90,10 +87,6 @@ DEFAULTS = {
     CONF_HUMIDITY_DELAY: 60,
     CONF_IN_ZONE: False,
 }
-
-# Consecutive polls with a different result before the shadow comparison counts a mismatch
-MISMATCH_CONFIRM_POLLS = 2
-MISMATCH_LOG_SIZE = 30
 
 # Repairs: EOS unreachable / measurements not accepted for longer than this
 ISSUE_AFTER_MIN = 30

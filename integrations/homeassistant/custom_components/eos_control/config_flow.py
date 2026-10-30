@@ -49,9 +49,6 @@ from .const import (
     CONF_SG_PREHEAT,
     CONF_SG_RAISED,
     CONF_SG_REDUCED,
-    CONF_SG_REFERENCE_ENTITY,
-    CONF_STANDBY_REFERENCE_ENTITY,
-    CONF_STANDBY_REFERENCE_STATE,
     CONF_TEMPERATURE_ENTITY,
     CONF_UPPER,
     CONF_URL,
@@ -81,8 +78,6 @@ ENTITY_OPTIONS = (
     CONF_SG_ACTUAL_ENTITY,
     CONF_ZONE_ALLOWED_ENTITY,
     CONF_REDUCTION_LOCK_ENTITY,
-    CONF_SG_REFERENCE_ENTITY,
-    CONF_STANDBY_REFERENCE_ENTITY,
 )
 
 
@@ -359,7 +354,6 @@ RULE_KEYS = (
     CONF_HOLIDAY_DHW_LEAD,
     CONF_SETTLE,
     CONF_HEATING_SEASON_STATES,
-    CONF_STANDBY_REFERENCE_STATE,
     CONF_SEND_MEASUREMENTS,
     CONF_MEASUREMENT_INTERVAL,
     CONF_PLAN_ENTITIES,
@@ -374,7 +368,7 @@ def _optional_entity(key: str, options: dict[str, Any]) -> vol.Optional:
 
 
 class EosControlOptionsFlow(OptionsFlow):
-    """Context entities, shadow comparison and rules."""
+    """Context entities and rules."""
 
     def __init__(self) -> None:
         self._entities: dict[str, Any] = {}
@@ -406,12 +400,6 @@ class EosControlOptionsFlow(OptionsFlow):
                 ),
                 _optional_entity(CONF_REDUCTION_LOCK_ENTITY, options): _entity(
                     ["input_datetime", "sensor"]
-                ),
-                _optional_entity(CONF_SG_REFERENCE_ENTITY, options): _entity(
-                    ["sensor", "input_number", "number", "select"]
-                ),
-                _optional_entity(CONF_STANDBY_REFERENCE_ENTITY, options): _entity(
-                    ["select", "sensor", "input_select"]
                 ),
             }
         )
@@ -471,9 +459,6 @@ class EosControlOptionsFlow(OptionsFlow):
                 vol.Required(CONF_SETTLE, default=options[CONF_SETTLE]): _number(0, 300, 1, "s"),
                 vol.Required(
                     CONF_HEATING_SEASON_STATES, default=options[CONF_HEATING_SEASON_STATES]
-                ): str,
-                vol.Required(
-                    CONF_STANDBY_REFERENCE_STATE, default=options[CONF_STANDBY_REFERENCE_STATE]
                 ): str,
                 vol.Required(CONF_SEND_MEASUREMENTS, default=options[CONF_SEND_MEASUREMENTS]): bool,
                 vol.Required(

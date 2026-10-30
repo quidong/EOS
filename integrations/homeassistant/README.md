@@ -106,7 +106,7 @@ configuration (`/v1/config/devices`) instead of typed ids:
 | Device in Home Assistant | Source | Entities |
 | --- | --- | --- |
 | EOS | the entry | plan, forecast, planned house load per hour, history, history hours |
-| Heat pump (one per entry) | "Add a device from EOS" | SG Ready target, reason, EOS mode, standby/hot water targets, room aggregates, shadow comparison, comfort suggestions, planned heat pump energy, room and hot water temperature |
+| Heat pump (one per entry) | "Add a device from EOS" | SG Ready target, reason, EOS mode, standby/hot water targets, room aggregates, comfort suggestions, planned heat pump energy, room and hot water temperature |
 | Battery | "Add a device from EOS" | operation mode (EOS `BatteryOperationMode`, with next change), mode factor, planned state of charge, charge power target (factor × `max_charge_power_w` while charging from the grid), charging from the grid, discharging allowed, battery export, plan |
 | Electric vehicle / wallbox | "Add a device from EOS" | operation mode, mode factor, planned state of charge, charge power target, charging, plan |
 | Home appliance | "Add a device from EOS" | running as planned, next start, plan |
@@ -191,12 +191,14 @@ redact the EOS URL.
 
 ## Migration from automations
 
-1. Shadow mode: the integration computes targets and reasons but writes nothing; compare with the
-   existing automations for a few days.
-2. Switch over: turn the integration on, disable the old automations (keep them).
-3. Remove the old automations and helpers after a trial period.
+1. Let the integration compute targets and reasons next to the existing automations and compare
+   them for a few days (the integration itself writes nothing).
+2. Switch over: let the automations switch from the integration's targets (SG Ready, standby,
+   hot water), keep a safe fallback (normal operation) for when the integration has no value.
+3. Remove the old decision logic and its helpers. Version 0.6 removed the built-in shadow
+   comparison; its options and entities are dropped on setup.
 
 ## Tests
 
 pytest with `pytest-homeassistant-custom-component`: config flow, mapping validation, every safety
-rule, restart restore, holiday sequence (standby, hot water setpoints, return), shadow mode.
+rule, restart restore, holiday sequence (standby, hot water setpoints, return).
