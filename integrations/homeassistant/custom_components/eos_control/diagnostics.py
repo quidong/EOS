@@ -20,7 +20,8 @@ async def async_get_config_entry_diagnostics(
     return {
         "entry": async_redact_data(dict(entry.data), TO_REDACT),
         "options": dict(entry.options),
-        "rooms": [dict(s.data) for s in entry.subentries.values()],
+        "rooms": [dict(s.data) for s in entry.runtime_data.room_subentries()],
+        "eos_devices_added": [dict(s.data) for s in entry.runtime_data.device_subentries()],
         "decision": data.decision.as_attributes() if data else None,
         "shadow": data.shadow.as_dict() if data else None,
         "eos_error": data.eos_error if data else None,

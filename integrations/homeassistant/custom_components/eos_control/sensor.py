@@ -24,10 +24,17 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import EosControlConfigEntry
 from .charts import parse_time
-from .const import CONF_DEVICE_ID, CONF_EOS_DEVICE, CONF_KIND
+from .const import CONF_EOS_DEVICE, CONF_HOLIDAY_FLOOR, CONF_KIND
 from .coordinator import ControlData
-from .devices import KIND_APPLIANCE, KIND_BATTERY, KIND_EV, OPERATION_MODES, DeviceState
-from .entity import EosControlEntity, EosDeviceEntity
+from .devices import (
+    KIND_APPLIANCE,
+    KIND_BATTERY,
+    KIND_EV,
+    KIND_HEAT_PUMP,
+    OPERATION_MODES,
+    DeviceState,
+)
+from .entity import EosControlEntity, EosDeviceEntity, EosRoomEntity
 from .logic import MODE_NAMES
 
 
@@ -274,24 +281,91 @@ DEVICE_SENSORS: tuple[EosDeviceSensorDescription, ...] = (
 )
 
 
+@dataclass(frozen=True, kw_only=True)
+class EosRoomSensorDescription(SensorEntityDescription):
+    value: Callable[["EosRoomSensor"], Any]
+    attributes: Callable[["EosRoomSensor"], dict[str, Any]] | None = None
+
+
+def _room_lower(entity: "EosRoomSensor") -> float | None:
+    """Lower limit valid now: the holiday floor while away, else the room's own."""
+    room = entity.room
+    data = entity.coordinator.data
+    if room is None or data is None:
+        return None
+    if data.holiday:
+        return float(entity.coordinator.option(CONF_HOLIDAY_FLOOR))
+    return room.lower_c
+
+
+def _room_margin(entity: "EosRoomSensor") -> float | None:
+    room = entity.room
+    lower = _room_lower(entity)
+    if room is None or room.temperature is None or lower is None:
+        return None
+    return round(room.temperature - lower, 2)
+
+
+def _room_suggestions(entity: "EosRoomSensor") -> list[dict[str, Any]]:
+    data = entity.coordinator.data
+    if data is None:
+        return []
+    return [s.as_dict() for s in data.suggestions if s.room == entity.room_name]
+
+
+ROOM_SENSORS: tuple[EosRoomSensorDescription, ...] = (
+    EosRoomSensorDescription(
+        key="room_temperature",
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+        value=lambda e: e.room.temperature if e.room is not None else None,
+    ),
+    EosRoomSensorDescription(
+        key="room_margin",
+        native_unit_of_measurement=UnitOfTemperature.KELVIN,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+        value=_room_margin,
+        attributes=lambda e: {
+            "lower_c": _room_lower(e),
+            "upper_c": e.room.upper_c if e.room is not None else None,
+        },
+    ),
+    EosRoomSensorDescription(
+        key="room_comfort_suggestion",
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        value=lambda e: max((s["suggested_c"] for s in _room_suggestions(e)), default=None),
+        attributes=lambda e: {"suggestions": _room_suggestions(e)},
+    ),
+)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: EosControlConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     coordinator = entry.runtime_data
-    heat_pump = bool(entry.data.get(CONF_DEVICE_ID))
-    async_add_entities(
-        [
-            *(EosSensor(coordinator, d) for d in SENSORS if heat_pump or not d.heat_pump),
-            *(
-                EosChartSensor(coordinator, d)
-                for d in CHART_SENSORS
-                if heat_pump or not d.heat_pump
-            ),
-        ]
-    )
+    async_add_entities(EosChartSensor(coordinator, d) for d in CHART_SENSORS if not d.heat_pump)
+    for subentry in coordinator.device_subentries(KIND_HEAT_PUMP)[:1]:
+        async_add_entities(
+            [
+                *(EosSensor(coordinator, d) for d in SENSORS),
+                *(EosChartSensor(coordinator, d) for d in CHART_SENSORS if d.heat_pump),
+            ],
+            config_subentry_id=subentry.subentry_id,
+        )
+    for subentry in coordinator.room_subentries():
+        async_add_entities(
+            [EosRoomSensor(coordinator, subentry, d) for d in ROOM_SENSORS],
+            config_subentry_id=subentry.subentry_id,
+        )
     for subentry in coordinator.device_subentries():
+        if subentry.data.get(CONF_KIND) == KIND_HEAT_PUMP:
+            continue
         device_id = str(subentry.data[CONF_EOS_DEVICE])
         kind = str(subentry.data[CONF_KIND])
         async_add_entities(
@@ -308,7 +382,7 @@ class EosSensor(EosControlEntity, SensorEntity):
     entity_description: EosSensorDescription
 
     def __init__(self, coordinator, description: EosSensorDescription) -> None:
-        super().__init__(coordinator, description.key)
+        super().__init__(coordinator, description.key, heat_pump=description.heat_pump)
         self.entity_description = description
 
     @property
@@ -358,3 +432,23 @@ class EosDeviceSensor(EosDeviceEntity, SensorEntity):
         if state is None or self.entity_description.attributes is None:
             return None
         return self.entity_description.attributes(state)
+
+
+class EosRoomSensor(EosRoomEntity, SensorEntity):
+    """A room as the heat pump control sees it."""
+
+    entity_description: EosRoomSensorDescription
+
+    def __init__(self, coordinator, subentry, description: EosRoomSensorDescription) -> None:
+        super().__init__(coordinator, subentry, description.key)
+        self.entity_description = description
+
+    @property
+    def native_value(self) -> Any:
+        return self.entity_description.value(self)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        if self.entity_description.attributes is None:
+            return None
+        return self.entity_description.attributes(self)

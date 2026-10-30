@@ -16,14 +16,16 @@ async def async_setup_entry(
     entry: EosControlConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    if not entry.data.get("device_id"):
-        return  # shadow comparison and comfort learning need a heat pump
-    async_add_entities(
-        [
-            ResetShadowButton(entry.runtime_data, "reset_shadow"),
-            ResetComfortButton(entry.runtime_data, "reset_comfort"),
-        ]
-    )
+    coordinator = entry.runtime_data
+    for subentry in coordinator.device_subentries("heat_pump")[:1]:
+        # shadow comparison and comfort learning belong to the heat pump
+        async_add_entities(
+            [
+                ResetShadowButton(coordinator, "reset_shadow"),
+                ResetComfortButton(coordinator, "reset_comfort"),
+            ],
+            config_subentry_id=subentry.subentry_id,
+        )
 
 
 class ResetShadowButton(EosControlEntity, ButtonEntity):

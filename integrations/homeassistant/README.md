@@ -98,27 +98,31 @@ the interventions + 0.3 K, in 0.5 K steps, at most 2 K above the current limit).
 automatically; adopt a suggestion in the room's settings. Events are kept for 90 days, locally in
 Home Assistant's storage; a button resets them. Interventions while away are ignored.
 
-## EOS devices
+## Structure
 
-The integration reads the devices of the EOS configuration (`/v1/config/devices`) instead of
-asking for typed ids:
+One entry per EOS instance (URL, poll interval). Everything else is a subentry, read from the EOS
+configuration (`/v1/config/devices`) instead of typed ids:
 
-- The heat pump is chosen from the heat pumps EOS knows (setup and "Reconfigure"); "–" sets up an
-  entry without heat pump (charts and devices only). If the chosen heat pump disappears from the
-  EOS configuration, the reason says so.
-- "Add a device from EOS" (subentry) offers the batteries, electric vehicles (wallbox) and home
-  appliances of EOS that are not added yet. Each becomes a device with entities:
+| Device in Home Assistant | Source | Entities |
+| --- | --- | --- |
+| EOS | the entry | plan, forecast, planned house load per hour, history, history hours |
+| Heat pump (one per entry) | "Add a device from EOS" | SG Ready target, reason, EOS mode, standby/hot water targets, room aggregates, shadow comparison, comfort suggestions, planned heat pump energy, room and hot water temperature |
+| Battery | "Add a device from EOS" | operation mode (EOS `BatteryOperationMode`, with next change), mode factor, planned state of charge, charge power target (factor × `max_charge_power_w` while charging from the grid), charging from the grid, discharging allowed, battery export, plan |
+| Electric vehicle / wallbox | "Add a device from EOS" | operation mode, mode factor, planned state of charge, charge power target, charging, plan |
+| Home appliance | "Add a device from EOS" | running as planned, next start, plan |
+| Room | "Add room" | room temperature, margin to the lower limit valid now (holiday: holiday floor), airing, humidity high, comfort suggestion |
 
-| Kind | Entities |
-| --- | --- |
-| Battery | operation mode (EOS `BatteryOperationMode`, with next change), mode factor, planned state of charge, charge power target (factor × `max_charge_power_w` while charging from the grid), charging from the grid, discharging allowed, battery export, plan (series) |
-| Electric vehicle | operation mode, mode factor, planned state of charge, charge power target, charging, plan |
-| Home appliance | running as planned, next start, plan |
+The setup offers all devices of EOS at once (the first heat pump and all batteries, EVs and
+appliances preselected); more can be added later. The rules and context entities (options) belong
+to the heat pump; rooms feed its decision.
 
-These are targets: switching the inverter, wallbox or appliance stays with Home Assistant
-automations, as for the heat pump. The same settle time applies to a changed mode. Without a valid
+Device targets are targets: switching the inverter, wallbox or appliance stays with Home Assistant
+automations, as for the heat pump. The settle time applies to a changed mode, too. Without a valid
 plan (EOS unreachable longer than the plan age limit) the device entities are unavailable, so an
 automation can fall back to a safe default.
+
+Migration from 0.4 (entry = one heat pump): the heat pump becomes a device subentry, the entry is
+renamed "EOS". All entity ids stay as they were.
 
 ## Charts
 

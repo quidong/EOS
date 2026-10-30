@@ -118,6 +118,8 @@ class RoomState:
     humidity_high: bool = False
     """Humidity at or above the room's limit for longer than its delay."""
     humidity_pct: Optional[float] = None
+    key: str = ""
+    """Subentry id of the room (for its entities)."""
 
 
 @dataclass

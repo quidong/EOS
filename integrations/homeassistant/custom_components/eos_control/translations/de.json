@@ -8,27 +8,29 @@
           "scan_interval": "Abfrageintervall"
         }
       },
-      "heat_pump": {
-        "title": "Wärmepumpe aus EOS",
+      "reconfigure": {
+        "title": "EOS-Verbindung",
         "data": {
-          "device_id": "Wärmepumpe (– = keine, nur Diagramme und Geräte)"
+          "url": "EOS-URL",
+          "scan_interval": "Abfrageintervall"
         }
       },
-      "reconfigure": {
-        "title": "Wärmepumpe aus EOS wählen",
+      "devices": {
+        "title": "Geräte aus EOS",
         "data": {
-          "device_id": "Wärmepumpe (– = keine, nur Diagramme und Geräte)"
+          "devices": "Geräte (weitere später über „Gerät aus EOS hinzufügen“)"
         }
       }
     },
     "error": {
       "cannot_connect": "EOS antwortet unter dieser URL nicht.",
-      "cannot_read_devices": "Die Geräteliste von EOS (/v1/config/devices) konnte nicht gelesen werden."
+      "cannot_read_devices": "Die Geräteliste von EOS (/v1/config/devices) konnte nicht gelesen werden.",
+      "one_heat_pump": "Pro EOS-Eintrag nur eine Wärmepumpe."
     },
     "abort": {
-      "already_configured": "Diese Wärmepumpe ist bereits eingerichtet.",
+      "already_configured": "Diese EOS-Instanz ist bereits eingerichtet.",
       "cannot_read_devices": "Die Geräteliste von EOS (/v1/config/devices) konnte nicht gelesen werden.",
-      "reconfigure_successful": "Wärmepumpe geändert."
+      "reconfigure_successful": "Gespeichert."
     }
   },
   "options": {
@@ -119,7 +121,7 @@
       },
       "step": {
         "user": {
-          "title": "Gerät aus der EOS-Konfiguration",
+          "title": "Gerät aus der EOS-Konfiguration (Wärmepumpe, Akku, E-Auto/Wallbox, Haushaltsgerät)",
           "data": {
             "eos_device_id": "Gerät"
           }
@@ -127,7 +129,7 @@
       },
       "abort": {
         "cannot_read_devices": "Die Geräteliste von EOS (/v1/config/devices) konnte nicht gelesen werden.",
-        "no_devices": "EOS hat keine (weiteren) Akkus, E-Autos oder Haushaltsgeräte konfiguriert.",
+        "no_devices": "EOS hat keine weiteren Geräte, die sich hinzufügen lassen.",
         "device_not_found": "Das Gerät ist nicht mehr in der EOS-Konfiguration."
       }
     }
@@ -220,6 +222,15 @@
       },
       "device_plan": {
         "name": "Plan"
+      },
+      "room_temperature": {
+        "name": "Raumtemperatur"
+      },
+      "room_margin": {
+        "name": "Abstand zur Untergrenze"
+      },
+      "room_comfort_suggestion": {
+        "name": "Komfort-Vorschlag"
       }
     },
     "binary_sensor": {
@@ -249,6 +260,12 @@
       },
       "running_planned": {
         "name": "Läuft laut Plan"
+      },
+      "airing": {
+        "name": "Lüften"
+      },
+      "humidity_high": {
+        "name": "Feuchte zu hoch"
       }
     },
     "button": {

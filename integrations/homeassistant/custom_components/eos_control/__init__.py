@@ -1,16 +1,26 @@
-"""EOS Control: executes EOS heat pump plans in Home Assistant.
+"""EOS Control: EOS plans for heat pump, batteries, EVs and appliances in Home Assistant.
 
-Version 0.1 runs in shadow mode only: it evaluates the plan and the safety rules,
-publishes the decision and compares it with the existing controller, but writes
-nothing to the heat pump.
+The integration evaluates the EOS plan and its safety rules and publishes targets and
+reasons; switching the devices stays with Home Assistant automations. One entry per
+EOS instance; the devices of EOS (heat pump, batteries, electric vehicles, home
+appliances) and the rooms of the heat pump are subentries.
 """
 
 from __future__ import annotations
 
-from homeassistant.config_entries import ConfigEntry
+from types import MappingProxyType
+
+from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant
 
-from .const import PLATFORMS
+from .const import (
+    CONF_DEVICE_ID,
+    CONF_EOS_DEVICE,
+    CONF_KIND,
+    CONF_URL,
+    PLATFORMS,
+    SUBENTRY_DEVICE,
+)
 from .coordinator import EosControlCoordinator
 
 type EosControlConfigEntry = ConfigEntry[EosControlCoordinator]
@@ -32,5 +42,36 @@ async def async_unload_entry(hass: HomeAssistant, entry: EosControlConfigEntry) 
 
 
 async def _async_reload(hass: HomeAssistant, entry: EosControlConfigEntry) -> None:
-    """Options or rooms changed."""
+    """Options, rooms or devices changed."""
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Version 1 (entry = one heat pump) -> 2 (entry = EOS, heat pump = device subentry).
+
+    The heat pump entities keep their unique ids, so their entity ids stay the same.
+    """
+    if entry.version > 2:
+        return False
+    if entry.version == 1:
+        device_id = str(entry.data.get(CONF_DEVICE_ID) or "")
+        data = {k: v for k, v in entry.data.items() if k != CONF_DEVICE_ID}
+        hass.config_entries.async_update_entry(
+            entry, data=data, title="EOS", unique_id=entry.data.get(CONF_URL), version=2
+        )
+        present = {
+            s.data.get(CONF_EOS_DEVICE)
+            for s in entry.subentries.values()
+            if s.subentry_type == SUBENTRY_DEVICE
+        }
+        if device_id and device_id not in present:
+            hass.config_entries.async_add_subentry(
+                entry,
+                ConfigSubentry(
+                    data=MappingProxyType({CONF_EOS_DEVICE: device_id, CONF_KIND: "heat_pump"}),
+                    subentry_type=SUBENTRY_DEVICE,
+                    title=device_id,
+                    unique_id=device_id,
+                ),
+            )
+    return True

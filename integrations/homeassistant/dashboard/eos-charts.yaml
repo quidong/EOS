@@ -4,7 +4,7 @@
 # "apexcharts-card" (HACS: Frontend -> apexcharts-card).
 #
 # Usage: Dashboard -> edit -> three dots -> "Raw configuration editor", add this view under
-# "views:". Replace "eos_hp1" with the prefix of your entities (Settings -> Devices ->
+# "views:". Replace "eos_hp1" with the prefix of your heat pump entities (Settings -> Devices ->
 # EOS Control -> entities). Optional: add your own meters as "actual" series, see the
 # commented examples.
 #
@@ -27,7 +27,7 @@ sections:
         heading_style: title
         badges:
           - type: entity
-            entity: sensor.eos_hp1_plan
+            entity: sensor.eos_plan
             name: Plan from
             show_name: true
           - type: entity
@@ -79,7 +79,7 @@ sections:
           #   type: column
           #   yaxis_id: kwh
           #   statistics: {type: change, period: hour, align: start}
-          - entity: sensor.eos_hp1_plan
+          - entity: sensor.eos_plan
             name: House load plan
             type: line
             curve: stepline
@@ -88,7 +88,7 @@ sections:
             yaxis_id: kwh
             data_generator: |
               return (entity.attributes.hourly || []).map(r => [new Date(r.t).getTime(), r.load_kwh]);
-          - entity: sensor.eos_hp1_plan
+          - entity: sensor.eos_plan
             name: Heat pump plan
             type: line
             curve: stepline
@@ -97,7 +97,7 @@ sections:
             yaxis_id: kwh
             data_generator: |
               return (entity.attributes.hourly || []).map(r => [new Date(r.t).getTime(), r.heat_pump_kwh]);
-          - entity: sensor.eos_hp1_forecast
+          - entity: sensor.eos_forecast
             name: PV forecast
             type: area
             curve: smooth
@@ -107,7 +107,7 @@ sections:
             yaxis_id: kwh
             data_generator: |
               return (entity.attributes.hourly || []).map(r => [new Date(r.t).getTime(), r.pv_kwh]);
-          - entity: sensor.eos_hp1_forecast
+          - entity: sensor.eos_forecast
             name: Electricity price
             type: line
             curve: stepline
@@ -163,7 +163,7 @@ sections:
             group_by:
               duration: 15min
               func: avg
-          - entity: sensor.eos_hp1_plan
+          - entity: sensor.eos_plan
             name: Room plan
             type: line
             curve: smooth
@@ -172,7 +172,7 @@ sections:
             yaxis_id: room
             data_generator: |
               return (entity.attributes.data || []).map(r => [new Date(r.t).getTime(), r.room_c]);
-          - entity: sensor.eos_hp1_plan
+          - entity: sensor.eos_plan
             name: Slab plan
             type: line
             curve: smooth
@@ -183,7 +183,7 @@ sections:
               hidden_by_default: true
             data_generator: |
               return (entity.attributes.data || []).map(r => [new Date(r.t).getTime(), r.slab_c]);
-          - entity: sensor.eos_hp1_plan
+          - entity: sensor.eos_plan
             name: Hot water plan
             type: line
             curve: smooth
@@ -219,7 +219,7 @@ sections:
             max: 5
             decimals: 0
         series:
-          - entity: sensor.eos_hp1_plan
+          - entity: sensor.eos_plan
             name: Heating mode
             type: line
             curve: stepline
@@ -228,7 +228,7 @@ sections:
             yaxis_id: mode
             data_generator: |
               return (entity.attributes.data || []).map(r => [new Date(r.t).getTime(), r.heating_mode]);
-          - entity: sensor.eos_hp1_plan
+          - entity: sensor.eos_plan
             name: Standby
             type: area
             curve: stepline
@@ -246,13 +246,13 @@ sections:
         heading_style: title
         badges:
           - type: entity
-            entity: sensor.eos_hp1_history
+            entity: sensor.eos_history
             name: As of
             show_name: true
       - type: markdown
         content: >-
-          {% set k = state_attr('sensor.eos_hp1_history', 'kpi') or {} %}
-          {% set p = state_attr('sensor.eos_hp1_history', 'plan') or {} %}
+          {% set k = state_attr('sensor.eos_history', 'kpi') or {} %}
+          {% set p = state_attr('sensor.eos_history', 'plan') or {} %}
           **Last plan:** {{ p.get('algorithm', '–') }}, planned {{ p.get('plan_net_amt', '–') }} €
           net, self-consumption baseline {{ p.get('baseline_net_amt', '–') }} €,
           **saving {{ p.get('saving_vs_baseline_amt', '–') }} €**
@@ -281,14 +281,14 @@ sections:
             min: 0
             decimals: 1
         series:
-          - entity: sensor.eos_hp1_history_hours
+          - entity: sensor.eos_history_hours
             name: Actual
             type: column
             color: "#f2c94c"
             yaxis_id: kwh
             data_generator: |
               return (entity.attributes.data || []).filter(r => r.pv_actual != null).map(r => [new Date(r.hour).getTime(), r.pv_actual / 1000]);
-          - entity: sensor.eos_hp1_history_hours
+          - entity: sensor.eos_history_hours
             name: Forecast
             type: line
             curve: stepline
@@ -317,14 +317,14 @@ sections:
             min: 0
             decimals: 1
         series:
-          - entity: sensor.eos_hp1_history_hours
+          - entity: sensor.eos_history_hours
             name: Actual
             type: column
             color: "#5b8def"
             yaxis_id: kwh
             data_generator: |
               return (entity.attributes.data || []).filter(r => r.load_actual != null).map(r => [new Date(r.hour).getTime(), r.load_actual / 1000]);
-          - entity: sensor.eos_hp1_history_hours
+          - entity: sensor.eos_history_hours
             name: Forecast
             type: line
             curve: stepline
@@ -352,14 +352,14 @@ sections:
           - id: eur
             decimals: 2
         series:
-          - entity: sensor.eos_hp1_history
+          - entity: sensor.eos_history
             name: GENETIC
             type: column
             color: "#5b8def"
             yaxis_id: eur
             data_generator: |
               return (entity.attributes.days || []).filter(r => r.algorithm === 'GENETIC').map(r => [new Date(r.day + 'T12:00:00').getTime(), r.net_amt]);
-          - entity: sensor.eos_hp1_history
+          - entity: sensor.eos_history
             name: MILP
             type: column
             color: "#2e9e6b"

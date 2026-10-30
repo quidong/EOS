@@ -8,27 +8,29 @@
           "scan_interval": "Poll interval"
         }
       },
-      "heat_pump": {
-        "title": "Heat pump from EOS",
+      "reconfigure": {
+        "title": "EOS connection",
         "data": {
-          "device_id": "Heat pump (– = none, charts and devices only)"
+          "url": "EOS URL",
+          "scan_interval": "Poll interval"
         }
       },
-      "reconfigure": {
-        "title": "Choose the heat pump from EOS",
+      "devices": {
+        "title": "Devices from EOS",
         "data": {
-          "device_id": "Heat pump (– = none, charts and devices only)"
+          "devices": "Devices (add more later with “Add a device from EOS”)"
         }
       }
     },
     "error": {
       "cannot_connect": "EOS does not answer at this URL.",
-      "cannot_read_devices": "Could not read the device list of EOS (/v1/config/devices)."
+      "cannot_read_devices": "Could not read the device list of EOS (/v1/config/devices).",
+      "one_heat_pump": "Only one heat pump per EOS entry."
     },
     "abort": {
-      "already_configured": "This heat pump is already configured.",
+      "already_configured": "This EOS instance is already configured.",
       "cannot_read_devices": "Could not read the device list of EOS (/v1/config/devices).",
-      "reconfigure_successful": "Heat pump changed."
+      "reconfigure_successful": "Saved."
     }
   },
   "options": {
@@ -119,7 +121,7 @@
       },
       "step": {
         "user": {
-          "title": "Device from the EOS configuration",
+          "title": "Device from the EOS configuration (heat pump, battery, EV/wallbox, home appliance)",
           "data": {
             "eos_device_id": "Device"
           }
@@ -127,7 +129,7 @@
       },
       "abort": {
         "cannot_read_devices": "Could not read the device list of EOS (/v1/config/devices).",
-        "no_devices": "EOS has no (further) batteries, electric vehicles or home appliances configured.",
+        "no_devices": "EOS has no further devices that can be added.",
         "device_not_found": "The device is no longer in the EOS configuration."
       }
     }
@@ -220,6 +222,15 @@
       },
       "device_plan": {
         "name": "Plan"
+      },
+      "room_temperature": {
+        "name": "Room temperature"
+      },
+      "room_margin": {
+        "name": "Margin to the lower limit"
+      },
+      "room_comfort_suggestion": {
+        "name": "Comfort suggestion"
       }
     },
     "binary_sensor": {
@@ -249,6 +260,12 @@
       },
       "running_planned": {
         "name": "Running as planned"
+      },
+      "airing": {
+        "name": "Airing"
+      },
+      "humidity_high": {
+        "name": "Humidity high"
       }
     },
     "button": {

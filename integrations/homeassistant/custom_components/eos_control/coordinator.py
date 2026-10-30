@@ -20,7 +20,6 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_AIRING_RUN_ON,
-    CONF_DEVICE_ID,
     CONF_HEATING_SEASON_ENTITY,
     CONF_HEATING_SEASON_STATES,
     CONF_HOLIDAY_DHW_LEAD,
@@ -66,7 +65,15 @@ from .const import (
     SUBENTRY_DEVICE,
     SUBENTRY_ROOM,
 )
-from .devices import DeviceState, EosDevice, Hold, device_state, find, parse_devices
+from .devices import (
+    KIND_HEAT_PUMP,
+    DeviceState,
+    EosDevice,
+    Hold,
+    device_state,
+    find,
+    parse_devices,
+)
 from .charts import Charts, PlanMemory, build_charts, parse_time
 from .learning import (
     KIND_LOCK,
@@ -139,6 +146,9 @@ class ControlData:
     devices: dict[str, Optional[DeviceState]] = field(default_factory=dict)
     """Planned state per added EOS device (subentry); None = not in a valid plan."""
     eos_devices: list[EosDevice] = field(default_factory=list)
+    rooms: dict[str, RoomState] = field(default_factory=dict)
+    """Rooms by subentry id, as the decision saw them."""
+    holiday: bool = False
 
 
 class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
@@ -224,7 +234,7 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
         if solution is not None:
             self._last_solution = solution
             await self._update_devices(now)
-        heat_pump = self.entry.data.get(CONF_DEVICE_ID) or ""
+        heat_pump = self.heat_pump_id
         if heat_pump and self.eos_devices and find(self.eos_devices, heat_pump) is None:
             error = f"heat pump '{heat_pump}' not in the EOS configuration"
         charts = build_charts(
@@ -284,6 +294,8 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             history_hours=self._history_hours,
             devices=devices,
             eos_devices=self.eos_devices,
+            rooms={r.key: r for r in data.rooms},
+            holiday=data.holiday,
         )
 
     def cancel_settle(self) -> None:
@@ -321,8 +333,23 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
     # EOS devices (batteries, electric vehicles, home appliances)
     # ------------------------------------------------------------------
 
-    def device_subentries(self) -> list[Any]:
-        return [s for s in self.entry.subentries.values() if s.subentry_type == SUBENTRY_DEVICE]
+    def device_subentries(self, kind: Optional[str] = None) -> list[Any]:
+        """EOS devices added to the entry (optionally only one kind)."""
+        return [
+            s
+            for s in self.entry.subentries.values()
+            if s.subentry_type == SUBENTRY_DEVICE
+            and (kind is None or s.data.get(CONF_KIND) == kind)
+        ]
+
+    def room_subentries(self) -> list[Any]:
+        return [s for s in self.entry.subentries.values() if s.subentry_type == SUBENTRY_ROOM]
+
+    @property
+    def heat_pump_id(self) -> str:
+        """The heat pump of the entry ('' = none); one heat pump per EOS entry."""
+        subs = self.device_subentries(KIND_HEAT_PUMP)
+        return str(subs[0].data[CONF_EOS_DEVICE]) if subs else ""
 
     async def _update_devices(self, now: datetime) -> None:
         """Device list of the EOS configuration, every ``HISTORY_INTERVAL``."""
@@ -351,6 +378,8 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
         states: dict[str, Optional[DeviceState]] = {}
         waits: list[float] = []
         for subentry in self.device_subentries():
+            if subentry.data.get(CONF_KIND) == KIND_HEAT_PUMP:
+                continue  # the heat pump has its own decision
             device_id = str(subentry.data[CONF_EOS_DEVICE])
             device = find(self.eos_devices, device_id) or EosDevice(
                 device_id, str(subentry.data.get(CONF_KIND))
@@ -380,10 +409,10 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             return None, None, f"EOS unreachable: {type(exc).__name__}"
         if not isinstance(solution, dict):
             return None, None, "EOS solution is no object"
-        if not self.entry.data.get(CONF_DEVICE_ID):
+        if not self.heat_pump_id:
             return None, solution, None  # no heat pump: only charts and devices
         try:
-            return parse_plan(solution, self.entry.data[CONF_DEVICE_ID]), solution, None
+            return parse_plan(solution, self.heat_pump_id), solution, None
         except ValueError as exc:
             return None, solution, str(exc)
 
@@ -448,6 +477,7 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             humidity = self._float(cfg.get(CONF_HUMIDITY_ENTITY))
             rooms.append(
                 RoomState(
+                    key=subentry.subentry_id,
                     name=name,
                     temperature=temperature,
                     lower_c=float(cfg.get(CONF_LOWER, DEFAULTS[CONF_LOWER])),

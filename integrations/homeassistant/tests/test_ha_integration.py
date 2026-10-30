@@ -6,7 +6,6 @@ from datetime import timedelta
 
 import pytest
 from custom_components.eos_control.const import (
-    CONF_DEVICE_ID,
     CONF_HOLIDAY_ENTITY,
     CONF_SCAN_INTERVAL,
     CONF_SG_REFERENCE_ENTITY,
@@ -19,6 +18,7 @@ from homeassistant import config_entries
 from homeassistant.config_entries import ConfigSubentryData
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (
@@ -94,6 +94,7 @@ async def setup(
     """
     aioclient_mock.get(SOLUTION_URL, json=sol)
     aioclient_mock.get(DEVICES_URL, json=devices if devices is not None else HP_DEVICES)
+    subentries = ([heat_pump_entry(heat_pump)] if heat_pump else []) + list(rooms or [])
     if history is None:
         aioclient_mock.get(SUMMARY_URL, status=404)
         aioclient_mock.get(HOURS_URL, status=404)
@@ -103,14 +104,24 @@ async def setup(
     entry = MockConfigEntry(
         domain=DOMAIN,
         title="EOS hp1",
-        data={CONF_URL: URL, CONF_DEVICE_ID: heat_pump, CONF_SCAN_INTERVAL: 60},
+        data={CONF_URL: URL, CONF_SCAN_INTERVAL: 60},
         options={**DEFAULTS, **(options or {})},
-        subentries_data=rooms or [],
+        subentries_data=subentries,
+        version=2,
     )
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     return entry
+
+
+def heat_pump_entry(device_id: str = "hp1") -> ConfigSubentryData:
+    return ConfigSubentryData(
+        data={"eos_device_id": device_id, "kind": "heat_pump"},
+        subentry_type="device",
+        title=device_id,
+        unique_id=device_id,
+    )
 
 
 def set_rooms(hass, living=21.0, bath=20.8):
@@ -129,33 +140,54 @@ ROOMS = [room("Living", "sensor.living"), room("Bath", "climate.bath")]
 
 
 async def test_user_flow_creates_entry(hass: HomeAssistant, aioclient_mock: AiohttpClientMocker):
-    """The heat pump is chosen from the EOS configuration, not typed."""
+    """EOS first, then its devices are offered (no typed ids); one heat pump."""
     aioclient_mock.get(f"{URL}/v1/health", json={"status": "alive"})
     aioclient_mock.get(
         DEVICES_URL,
-        json={"heat_pumps": {"wp_a": {}, "wp_b": {}}, "batteries": {"bat1": {}}},
+        json={
+            "heat_pumps": {"hp1": {}, "wp_b": {}},
+            "batteries": {"bat1": {}},
+            "inverters": {"inv": {}},
+        },
     )
+    aioclient_mock.get(SOLUTION_URL, json=solution(1))
+    aioclient_mock.get(SUMMARY_URL, status=404)
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
     assert result["type"] is FlowResultType.FORM
-    aioclient_mock.get(SOLUTION_URL, json=solution(1))
-    aioclient_mock.get(SUMMARY_URL, status=404)
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {CONF_URL: URL + "/", CONF_SCAN_INTERVAL: 60}
     )
-    assert result["type"] is FlowResultType.FORM and result["step_id"] == "heat_pump"
-    options = result["data_schema"].schema[CONF_DEVICE_ID].config["options"]
-    assert [o["value"] for o in options] == ["wp_a", "wp_b", "-"]  # no battery offered
-    with pytest.raises(Exception):  # a typed id that EOS does not know is refused
-        await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_DEVICE_ID: "wbb13"})
+    assert result["type"] is FlowResultType.FORM and result["step_id"] == "devices"
+    field = next(k for k in result["data_schema"].schema if k == "devices")
+    options = result["data_schema"].schema[field].config["options"]
+    assert [o["value"] for o in options] == ["hp1", "wp_b", "bat1"]  # no inverter
+    assert field.default() == ["hp1", "bat1"]  # first heat pump and the battery
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_DEVICE_ID: "wp_b"}
+        result["flow_id"], {"devices": ["hp1", "wp_b"]}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "one_heat_pump"}
+    with pytest.raises(Exception):  # an id that EOS does not know is refused
+        await hass.config_entries.flow.async_configure(result["flow_id"], {"devices": ["wbb13"]})
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"devices": ["hp1", "bat1"]}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["data"] == {CONF_URL: URL, CONF_DEVICE_ID: "wp_b", CONF_SCAN_INTERVAL: 60}
-    assert result["title"] == "EOS wp_b"
+    assert result["title"] == "EOS"
+    assert result["data"] == {CONF_URL: URL, CONF_SCAN_INTERVAL: 60}
     assert result["options"]["sg_reduced"] == 1
+    await hass.async_block_till_done()
+    entry = result["result"]
+    assert entry.version == 2
+    assert sorted((s.data["eos_device_id"], s.data["kind"]) for s in entry.subentries.values()) == [
+        ("bat1", "battery"),
+        ("hp1", "heat_pump"),
+    ]
+    assert hass.states.get("sensor.eos_hp1_sg_ready_target") is not None
+    assert hass.states.get("sensor.eos_plan") is not None
+    assert hass.states.get("sensor.eos_bat1_operation_mode") is not None
 
 
 async def test_user_flow_without_heat_pump(
@@ -171,14 +203,12 @@ async def test_user_flow_without_heat_pump(
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {CONF_URL: URL, CONF_SCAN_INTERVAL: 60}
     )
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_DEVICE_ID: "-"}
-    )
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"devices": []})
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["data"][CONF_DEVICE_ID] == "" and result["title"] == "EOS"
     await hass.async_block_till_done()
     assert hass.states.get("sensor.eos_plan") is not None
-    assert hass.states.get("sensor.eos_sg_ready_target") is None  # no heat pump entities
+    assert not [s for s in hass.states.async_entity_ids() if "sg_ready" in s]
+    assert not [s for s in hass.states.async_entity_ids() if s.startswith("button.")]
 
 
 async def test_user_flow_device_list_unreadable(
@@ -250,7 +280,7 @@ async def test_room_subentry_flow(hass: HomeAssistant, aioclient_mock: AiohttpCl
         },
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    sub = next(iter(entry.subentries.values()))
+    sub = next(s for s in entry.subentries.values() if s.subentry_type == "room")
     assert sub.title == "Office" and sub.data["lower_c"] == 16.5
 
 
@@ -321,10 +351,11 @@ async def test_unreachable_eos(hass: HomeAssistant, aioclient_mock: AiohttpClien
     aioclient_mock.get(SOLUTION_URL, status=503)
     entry = MockConfigEntry(
         domain=DOMAIN,
-        data={CONF_URL: URL, CONF_DEVICE_ID: "hp1", CONF_SCAN_INTERVAL: 60},
+        data={CONF_URL: URL, CONF_SCAN_INTERVAL: 60},
         options=dict(DEFAULTS),
-        subentries_data=ROOMS,
-        title="EOS hp1",
+        subentries_data=[heat_pump_entry(), *ROOMS],
+        title="EOS",
+        version=2,
     )
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
@@ -565,23 +596,23 @@ def chart_solution(age_min: int = 5) -> dict:
 async def test_chart_sensors(hass: HomeAssistant, aioclient_mock: AiohttpClientMocker):
     set_rooms(hass)
     await setup(hass, aioclient_mock, chart_solution(), rooms=ROOMS)
-    plan = hass.states.get("sensor.eos_hp1_plan")
+    plan = hass.states.get("sensor.eos_plan")
     assert plan is not None and plan.state not in ("unknown", "unavailable")
     assert plan.attributes["slot_minutes"] == 15
     assert len(plan.attributes["data"]) == 8
     assert plan.attributes["data"][0]["heat_pump_wh"] == 250.0
     assert plan.attributes["hourly"][0]["heat_pump_kwh"] == pytest.approx(1.0)
-    forecast = hass.states.get("sensor.eos_hp1_forecast")
+    forecast = hass.states.get("sensor.eos_forecast")
     assert forecast.attributes["hourly"][0]["pv_kwh"] == pytest.approx(1.2)
-    assert float(hass.states.get("sensor.eos_hp1_planned_house_load_hour").state) == 0.4
+    assert float(hass.states.get("sensor.eos_planned_house_load_hour").state) == 0.4
     assert float(hass.states.get("sensor.eos_hp1_planned_heat_pump_energy_hour").state) == 1.0
     room = hass.states.get("sensor.eos_hp1_planned_room_temperature")
     assert float(room.state) == 21.25
     assert room.attributes["state_class"] == "measurement"
     assert float(hass.states.get("sensor.eos_hp1_planned_hot_water_temperature").state) == 48.0
     # upstream EOS without history endpoints
-    assert hass.states.get("sensor.eos_hp1_history").state == "unavailable"
-    assert hass.states.get("sensor.eos_hp1_history_hours").state == "unavailable"
+    assert hass.states.get("sensor.eos_history").state == "unavailable"
+    assert hass.states.get("sensor.eos_history_hours").state == "unavailable"
 
 
 async def test_chart_series_are_not_recorded(
@@ -609,11 +640,11 @@ async def test_history_sensors(hass: HomeAssistant, aioclient_mock: AiohttpClien
         "data": [{"hour": "2026-10-29T19:00:00+00:00", "pv_actual": 0.0, "pv_predicted": 5.0}],
     }
     await setup(hass, aioclient_mock, chart_solution(), rooms=ROOMS, history=(summary, hours))
-    state = hass.states.get("sensor.eos_hp1_history")
+    state = hass.states.get("sensor.eos_history")
     assert state.state == "2026-10-29T20:25:04+00:00"
     assert state.attributes["kpi"] == {"pv_mae_6h": 120.0}
     assert state.attributes["ab"]["MILP"]["days"] == 1
-    hourly = hass.states.get("sensor.eos_hp1_history_hours")
+    hourly = hass.states.get("sensor.eos_history_hours")
     assert hourly.attributes["data"][0]["pv_predicted"] == 5.0
     calls = [str(c[1]) for c in aioclient_mock.mock_calls]
     # fetched once, not on every poll
@@ -652,11 +683,11 @@ async def test_plan_memory_survives_a_reload(
     aioclient_mock.get(SUMMARY_URL, status=404)
     await coordinator.async_refresh()
     await hass.async_block_till_done()
-    plan = hass.states.get("sensor.eos_hp1_plan")
+    plan = hass.states.get("sensor.eos_plan")
     assert len(plan.attributes["data"]) == 8
     # the time of the last plan stays (plan age), also across the reload
     assert plan.state not in ("unknown", "unavailable")
-    assert hass.states.get("sensor.eos_hp1_forecast").state == "unknown"
+    assert hass.states.get("sensor.eos_forecast").state == "unknown"
     assert float(hass.states.get("sensor.eos_hp1_planned_room_temperature").state) == 21.25
 
 
@@ -671,8 +702,8 @@ async def test_example_dashboard_uses_existing_entities(
 
     text = (Path(__file__).resolve().parents[1] / "dashboard" / "eos-charts.yaml").read_text()
     yaml.safe_load(text)
-    referenced = set(re.findall(r"sensor\.eos_hp1_[a-z_]+", text))
-    assert "sensor.eos_hp1_plan" in referenced and "sensor.eos_hp1_history_hours" in referenced
+    referenced = set(re.findall(r"sensor\.eos_[a-z0-9_]+", text))
+    assert "sensor.eos_plan" in referenced and "sensor.eos_history_hours" in referenced
     set_rooms(hass)
     await setup(hass, aioclient_mock, chart_solution(), rooms=ROOMS)
     missing = {e for e in referenced if hass.states.get(e) is None}
@@ -915,6 +946,7 @@ async def test_device_subentry_flow(hass: HomeAssistant, aioclient_mock: Aiohttp
     await hass.async_block_till_done()
     sub = [s for s in entry.subentries.values() if s.subentry_type == "device"]
     assert {s.data["eos_device_id"]: s.data["kind"] for s in sub} == {
+        "hp1": "heat_pump",
         "bat1": "battery",
         "ev1": "electric_vehicle",
     }
@@ -932,21 +964,153 @@ async def test_device_subentry_flow_nothing_to_add(
     assert result["type"] is FlowResultType.ABORT and result["reason"] == "no_devices"
 
 
-async def test_reconfigure_heat_pump(hass: HomeAssistant, aioclient_mock: AiohttpClientMocker):
+async def test_reconfigure_connection(hass: HomeAssistant, aioclient_mock: AiohttpClientMocker):
     set_rooms(hass)
-    entry = await setup(
-        hass,
-        aioclient_mock,
-        solution(1),
-        rooms=ROOMS,
-        devices={"heat_pumps": {"hp1": {}, "hp2": {}}},
-    )
+    entry = await setup(hass, aioclient_mock, solution(1), rooms=ROOMS)
+    other = "http://eos2.test:8503"
+    aioclient_mock.get(f"{other}/v1/health", json={"status": "alive"})
+    aioclient_mock.get(f"{other}/v1/energy-management/optimization/solution", json=solution(1))
+    aioclient_mock.get(f"{other}/v1/config/devices", json=HP_DEVICES)
+    aioclient_mock.get(f"{other}/v1/energy-management/history/summary", status=404)
     result = await entry.start_reconfigure_flow(hass)
     assert result["type"] is FlowResultType.FORM
-    options = result["data_schema"].schema[CONF_DEVICE_ID].config["options"]
-    assert [o["value"] for o in options] == ["hp1", "hp2", "-"]
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_DEVICE_ID: "hp2"}
+        result["flow_id"], {CONF_URL: other + "/", CONF_SCAN_INTERVAL: 30}
     )
     assert result["type"] is FlowResultType.ABORT and result["reason"] == "reconfigure_successful"
-    assert entry.data[CONF_DEVICE_ID] == "hp2"
+    assert entry.data == {CONF_URL: other, CONF_SCAN_INTERVAL: 30}
+
+
+async def test_device_subentry_offers_the_heat_pump_once(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+):
+    set_rooms(hass)
+    entry = await setup(
+        hass, aioclient_mock, solution(1), rooms=ROOMS, heat_pump="", devices=DEVICE_CONFIG
+    )
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, "device"), context={"source": config_entries.SOURCE_USER}
+    )
+    options = result["data_schema"].schema["eos_device_id"].config["options"]
+    assert [o["value"] for o in options] == ["hp1", "bat1", "ev1", "dishwasher"]
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"eos_device_id": "hp1"}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.eos_hp1_sg_ready_target") is not None
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, "device"), context={"source": config_entries.SOURCE_USER}
+    )
+    options = result["data_schema"].schema["eos_device_id"].config["options"]
+    assert "hp1" not in [o["value"] for o in options]
+
+
+async def test_rooms_are_devices(hass: HomeAssistant, aioclient_mock: AiohttpClientMocker):
+    set_rooms(hass, living=21.0, bath=20.8)
+    hass.states.async_set("binary_sensor.bath_window", "on")
+    hass.states.async_set("sensor.bath_humidity", "50")
+    rooms = [
+        room("Living", "sensor.living"),
+        room(
+            "Bath",
+            "climate.bath",
+            ["binary_sensor.bath_window"],
+            humidity_entity="sensor.bath_humidity",
+        ),
+    ]
+    entry = await setup(hass, aioclient_mock, solution(1), rooms=rooms)
+    assert float(hass.states.get("sensor.eos_raum_living_room_temperature").state) == 21.0
+    margin = hass.states.get("sensor.eos_raum_living_margin_to_the_lower_limit")
+    assert float(margin.state) == pytest.approx(1.5)  # 21.0 - 19.5
+    assert margin.attributes["lower_c"] == 19.5
+    assert hass.states.get("binary_sensor.eos_raum_bath_airing").state == "on"
+    assert hass.states.get("binary_sensor.eos_raum_bath_humidity_high").state == "off"
+    assert hass.states.get("sensor.eos_raum_bath_comfort_suggestion").state == "unknown"
+    registry = dr.async_get(hass)
+    living = registry.async_get_device(
+        identifiers={
+            (
+                DOMAIN,
+                f"{entry.entry_id}_room_"
+                + next(s.subentry_id for s in entry.subentries.values() if s.title == "Living"),
+            )
+        }
+    )
+    assert living is not None and living.name == "EOS Raum Living"
+    hub = registry.async_get_device(identifiers={(DOMAIN, entry.entry_id)})
+    assert living.via_device_id == hub.id
+
+
+async def test_room_margin_in_holiday(hass: HomeAssistant, aioclient_mock: AiohttpClientMocker):
+    set_rooms(hass, living=17.0, bath=18.0)
+    hass.states.async_set("input_boolean.away", "on")
+    await setup(
+        hass,
+        aioclient_mock,
+        solution(0, away=1),
+        options={"holiday_entity": "input_boolean.away"},
+        rooms=ROOMS,
+    )
+    margin = hass.states.get("sensor.eos_raum_living_margin_to_the_lower_limit")
+    assert float(margin.state) == pytest.approx(1.0)  # 17.0 - holiday floor 16.0
+
+
+async def test_migration_from_version_1_keeps_entity_ids(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+):
+    """0.4 entries (entry = heat pump) become EOS entries with a heat pump subentry."""
+    set_rooms(hass)
+    aioclient_mock.get(SOLUTION_URL, json=chart_solution())
+    aioclient_mock.get(DEVICES_URL, json=HP_DEVICES)
+    aioclient_mock.get(SUMMARY_URL, status=404)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="EOS hp1",
+        unique_id=f"{URL}#hp1",
+        data={CONF_URL: URL, "device_id": "hp1", CONF_SCAN_INTERVAL: 60},
+        options=dict(DEFAULTS),
+        subentries_data=ROOMS,
+        version=1,
+    )
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    old_device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id, identifiers={(DOMAIN, entry.entry_id)}, name="EOS hp1"
+    )
+    # entity ids as 0.4 created them (device "EOS hp1")
+    old = {
+        "sg_target": ("sensor", "eos_hp1_sg_ready_target"),
+        "plan": ("sensor", "eos_hp1_plan"),
+        "planned_room_temperature": ("sensor", "eos_hp1_planned_room_temperature"),
+        "standby": ("binary_sensor", "eos_hp1_standby_target"),
+        "reset_shadow": ("button", "eos_hp1_reset_shadow_comparison"),
+    }
+    for key, (domain, object_id) in old.items():
+        registry.async_get_or_create(
+            domain,
+            DOMAIN,
+            f"{entry.entry_id}_{key}",
+            suggested_object_id=object_id,
+            config_entry=entry,
+            device_id=old_device.id,
+        )
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.version == 2
+    assert entry.title == "EOS" and entry.unique_id == URL
+    assert "device_id" not in entry.data
+    heat_pumps = [s for s in entry.subentries.values() if s.subentry_type == "device"]
+    assert [(s.data["eos_device_id"], s.data["kind"]) for s in heat_pumps] == [("hp1", "heat_pump")]
+    assert len([s for s in entry.subentries.values() if s.subentry_type == "room"]) == 2
+    for key, (domain, object_id) in old.items():
+        entity_id = f"{domain}.{object_id}"
+        assert registry.async_get_entity_id(domain, DOMAIN, f"{entry.entry_id}_{key}") == entity_id
+        assert hass.states.get(entity_id) is not None, entity_id
+    # heat pump entities moved to the heat pump device, the plan stays at "EOS"
+    sg = registry.async_get("sensor.eos_hp1_sg_ready_target")
+    plan = registry.async_get("sensor.eos_hp1_plan")
+    assert sg.config_subentry_id == heat_pumps[0].subentry_id
+    assert plan.device_id == old_device.id and sg.device_id != old_device.id
+    assert hass.states.get("sensor.eos_hp1_sg_ready_target").state == "2"
+    assert len(hass.states.get("sensor.eos_hp1_plan").attributes["data"]) == 8

@@ -8,6 +8,7 @@ import aiohttp
 import voluptuous as vol
 from homeassistant.config_entries import (
     ConfigEntry,
+    ConfigSubentryData,
     ConfigFlow,
     ConfigFlowResult,
     ConfigSubentryFlow,
@@ -20,7 +21,6 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     CONF_AIRING_RUN_ON,
-    CONF_DEVICE_ID,
     CONF_HEATING_SEASON_ENTITY,
     CONF_HEATING_SEASON_STATES,
     CONF_HOLIDAY_DHW_LEAD,
@@ -66,7 +66,7 @@ from .const import (
 )
 from .devices import DEVICE_KINDS, KIND_HEAT_PUMP, EosDevice, parse_devices
 
-NO_HEAT_PUMP = "-"
+CONF_DEVICES = "devices"
 
 ENTITY_OPTIONS = (
     CONF_HOLIDAY_ENTITY,
@@ -125,26 +125,43 @@ async def fetch_devices(hass, url: str) -> list[EosDevice] | None:
         return None
 
 
-def _heat_pump_selector(devices: list[EosDevice]) -> selector.SelectSelector:
-    options = [
-        selector.SelectOptionDict(value=d.device_id, label=d.device_id)
+def _device_options(devices: list[EosDevice]) -> list[selector.SelectOptionDict]:
+    return [
+        selector.SelectOptionDict(value=d.device_id, label=f"{d.device_id} ({d.kind})")
         for d in devices
-        if d.kind == KIND_HEAT_PUMP
     ]
-    options.append(selector.SelectOptionDict(value=NO_HEAT_PUMP, label="–"))
-    return selector.SelectSelector(
-        selector.SelectSelectorConfig(options=options, mode=selector.SelectSelectorMode.LIST)
+
+
+def _addable(
+    devices: list[EosDevice], present: set[str], heat_pump_present: bool
+) -> list[EosDevice]:
+    """Devices that can be added: supported kinds, not added yet, one heat pump."""
+    result = []
+    for device in devices:
+        if device.device_id in present:
+            continue
+        if device.kind == KIND_HEAT_PUMP:
+            if heat_pump_present:
+                continue
+        elif device.kind not in DEVICE_KINDS:
+            continue
+        result.append(device)
+    return result
+
+
+def _device_subentry(device: EosDevice) -> ConfigSubentryData:
+    return ConfigSubentryData(
+        data={CONF_EOS_DEVICE: device.device_id, CONF_KIND: device.kind},
+        subentry_type=SUBENTRY_DEVICE,
+        title=device.device_id,
+        unique_id=device.device_id,
     )
 
 
-def _default_heat_pump(devices: list[EosDevice]) -> str:
-    return next((d.device_id for d in devices if d.kind == KIND_HEAT_PUMP), NO_HEAT_PUMP)
-
-
 class EosControlConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Connection to EOS, then the heat pump from the EOS configuration."""
+    """Connection to EOS, then the EOS devices to add."""
 
-    VERSION = 1
+    VERSION = 2
 
     def __init__(self) -> None:
         self._url = ""
@@ -156,13 +173,17 @@ class EosControlConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             self._url = user_input[CONF_URL].rstrip("/")
             self._scan_interval = int(user_input[CONF_SCAN_INTERVAL])
+            await self.async_set_unique_id(self._url)
+            self._abort_if_unique_id_configured()
             error = await _check_eos(self.hass, self._url)
             devices = None if error else await fetch_devices(self.hass, self._url)
             if error or devices is None:
                 errors["base"] = error or "cannot_read_devices"
             else:
-                self._devices = devices
-                return await self.async_step_heat_pump()
+                self._devices = _addable(devices, set(), heat_pump_present=False)
+                if not self._devices:
+                    return self._create([])
+                return await self.async_step_devices()
         schema = vol.Schema(
             {
                 vol.Required(CONF_URL, default="http://eos:8503"): selector.TextSelector(
@@ -175,53 +196,73 @@ class EosControlConfigFlow(ConfigFlow, domain=DOMAIN):
         )
         return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
 
-    async def async_step_heat_pump(
+    async def async_step_devices(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Heat pump from the EOS configuration (or none: charts and devices only)."""
+        """EOS devices to add now (more can be added later)."""
+        errors: dict[str, str] = {}
         if user_input is not None:
-            choice = user_input[CONF_DEVICE_ID]
-            device_id = "" if choice == NO_HEAT_PUMP else choice
-            await self.async_set_unique_id(f"{self._url}#{device_id}")
-            self._abort_if_unique_id_configured()
-            return self.async_create_entry(
-                title=f"EOS {device_id}" if device_id else "EOS",
-                data={
-                    CONF_URL: self._url,
-                    CONF_DEVICE_ID: device_id,
-                    CONF_SCAN_INTERVAL: self._scan_interval,
-                },
-                options={k: v for k, v in DEFAULTS.items() if k in RULE_KEYS},
-            )
+            chosen = [d for d in self._devices if d.device_id in user_input[CONF_DEVICES]]
+            if sum(d.kind == KIND_HEAT_PUMP for d in chosen) > 1:
+                errors["base"] = "one_heat_pump"
+            else:
+                return self._create(chosen)
+        first_heat_pump = next((d for d in self._devices if d.kind == KIND_HEAT_PUMP), None)
+        default = [
+            d.device_id for d in self._devices if d.kind != KIND_HEAT_PUMP or d is first_heat_pump
+        ]
         schema = vol.Schema(
             {
-                vol.Required(
-                    CONF_DEVICE_ID, default=_default_heat_pump(self._devices)
-                ): _heat_pump_selector(self._devices)
+                vol.Optional(CONF_DEVICES, default=default): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=_device_options(self._devices),
+                        multiple=True,
+                        mode=selector.SelectSelectorMode.LIST,
+                    )
+                )
             }
         )
-        return self.async_show_form(step_id="heat_pump", data_schema=schema)
+        return self.async_show_form(step_id="devices", data_schema=schema, errors=errors)
+
+    def _create(self, devices: list[EosDevice]) -> ConfigFlowResult:
+        return self.async_create_entry(
+            title="EOS",
+            data={CONF_URL: self._url, CONF_SCAN_INTERVAL: self._scan_interval},
+            options={k: v for k, v in DEFAULTS.items() if k in RULE_KEYS},
+            subentries=[_device_subentry(d) for d in devices],
+        )
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Choose the heat pump again from the EOS configuration."""
+        """Change the EOS URL or the poll interval."""
         entry = self._get_reconfigure_entry()
-        url = entry.data[CONF_URL]
+        errors: dict[str, str] = {}
         if user_input is not None:
-            choice = user_input[CONF_DEVICE_ID]
-            device_id = "" if choice == NO_HEAT_PUMP else choice
-            return self.async_update_reload_and_abort(
-                entry, data_updates={CONF_DEVICE_ID: device_id}
-            )
-        devices = await fetch_devices(self.hass, url)
-        if devices is None:
-            return self.async_abort(reason="cannot_read_devices")
-        current = entry.data.get(CONF_DEVICE_ID) or NO_HEAT_PUMP
+            url = user_input[CONF_URL].rstrip("/")
+            error = await _check_eos(self.hass, url)
+            if error:
+                errors["base"] = error
+            else:
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data_updates={
+                        CONF_URL: url,
+                        CONF_SCAN_INTERVAL: int(user_input[CONF_SCAN_INTERVAL]),
+                    },
+                )
         schema = vol.Schema(
-            {vol.Required(CONF_DEVICE_ID, default=current): _heat_pump_selector(devices)}
+            {
+                vol.Required(CONF_URL, default=entry.data[CONF_URL]): selector.TextSelector(
+                    selector.TextSelectorConfig(type=selector.TextSelectorType.URL)
+                ),
+                vol.Required(
+                    CONF_SCAN_INTERVAL,
+                    default=entry.data.get(CONF_SCAN_INTERVAL, DEFAULTS[CONF_SCAN_INTERVAL]),
+                ): _number(15, 600, 5, "s"),
+            }
         )
-        return self.async_show_form(step_id="reconfigure", data_schema=schema)
+        return self.async_show_form(step_id="reconfigure", data_schema=schema, errors=errors)
 
     @staticmethod
     @callback
@@ -367,7 +408,7 @@ class EosControlOptionsFlow(OptionsFlow):
 
 
 class DeviceSubentryFlow(ConfigSubentryFlow):
-    """A battery, electric vehicle or home appliance from the EOS configuration."""
+    """A device from the EOS configuration: heat pump, battery, EV or home appliance."""
 
     def __init__(self) -> None:
         self._devices: list[EosDevice] = []
@@ -380,31 +421,27 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
             )
             if device is None:
                 return self.async_abort(reason="device_not_found")
+            sub = _device_subentry(device)
             return self.async_create_entry(
-                title=device.device_id,
-                data={CONF_EOS_DEVICE: device.device_id, CONF_KIND: device.kind},
-                unique_id=device.device_id,
+                title=sub["title"], data=sub["data"], unique_id=sub["unique_id"]
             )
         devices = await fetch_devices(self.hass, entry.data[CONF_URL])
         if devices is None:
             return self.async_abort(reason="cannot_read_devices")
-        added = {
-            s.data.get(CONF_EOS_DEVICE)
-            for s in entry.subentries.values()
-            if s.subentry_type == SUBENTRY_DEVICE
-        }
-        self._devices = [d for d in devices if d.kind in DEVICE_KINDS and d.device_id not in added]
+        present = [s for s in entry.subentries.values() if s.subentry_type == SUBENTRY_DEVICE]
+        self._devices = _addable(
+            devices,
+            {str(s.data.get(CONF_EOS_DEVICE)) for s in present},
+            heat_pump_present=any(s.data.get(CONF_KIND) == KIND_HEAT_PUMP for s in present),
+        )
         if not self._devices:
             return self.async_abort(reason="no_devices")
-        options = [
-            selector.SelectOptionDict(value=d.device_id, label=f"{d.device_id} ({d.kind})")
-            for d in self._devices
-        ]
         schema = vol.Schema(
             {
                 vol.Required(CONF_EOS_DEVICE): selector.SelectSelector(
                     selector.SelectSelectorConfig(
-                        options=options, mode=selector.SelectSelectorMode.LIST
+                        options=_device_options(self._devices),
+                        mode=selector.SelectSelectorMode.LIST,
                     )
                 )
             }
