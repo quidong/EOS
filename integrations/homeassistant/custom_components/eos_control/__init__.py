@@ -13,6 +13,7 @@ from types import MappingProxyType
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.typing import ConfigType
 
 from .const import (
@@ -44,8 +45,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: EosControlConfigEntry) -
     entry.runtime_data = coordinator
     entry.async_on_unload(coordinator.cancel_settle)
     await hass.config_entries.async_forward_entry_setups(entry, [*PLATFORMS, "button"])
+    _link_devices(hass, entry)
     entry.async_on_unload(entry.add_update_listener(_async_reload))
     return True
+
+
+def _link_devices(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Heat pump, EOS devices and rooms below the "EOS" device."""
+    registry = dr.async_get(hass)
+    hub = registry.async_get_device(identifiers={(DOMAIN, entry.entry_id)})
+    if hub is None:
+        return
+    for device in dr.async_entries_for_config_entry(registry, entry.entry_id):
+        if device.id != hub.id and device.via_device_id != hub.id:
+            registry.async_update_device(device.id, via_device_id=hub.id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: EosControlConfigEntry) -> bool:

@@ -7,6 +7,8 @@ Devices in Home Assistant:
   appliance), each added as an EOS device subentry, below "EOS";
 - every room (room subentry), below "EOS".
 
+The devices hang below "EOS" (``via_device_id``, linked after the setup).
+
 The heat pump keeps the unique ids ``<entry>_<key>`` of the versions before 0.5, so its
 entity ids stay the same after the migration (one heat pump per EOS entry).
 """
@@ -50,7 +52,6 @@ def eos_device(coordinator: EosControlCoordinator, device_id: str, kind: str) ->
         manufacturer="EOS Control",
         model=KIND_MODELS.get(kind, kind),
         entry_type=DeviceEntryType.SERVICE,
-        via_device=(DOMAIN, entry.entry_id),
     )
 
 
@@ -116,7 +117,6 @@ class EosRoomEntity(CoordinatorEntity[EosControlCoordinator]):
             manufacturer="EOS Control",
             model="Room",
             entry_type=DeviceEntryType.SERVICE,
-            via_device=(DOMAIN, entry.entry_id),
         )
 
     @property
