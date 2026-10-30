@@ -43,6 +43,8 @@ from .const import (
     CONF_SCAN_INTERVAL,
     CONF_SETPOINT_ENTITY,
     CONF_SETTLE,
+    CONF_EOS_DEVICE,
+    CONF_KIND,
     CONF_SG_ACTUAL_ENTITY,
     CONF_SG_FORCED,
     CONF_SG_NORMAL,
@@ -61,8 +63,10 @@ from .const import (
     DOMAIN,
     MISMATCH_CONFIRM_POLLS,
     MISMATCH_LOG_SIZE,
+    SUBENTRY_DEVICE,
     SUBENTRY_ROOM,
 )
+from .devices import DeviceState, EosDevice, Hold, device_state, find, parse_devices
 from .charts import Charts, PlanMemory, build_charts, parse_time
 from .learning import (
     KIND_LOCK,
@@ -91,6 +95,7 @@ RESTART_STAMP_S = 60.0
 HISTORY_INTERVAL = timedelta(minutes=15)
 HISTORY_SUMMARY_PATH = "/v1/energy-management/history/summary"
 HISTORY_HOURS_PATH = "/v1/energy-management/history/hours"
+DEVICES_PATH = "/v1/config/devices"
 
 
 @dataclass
@@ -131,6 +136,9 @@ class ControlData:
     history: Optional[dict[str, Any]] = None
     """``/history/summary`` of EOS (key figures); None = not available (e.g. upstream EOS)."""
     history_hours: Optional[dict[str, Any]] = None
+    devices: dict[str, Optional[DeviceState]] = field(default_factory=dict)
+    """Planned state per added EOS device (subentry); None = not in a valid plan."""
+    eos_devices: list[EosDevice] = field(default_factory=list)
 
 
 class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
@@ -157,6 +165,10 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
         self.settle = Settle(seconds=float(self.option(CONF_SETTLE)))
         self._settle_unsub: Optional[Callable[[], None]] = None
         self._last_plan: Optional[Plan] = None
+        self._last_solution: Optional[dict[str, Any]] = None
+        self.hold = Hold(seconds=float(self.option(CONF_SETTLE)))
+        self.eos_devices: list[EosDevice] = []
+        self._devices_at: Optional[datetime] = None
         self._memory_generated: Optional[datetime] = None
         self._history: Optional[dict[str, Any]] = None
         self._history_hours: Optional[dict[str, Any]] = None
@@ -209,9 +221,15 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             # EOS busy or unreachable: the last plan stays valid until it is too old
             # (plan_max_age_min decides), instead of NORMAL for every short outage.
             plan = self._last_plan
+        if solution is not None:
+            self._last_solution = solution
+            await self._update_devices(now)
+        heat_pump = self.entry.data.get(CONF_DEVICE_ID) or ""
+        if heat_pump and self.eos_devices and find(self.eos_devices, heat_pump) is None:
+            error = f"heat pump '{heat_pump}' not in the EOS configuration"
         charts = build_charts(
             solution,
-            self.entry.data[CONF_DEVICE_ID],
+            heat_pump,
             self.memory,
             now,
             dt_util.get_default_time_zone(),
@@ -243,7 +261,9 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
         if error and not raw.reason.startswith("NORMAL: EOS"):
             raw.reason = f"{raw.reason} ({error})"
         decision, wait = self.settle.apply(raw, now)
-        self._schedule_settle(wait)
+        devices, device_wait = self._device_states(now)
+        waits = [w for w in (wait, device_wait) if w is not None]
+        self._schedule_settle(min(waits) if waits else None)
         learned = self._learn(now, data)
         reference_sg = self._int(self.option(CONF_SG_REFERENCE_ENTITY))
         reference_standby = self._standby_reference()
@@ -262,6 +282,8 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             charts=charts,
             history=self._history,
             history_hours=self._history_hours,
+            devices=devices,
+            eos_devices=self.eos_devices,
         )
 
     def cancel_settle(self) -> None:
@@ -295,6 +317,55 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             ),
         }
 
+    # ------------------------------------------------------------------
+    # EOS devices (batteries, electric vehicles, home appliances)
+    # ------------------------------------------------------------------
+
+    def device_subentries(self) -> list[Any]:
+        return [s for s in self.entry.subentries.values() if s.subentry_type == SUBENTRY_DEVICE]
+
+    async def _update_devices(self, now: datetime) -> None:
+        """Device list of the EOS configuration, every ``HISTORY_INTERVAL``."""
+        if self._devices_at is not None and now - self._devices_at < HISTORY_INTERVAL:
+            return
+        self._devices_at = now
+        config, _ = await self._get_json(DEVICES_PATH)
+        if config is not None:
+            self.eos_devices = parse_devices(config)
+
+    def _plan_solution(self, now: datetime) -> Optional[dict[str, Any]]:
+        """Latest solution while it is younger than the plan age limit."""
+        solution = self._last_solution
+        if solution is None:
+            return None
+        generated = parse_time(solution.get("generated_at"))
+        max_age = timedelta(minutes=float(self.option(CONF_PLAN_MAX_AGE)))
+        if generated is None or now - generated > max_age:
+            return None
+        return solution
+
+    def _device_states(
+        self, now: datetime
+    ) -> tuple[dict[str, Optional[DeviceState]], Optional[float]]:
+        solution = self._plan_solution(now)
+        states: dict[str, Optional[DeviceState]] = {}
+        waits: list[float] = []
+        for subentry in self.device_subentries():
+            device_id = str(subentry.data[CONF_EOS_DEVICE])
+            device = find(self.eos_devices, device_id) or EosDevice(
+                device_id, str(subentry.data.get(CONF_KIND))
+            )
+            state = device_state(solution, device, now)
+            if state is None:
+                self.hold.forget(device_id)
+                states[device_id] = None
+                continue
+            state, wait = self.hold.apply(state, now)
+            if wait is not None:
+                waits.append(wait)
+            states[device_id] = state
+        return states, (min(waits) if waits else None)
+
     async def _fetch_plan(
         self,
     ) -> tuple[Optional[Plan], Optional[dict[str, Any]], Optional[str]]:
@@ -309,6 +380,8 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             return None, None, f"EOS unreachable: {type(exc).__name__}"
         if not isinstance(solution, dict):
             return None, None, "EOS solution is no object"
+        if not self.entry.data.get(CONF_DEVICE_ID):
+            return None, solution, None  # no heat pump: only charts and devices
         try:
             return parse_plan(solution, self.entry.data[CONF_DEVICE_ID]), solution, None
         except ValueError as exc:

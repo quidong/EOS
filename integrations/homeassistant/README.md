@@ -98,6 +98,28 @@ the interventions + 0.3 K, in 0.5 K steps, at most 2 K above the current limit).
 automatically; adopt a suggestion in the room's settings. Events are kept for 90 days, locally in
 Home Assistant's storage; a button resets them. Interventions while away are ignored.
 
+## EOS devices
+
+The integration reads the devices of the EOS configuration (`/v1/config/devices`) instead of
+asking for typed ids:
+
+- The heat pump is chosen from the heat pumps EOS knows (setup and "Reconfigure"); "–" sets up an
+  entry without heat pump (charts and devices only). If the chosen heat pump disappears from the
+  EOS configuration, the reason says so.
+- "Add a device from EOS" (subentry) offers the batteries, electric vehicles (wallbox) and home
+  appliances of EOS that are not added yet. Each becomes a device with entities:
+
+| Kind | Entities |
+| --- | --- |
+| Battery | operation mode (EOS `BatteryOperationMode`, with next change), mode factor, planned state of charge, charge power target (factor × `max_charge_power_w` while charging from the grid), charging from the grid, discharging allowed, battery export, plan (series) |
+| Electric vehicle | operation mode, mode factor, planned state of charge, charge power target, charging, plan |
+| Home appliance | running as planned, next start, plan |
+
+These are targets: switching the inverter, wallbox or appliance stays with Home Assistant
+automations, as for the heat pump. The same settle time applies to a changed mode. Without a valid
+plan (EOS unreachable longer than the plan age limit) the device entities are unavailable, so an
+automation can fall back to a safe default.
+
 ## Charts
 
 The integration publishes what EOS planned and forecast, so dashboards need no REST or template

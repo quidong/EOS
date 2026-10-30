@@ -16,6 +16,7 @@ from homeassistant.const import (
     PERCENTAGE,
     EntityCategory,
     UnitOfEnergy,
+    UnitOfPower,
     UnitOfTemperature,
 )
 from homeassistant.core import HomeAssistant
@@ -23,8 +24,10 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import EosControlConfigEntry
 from .charts import parse_time
+from .const import CONF_DEVICE_ID, CONF_EOS_DEVICE, CONF_KIND
 from .coordinator import ControlData
-from .entity import EosControlEntity
+from .devices import KIND_APPLIANCE, KIND_BATTERY, KIND_EV, OPERATION_MODES, DeviceState
+from .entity import EosControlEntity, EosDeviceEntity
 from .logic import MODE_NAMES
 
 
@@ -33,6 +36,15 @@ class EosSensorDescription(SensorEntityDescription):
     value: Callable[[ControlData], Any]
     attributes: Callable[[ControlData], dict[str, Any]] | None = None
     available: Callable[[ControlData], bool] | None = None
+    heat_pump: bool = True
+    """Only with a heat pump (entry without heat pump: charts and devices only)."""
+
+
+@dataclass(frozen=True, kw_only=True)
+class EosDeviceSensorDescription(SensorEntityDescription):
+    kinds: tuple[str, ...]
+    value: Callable[[DeviceState], Any]
+    attributes: Callable[[DeviceState], dict[str, Any]] | None = None
 
 
 # Series for charts: large, kept out of the recorder (the state machine has them).
@@ -130,6 +142,7 @@ SENSORS: tuple[EosSensorDescription, ...] = (
 CHART_SENSORS: tuple[EosSensorDescription, ...] = (
     EosSensorDescription(
         key="plan",
+        heat_pump=False,
         device_class=SensorDeviceClass.TIMESTAMP,
         value=lambda d: d.charts.generated_at,
         attributes=lambda d: {
@@ -140,12 +153,14 @@ CHART_SENSORS: tuple[EosSensorDescription, ...] = (
     ),
     EosSensorDescription(
         key="forecast",
+        heat_pump=False,
         device_class=SensorDeviceClass.TIMESTAMP,
         value=lambda d: d.charts.generated_at if d.charts.forecast else None,
         attributes=lambda d: {"data": d.charts.forecast, "hourly": d.charts.forecast_hourly},
     ),
     EosSensorDescription(
         key="planned_load_hour",
+        heat_pump=False,
         value=lambda d: d.charts.load_hour_kwh,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         state_class=SensorStateClass.MEASUREMENT,
@@ -176,6 +191,7 @@ CHART_SENSORS: tuple[EosSensorDescription, ...] = (
     ),
     EosSensorDescription(
         key="history",
+        heat_pump=False,
         device_class=SensorDeviceClass.TIMESTAMP,
         available=lambda d: d.history is not None,
         value=lambda d: parse_time((d.history or {}).get("state")),
@@ -186,6 +202,7 @@ CHART_SENSORS: tuple[EosSensorDescription, ...] = (
     ),
     EosSensorDescription(
         key="history_hours",
+        heat_pump=False,
         device_class=SensorDeviceClass.TIMESTAMP,
         available=lambda d: d.history_hours is not None,
         value=lambda d: parse_time((d.history_hours or {}).get("state")),
@@ -197,18 +214,94 @@ CHART_SENSORS: tuple[EosSensorDescription, ...] = (
 )
 
 
+def _plan_attributes(state: DeviceState) -> dict[str, Any]:
+    return {
+        "factor": state.factor,
+        "next_change": state.next_change.isoformat() if state.next_change else None,
+        "next_mode": state.next_mode,
+        "pending": state.pending,
+    }
+
+
+DEVICE_SENSORS: tuple[EosDeviceSensorDescription, ...] = (
+    EosDeviceSensorDescription(
+        key="operation_mode",
+        kinds=(KIND_BATTERY, KIND_EV),
+        device_class=SensorDeviceClass.ENUM,
+        options=[m.lower() for m in OPERATION_MODES],
+        value=lambda s: s.mode.lower() if s.mode else None,
+        attributes=_plan_attributes,
+    ),
+    EosDeviceSensorDescription(
+        key="mode_factor",
+        kinds=(KIND_BATTERY, KIND_EV),
+        native_unit_of_measurement=PERCENTAGE,
+        value=lambda s: round(s.factor * 100.0, 1) if s.factor is not None else None,
+    ),
+    EosDeviceSensorDescription(
+        key="planned_soc",
+        kinds=(KIND_BATTERY, KIND_EV),
+        native_unit_of_measurement=PERCENTAGE,
+        device_class=SensorDeviceClass.BATTERY,
+        state_class=SensorStateClass.MEASUREMENT,
+        value=lambda s: s.soc_pct,
+    ),
+    EosDeviceSensorDescription(
+        key="charge_power_target",
+        kinds=(KIND_BATTERY, KIND_EV),
+        native_unit_of_measurement=UnitOfPower.WATT,
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        value=lambda s: s.power_w,
+    ),
+    EosDeviceSensorDescription(
+        key="next_start",
+        kinds=(KIND_APPLIANCE,),
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value=lambda s: s.next_start,
+        attributes=lambda s: {
+            "next_change": s.next_change.isoformat() if s.next_change else None,
+            "pending": s.pending,
+        },
+    ),
+    EosDeviceSensorDescription(
+        key="device_plan",
+        kinds=(KIND_BATTERY, KIND_EV, KIND_APPLIANCE),
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value=lambda s: parse_time(s.rows[0]["t"]) if s.rows else None,
+        attributes=lambda s: {"data": s.rows},
+    ),
+)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: EosControlConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     coordinator = entry.runtime_data
+    heat_pump = bool(entry.data.get(CONF_DEVICE_ID))
     async_add_entities(
         [
-            *(EosSensor(coordinator, description) for description in SENSORS),
-            *(EosChartSensor(coordinator, description) for description in CHART_SENSORS),
+            *(EosSensor(coordinator, d) for d in SENSORS if heat_pump or not d.heat_pump),
+            *(
+                EosChartSensor(coordinator, d)
+                for d in CHART_SENSORS
+                if heat_pump or not d.heat_pump
+            ),
         ]
     )
+    for subentry in coordinator.device_subentries():
+        device_id = str(subentry.data[CONF_EOS_DEVICE])
+        kind = str(subentry.data[CONF_KIND])
+        async_add_entities(
+            [
+                EosDeviceSensor(coordinator, device_id, kind, d)
+                for d in DEVICE_SENSORS
+                if kind in d.kinds
+            ],
+            config_subentry_id=subentry.subentry_id,
+        )
 
 
 class EosSensor(EosControlEntity, SensorEntity):
@@ -240,3 +333,28 @@ class EosChartSensor(EosSensor):
     """Plan, forecast and history series for dashboards (series not recorded)."""
 
     _unrecorded_attributes = CHART_ATTRIBUTES
+
+
+class EosDeviceSensor(EosDeviceEntity, SensorEntity):
+    """Planned state of an EOS device (battery, electric vehicle, home appliance)."""
+
+    entity_description: EosDeviceSensorDescription
+    _unrecorded_attributes = frozenset({"data"})
+
+    def __init__(
+        self, coordinator, device_id: str, kind: str, description: EosDeviceSensorDescription
+    ) -> None:
+        super().__init__(coordinator, device_id, kind, description.key)
+        self.entity_description = description
+
+    @property
+    def native_value(self) -> Any:
+        state = self.state_data
+        return self.entity_description.value(state) if state is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        state = self.state_data
+        if state is None or self.entity_description.attributes is None:
+            return None
+        return self.entity_description.attributes(state)

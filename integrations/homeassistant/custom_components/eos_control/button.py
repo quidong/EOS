@@ -16,6 +16,8 @@ async def async_setup_entry(
     entry: EosControlConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
+    if not entry.data.get("device_id"):
+        return  # shadow comparison and comfort learning need a heat pump
     async_add_entities(
         [
             ResetShadowButton(entry.runtime_data, "reset_shadow"),

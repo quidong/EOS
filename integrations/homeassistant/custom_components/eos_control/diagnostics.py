@@ -24,4 +24,17 @@ async def async_get_config_entry_diagnostics(
         "decision": data.decision.as_attributes() if data else None,
         "shadow": data.shadow.as_dict() if data else None,
         "eos_error": data.eos_error if data else None,
+        "eos_devices": [d.__dict__ for d in data.eos_devices] if data else None,
+        "devices": (
+            {
+                key: (
+                    {k: v for k, v in state.__dict__.items() if k != "rows"}
+                    if state is not None
+                    else None
+                )
+                for key, state in data.devices.items()
+            }
+            if data
+            else None
+        ),
     }

@@ -5,16 +5,30 @@
         "title": "EOS",
         "data": {
           "url": "EOS URL",
-          "device_id": "Heat pump device id in EOS",
           "scan_interval": "Poll interval"
+        }
+      },
+      "heat_pump": {
+        "title": "Heat pump from EOS",
+        "data": {
+          "device_id": "Heat pump (– = none, charts and devices only)"
+        }
+      },
+      "reconfigure": {
+        "title": "Choose the heat pump from EOS",
+        "data": {
+          "device_id": "Heat pump (– = none, charts and devices only)"
         }
       }
     },
     "error": {
-      "cannot_connect": "EOS does not answer at this URL."
+      "cannot_connect": "EOS does not answer at this URL.",
+      "cannot_read_devices": "Could not read the device list of EOS (/v1/config/devices)."
     },
     "abort": {
-      "already_configured": "This heat pump is already configured."
+      "already_configured": "This heat pump is already configured.",
+      "cannot_read_devices": "Could not read the device list of EOS (/v1/config/devices).",
+      "reconfigure_successful": "Heat pump changed."
     }
   },
   "options": {
@@ -97,6 +111,25 @@
       "abort": {
         "reconfigure_successful": "Room updated."
       }
+    },
+    "device": {
+      "entry_type": "EOS device",
+      "initiate_flow": {
+        "user": "Add a device from EOS"
+      },
+      "step": {
+        "user": {
+          "title": "Device from the EOS configuration",
+          "data": {
+            "eos_device_id": "Device"
+          }
+        }
+      },
+      "abort": {
+        "cannot_read_devices": "Could not read the device list of EOS (/v1/config/devices).",
+        "no_devices": "EOS has no (further) batteries, electric vehicles or home appliances configured.",
+        "device_not_found": "The device is no longer in the EOS configuration."
+      }
     }
   },
   "entity": {
@@ -154,6 +187,39 @@
       },
       "history_hours": {
         "name": "History hours"
+      },
+      "operation_mode": {
+        "name": "Operation mode",
+        "state": {
+          "idle": "Idle",
+          "self_consumption": "Self-consumption",
+          "non_export": "Non-export (PV charging)",
+          "peak_shaving": "Peak shaving",
+          "grid_support_export": "Grid support export",
+          "grid_support_import": "Grid support import (grid charging)",
+          "frequency_regulation": "Frequency regulation",
+          "ramp_rate_control": "Ramp rate control",
+          "reserve_backup": "Reserve backup",
+          "outage_supply": "Outage supply",
+          "forced_charge": "Forced charge",
+          "forced_discharge": "Forced discharge",
+          "fault": "Fault"
+        }
+      },
+      "mode_factor": {
+        "name": "Mode factor"
+      },
+      "planned_soc": {
+        "name": "Planned state of charge"
+      },
+      "charge_power_target": {
+        "name": "Charge power target"
+      },
+      "next_start": {
+        "name": "Next start"
+      },
+      "device_plan": {
+        "name": "Plan"
       }
     },
     "binary_sensor": {
@@ -171,6 +237,18 @@
       },
       "eos_plan_ok": {
         "name": "EOS plan OK"
+      },
+      "grid_charge": {
+        "name": "Charging from the grid"
+      },
+      "discharge_allowed": {
+        "name": "Discharging allowed"
+      },
+      "grid_export": {
+        "name": "Battery export"
+      },
+      "running_planned": {
+        "name": "Running as planned"
       }
     },
     "button": {

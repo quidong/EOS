@@ -6,6 +6,7 @@ DOMAIN = "eos_control"
 PLATFORMS = ["sensor", "binary_sensor"]
 
 SUBENTRY_ROOM = "room"
+SUBENTRY_DEVICE = "device"
 
 # Entry data
 CONF_URL = "url"
@@ -41,6 +42,10 @@ CONF_HOLIDAY_FLOOR = "holiday_floor_c"
 CONF_HOLIDAY_RESTART = "holiday_restart_hours"
 CONF_HOLIDAY_DHW_LEAD = "holiday_dhw_lead_hours"
 CONF_SETTLE = "settle_seconds"
+
+# Device subentry (battery, electric vehicle, home appliance from EOS)
+CONF_EOS_DEVICE = "eos_device_id"
+CONF_KIND = "kind"
 
 # Room subentry
 CONF_NAME = "name"

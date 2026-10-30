@@ -5,16 +5,30 @@
         "title": "EOS",
         "data": {
           "url": "EOS-URL",
-          "device_id": "Geräte-ID der Wärmepumpe in EOS",
           "scan_interval": "Abfrageintervall"
+        }
+      },
+      "heat_pump": {
+        "title": "Wärmepumpe aus EOS",
+        "data": {
+          "device_id": "Wärmepumpe (– = keine, nur Diagramme und Geräte)"
+        }
+      },
+      "reconfigure": {
+        "title": "Wärmepumpe aus EOS wählen",
+        "data": {
+          "device_id": "Wärmepumpe (– = keine, nur Diagramme und Geräte)"
         }
       }
     },
     "error": {
-      "cannot_connect": "EOS antwortet unter dieser URL nicht."
+      "cannot_connect": "EOS antwortet unter dieser URL nicht.",
+      "cannot_read_devices": "Die Geräteliste von EOS (/v1/config/devices) konnte nicht gelesen werden."
     },
     "abort": {
-      "already_configured": "Diese Wärmepumpe ist bereits eingerichtet."
+      "already_configured": "Diese Wärmepumpe ist bereits eingerichtet.",
+      "cannot_read_devices": "Die Geräteliste von EOS (/v1/config/devices) konnte nicht gelesen werden.",
+      "reconfigure_successful": "Wärmepumpe geändert."
     }
   },
   "options": {
@@ -97,6 +111,25 @@
       "abort": {
         "reconfigure_successful": "Raum aktualisiert."
       }
+    },
+    "device": {
+      "entry_type": "EOS-Gerät",
+      "initiate_flow": {
+        "user": "Gerät aus EOS hinzufügen"
+      },
+      "step": {
+        "user": {
+          "title": "Gerät aus der EOS-Konfiguration",
+          "data": {
+            "eos_device_id": "Gerät"
+          }
+        }
+      },
+      "abort": {
+        "cannot_read_devices": "Die Geräteliste von EOS (/v1/config/devices) konnte nicht gelesen werden.",
+        "no_devices": "EOS hat keine (weiteren) Akkus, E-Autos oder Haushaltsgeräte konfiguriert.",
+        "device_not_found": "Das Gerät ist nicht mehr in der EOS-Konfiguration."
+      }
     }
   },
   "entity": {
@@ -154,6 +187,39 @@
       },
       "history_hours": {
         "name": "Historie Stunden"
+      },
+      "operation_mode": {
+        "name": "Betriebsmodus",
+        "state": {
+          "idle": "Ruhe",
+          "self_consumption": "Eigenverbrauch",
+          "non_export": "Ohne Einspeisung (PV-Laden)",
+          "peak_shaving": "Lastspitzen abdecken",
+          "grid_support_export": "Netzeinspeisung aus dem Akku",
+          "grid_support_import": "Laden aus dem Netz",
+          "frequency_regulation": "Frequenzregelung",
+          "ramp_rate_control": "Rampenbegrenzung",
+          "reserve_backup": "Reserve halten",
+          "outage_supply": "Notstrom",
+          "forced_charge": "Zwangsladen",
+          "forced_discharge": "Zwangsentladen",
+          "fault": "Störung"
+        }
+      },
+      "mode_factor": {
+        "name": "Modus-Faktor"
+      },
+      "planned_soc": {
+        "name": "Geplanter Ladestand"
+      },
+      "charge_power_target": {
+        "name": "Ladeleistung-Soll"
+      },
+      "next_start": {
+        "name": "Nächster Start"
+      },
+      "device_plan": {
+        "name": "Plan"
       }
     },
     "binary_sensor": {
@@ -171,6 +237,18 @@
       },
       "eos_plan_ok": {
         "name": "EOS-Plan OK"
+      },
+      "grid_charge": {
+        "name": "Laden aus dem Netz"
+      },
+      "discharge_allowed": {
+        "name": "Entladen erlaubt"
+      },
+      "grid_export": {
+        "name": "Einspeisen aus dem Akku"
+      },
+      "running_planned": {
+        "name": "Läuft laut Plan"
       }
     },
     "button": {
