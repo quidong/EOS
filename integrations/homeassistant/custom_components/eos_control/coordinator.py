@@ -61,7 +61,7 @@ from .const import (
     MISMATCH_LOG_SIZE,
     SUBENTRY_ROOM,
 )
-from .charts import Charts, PlanMemory, build_charts
+from .charts import Charts, PlanMemory, build_charts, parse_time
 from .learning import (
     KIND_LOCK,
     KIND_SETPOINT,
@@ -185,6 +185,7 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             self.shadow = ShadowStats.from_dict(stored)
             self.learning = ComfortLearning.from_list(stored.get("comfort_events"))
             self.memory = PlanMemory.from_list(stored.get("plan_memory"))
+            self.memory.generated_at = parse_time(stored.get("plan_generated_at"))
             self._loaded = True
         now = dt_util.now()
         plan, solution, error = await self._fetch_plan()
@@ -246,6 +247,9 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             **self.shadow.as_dict(),
             "comfort_events": self.learning.as_list(),
             "plan_memory": self.memory.as_list(),
+            "plan_generated_at": (
+                self.memory.generated_at.isoformat() if self.memory.generated_at else None
+            ),
         }
 
     async def _fetch_plan(

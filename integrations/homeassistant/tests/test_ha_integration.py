@@ -580,7 +580,11 @@ async def test_plan_memory_survives_a_reload(
     aioclient_mock.get(SUMMARY_URL, status=404)
     await coordinator.async_refresh()
     await hass.async_block_till_done()
-    assert len(hass.states.get("sensor.eos_hp1_plan").attributes["data"]) == 8
+    plan = hass.states.get("sensor.eos_hp1_plan")
+    assert len(plan.attributes["data"]) == 8
+    # the time of the last plan stays (plan age), also across the reload
+    assert plan.state not in ("unknown", "unavailable")
+    assert hass.states.get("sensor.eos_hp1_forecast").state == "unknown"
     assert float(hass.states.get("sensor.eos_hp1_planned_room_temperature").state) == 21.25
 
 

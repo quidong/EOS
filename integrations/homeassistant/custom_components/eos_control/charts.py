@@ -202,6 +202,8 @@ class PlanMemory:
 
     rows: dict[str, dict] = field(default_factory=dict)
     keep_hours: float = MEMORY_HOURS
+    generated_at: Optional[datetime] = None
+    """Creation time of the latest plan taken (kept while EOS is unreachable)."""
 
     def update(self, new_rows: list[dict], now: datetime) -> None:
         """Take a new plan: its slots replace stored ones; later stored slots are dropped.
@@ -278,13 +280,18 @@ def build_charts(
     charts = Charts()
     new_rows: list[dict] = []
     if solution:
-        charts.generated_at = parse_time(solution.get("generated_at"))
+        generated = parse_time(solution.get("generated_at"))
+        if generated is not None:
+            memory.generated_at = generated
         new_rows = plan_rows(solution, device_id)
         charts.forecast = forecast_rows(solution)
         charts.forecast_hourly = hourly(
             charts.forecast, tz, mean_keys=("price_amt_kwh", "feed_in_amt_kwh", "outdoor_c")
         )
     memory.update(new_rows, now)
+    # A short outage (EOS busy optimising) keeps the time of the last plan: consumers
+    # judge the plan's age by it and must not see "no plan" for a minute.
+    charts.generated_at = memory.generated_at
     rows = memory.series()
     if not rows:
         return charts

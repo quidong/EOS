@@ -166,11 +166,12 @@ def test_build_charts_without_eos_uses_the_memory():
     memory = charts.PlanMemory()
     charts.build_charts(solution(NOW.replace(minute=0), n=8), "hp1", memory, NOW, TZ)
     offline = charts.build_charts(None, "hp1", memory, NOW + timedelta(minutes=20), TZ)
-    assert offline.generated_at is None
+    assert offline.generated_at == NOW.replace(minute=3)  # last plan, not "no plan"
     assert len(offline.plan) == 8 and offline.forecast == []
     assert offline.room_c == 21.1  # 10:27 is in the 10:15 slot
     empty = charts.build_charts(None, "hp1", charts.PlanMemory(), NOW, TZ)
     assert empty.plan == [] and empty.load_hour_kwh is None and empty.room_c is None
+    assert empty.generated_at is None
 
 
 def test_hour_energy_uses_the_local_hour():
