@@ -50,7 +50,8 @@
           "holiday_restart_hours": "Restart before the return",
           "holiday_dhw_lead_hours": "Restore hot water setpoints ahead of a charge",
           "heating_season_states": "States meaning heating (comma separated)",
-          "standby_reference_state": "State meaning standby"
+          "standby_reference_state": "State meaning standby",
+          "settle_seconds": "Accept a changed decision after"
         }
       }
     }

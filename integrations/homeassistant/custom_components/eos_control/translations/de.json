@@ -50,7 +50,8 @@
           "holiday_restart_hours": "Wiederanlauf vor der Rückkehr",
           "holiday_dhw_lead_hours": "WW-Sollwerte vor einer Ladung zurückstellen",
           "heating_season_states": "Zustände für Heizen (kommagetrennt)",
-          "standby_reference_state": "Zustand für Standby"
+          "standby_reference_state": "Zustand für Standby",
+          "settle_seconds": "Neue Entscheidung erst übernehmen nach"
         }
       }
     }

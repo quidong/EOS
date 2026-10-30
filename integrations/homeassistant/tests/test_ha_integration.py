@@ -605,3 +605,64 @@ async def test_example_dashboard_uses_existing_entities(
     await setup(hass, aioclient_mock, chart_solution(), rooms=ROOMS)
     missing = {e for e in referenced if hass.states.get(e) is None}
     assert not missing
+
+
+# ----------------------------------------------------------------------
+# Settle time and short EOS outages
+# ----------------------------------------------------------------------
+
+
+async def test_changed_decision_is_accepted_after_the_settle_time(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, freezer
+):
+    set_rooms(hass)
+    entry = await setup(hass, aioclient_mock, solution(1), rooms=ROOMS)
+    assert hass.states.get("sensor.eos_hp1_sg_ready_target").state == "2"
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(SOLUTION_URL, json=solution(0))
+    aioclient_mock.get(SUMMARY_URL, status=404)
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    state = hass.states.get("sensor.eos_hp1_sg_ready_target")
+    assert state.state == "2"  # held
+    assert state.attributes["pending"].startswith("REDUCED")
+    # re-evaluated by itself after the settle time, not only at the next poll
+    freezer.tick(timedelta(seconds=5))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.eos_hp1_sg_ready_target").state == "2"
+    freezer.tick(timedelta(seconds=6))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    state = hass.states.get("sensor.eos_hp1_sg_ready_target")
+    assert state.state == "1"
+    assert state.attributes["pending"] is None
+
+
+async def test_settle_time_zero(hass: HomeAssistant, aioclient_mock: AiohttpClientMocker):
+    set_rooms(hass)
+    entry = await setup(
+        hass, aioclient_mock, solution(1), options={"settle_seconds": 0}, rooms=ROOMS
+    )
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(SOLUTION_URL, json=solution(0))
+    aioclient_mock.get(SUMMARY_URL, status=404)
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.eos_hp1_sg_ready_target").state == "1"
+
+
+async def test_short_eos_outage_keeps_the_last_plan(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+):
+    set_rooms(hass)
+    entry = await setup(hass, aioclient_mock, solution(0), rooms=ROOMS)
+    assert hass.states.get("sensor.eos_hp1_sg_ready_target").state == "1"
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(SOLUTION_URL, exc=TimeoutError())
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    state = hass.states.get("sensor.eos_hp1_sg_ready_target")
+    assert state.state == "1"  # plan of 5 min ago is still valid
+    assert "EOS unreachable: TimeoutError" in state.attributes["reason"]
+    assert hass.states.get("binary_sensor.eos_hp1_eos_plan_ok").state == "on"

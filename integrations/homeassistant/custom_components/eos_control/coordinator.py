@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Optional
@@ -13,6 +13,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
@@ -41,6 +42,7 @@ from .const import (
     CONF_REDUCTION_LOCK_ENTITY,
     CONF_SCAN_INTERVAL,
     CONF_SETPOINT_ENTITY,
+    CONF_SETTLE,
     CONF_SG_ACTUAL_ENTITY,
     CONF_SG_FORCED,
     CONF_SG_NORMAL,
@@ -72,7 +74,16 @@ from .learning import (
     lock_set,
     setpoint_raised,
 )
-from .logic import ControlInput, Decision, Plan, RoomState, Settings, decide, parse_plan
+from .logic import (
+    ControlInput,
+    Decision,
+    Plan,
+    RoomState,
+    Settings,
+    Settle,
+    decide,
+    parse_plan,
+)
 
 _LOGGER = logging.getLogger(__name__)
 STORAGE_VERSION = 1
@@ -143,6 +154,9 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
         self.shadow = ShadowStats()
         self.learning = ComfortLearning()
         self.memory = PlanMemory()
+        self.settle = Settle(seconds=float(self.option(CONF_SETTLE)))
+        self._settle_unsub: Optional[Callable[[], None]] = None
+        self._last_plan: Optional[Plan] = None
         self._memory_generated: Optional[datetime] = None
         self._history: Optional[dict[str, Any]] = None
         self._history_hours: Optional[dict[str, Any]] = None
@@ -189,6 +203,12 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             self._loaded = True
         now = dt_util.now()
         plan, solution, error = await self._fetch_plan()
+        if plan is not None:
+            self._last_plan = plan
+        elif solution is None:
+            # EOS busy or unreachable: the last plan stays valid until it is too old
+            # (plan_max_age_min decides), instead of NORMAL for every short outage.
+            plan = self._last_plan
         charts = build_charts(
             solution,
             self.entry.data[CONF_DEVICE_ID],
@@ -219,10 +239,12 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             sg_actual=self._int(self.option(CONF_SG_ACTUAL_ENTITY)),
             reduction_locked_until=self._datetime(self.option(CONF_REDUCTION_LOCK_ENTITY)),
         )
-        decision = decide(data, self.settings())
+        raw = decide(data, self.settings())
+        if error and not raw.reason.startswith("NORMAL: EOS"):
+            raw.reason = f"{raw.reason} ({error})"
+        decision, wait = self.settle.apply(raw, now)
+        self._schedule_settle(wait)
         learned = self._learn(now, data)
-        if error and not decision.reason.startswith("NORMAL: EOS"):
-            decision.reason = f"{decision.reason} ({error})"
         reference_sg = self._int(self.option(CONF_SG_REFERENCE_ENTITY))
         reference_standby = self._standby_reference()
         compared = self._compare(now, decision, reference_sg, reference_standby, data.holiday)
@@ -241,6 +263,27 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             history=self._history,
             history_hours=self._history_hours,
         )
+
+    def cancel_settle(self) -> None:
+        if self._settle_unsub is not None:
+            self._settle_unsub()
+            self._settle_unsub = None
+
+    def _schedule_settle(self, wait: Optional[float]) -> None:
+        """Evaluate again when a pending change can be accepted (not at the next poll)."""
+        self.cancel_settle()
+        if wait is None:
+            return
+
+        async def _recheck(_now: datetime) -> None:
+            self._settle_unsub = None
+            await self.async_refresh()
+
+        self._settle_unsub = async_call_later(self.hass, wait + 0.5, _recheck)
+
+    async def async_shutdown(self) -> None:
+        self.cancel_settle()
+        await super().async_shutdown()
 
     def _stored(self) -> dict[str, Any]:
         return {

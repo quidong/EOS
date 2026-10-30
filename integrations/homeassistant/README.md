@@ -62,7 +62,13 @@ lock of the reduction (`<id>-reduce-lock-until-ts`, so EOS plans NORMAL until th
 
 ## Execution and safety
 
-- Plan missing, older than the limit or EOS unreachable → NORMAL (SG 2) and a repair issue.
+- Plan missing, older than the limit or EOS unreachable → NORMAL (SG 2) and a repair issue. While
+  EOS does not answer for a short time (it is busy optimising), the last plan stays valid until it is
+  older than the limit.
+- Settle time (default 10 s): a changed result (SG target, standby, hot water charge, setpoint
+  restore) is accepted only after it stayed the same for this time; until then the previous one
+  stays in force and the new one is shown as `pending`. The integration re-evaluates by itself
+  when the time is up.
 - Coldest room below its lower limit → no REDUCED; warmest room above its upper limit → no RAISED.
 - Switching limit per day, minimum holding time, maximum reduction duration.
 - Manual change at the unit → pause and notification event.

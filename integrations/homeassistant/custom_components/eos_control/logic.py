@@ -9,7 +9,7 @@ published and compared with a reference.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
@@ -174,10 +174,17 @@ class Decision:
     humidity_max_pct: Optional[float] = None
     humidity_warning: bool = False
     valid_rooms: int = 0
+    pending: Optional[str] = None
+    """A changed decision that is not accepted yet (see :class:`Settle`)."""
+
+    def outputs(self) -> tuple[int, bool, bool, bool]:
+        """What is switched: SG target, standby, hot water charge, setpoint restore."""
+        return (self.sg_target, self.standby, self.dhw_charge, self.dhw_setpoints_restore)
 
     def as_attributes(self) -> dict[str, Any]:
         return {
             "reason": self.reason,
+            "pending": self.pending,
             "eos_mode": MODE_NAMES.get(self.eos_mode, None) if self.eos_mode is not None else None,
             "eos_fresh": self.eos_fresh,
             "standby": self.standby,
@@ -194,6 +201,65 @@ class Decision:
             "humidity_warning": self.humidity_warning,
             "valid_rooms": self.valid_rooms,
         }
+
+
+@dataclass
+class Settle:
+    """Accept a changed decision only after it has stayed the same for ``seconds``.
+
+    EOS writes a new plan slot by slot and a replan or a sensor update can flip the
+    result for a moment; a switch of the heat pump should not follow such a blip.
+    Until the change is accepted the previous outputs (and their reasons) stay in
+    force and the new result is shown as ``pending``. The first decision after a
+    start is accepted at once; ``seconds`` = 0 accepts every change at once.
+    """
+
+    seconds: float = 10.0
+    accepted: Optional[Decision] = None
+    pending: Optional[tuple[int, bool, bool, bool]] = None
+    since: Optional[datetime] = None
+
+    def apply(self, decision: Decision, now: datetime) -> tuple[Decision, Optional[float]]:
+        """Decision to publish and the seconds until the pending change can be accepted."""
+        accepted = self.accepted
+        outputs = decision.outputs()
+        if accepted is None or self.seconds <= 0 or outputs == accepted.outputs():
+            return self._accept(decision), None
+        if self.pending != outputs or self.since is None:
+            self.pending, self.since = outputs, now
+        waited = (now - self.since).total_seconds()
+        if waited >= self.seconds:
+            return self._accept(decision), None
+        remaining = self.seconds - waited
+        held = replace(
+            decision,
+            sg_target=accepted.sg_target,
+            standby=accepted.standby,
+            dhw_charge=accepted.dhw_charge,
+            dhw_setpoints_restore=accepted.dhw_setpoints_restore,
+            reason=accepted.reason,
+            standby_reason=accepted.standby_reason,
+            pending=f"{_change(decision, accepted)} (in {remaining:.0f} s)",
+        )
+        return held, remaining
+
+    def _accept(self, decision: Decision) -> Decision:
+        self.accepted = decision
+        self.pending = self.since = None
+        return decision
+
+
+def _change(new: Decision, old: Decision) -> str:
+    parts = []
+    if (new.sg_target, new.dhw_charge, new.dhw_setpoints_restore) != (
+        old.sg_target,
+        old.dhw_charge,
+        old.dhw_setpoints_restore,
+    ):
+        parts.append(new.reason)
+    if new.standby != old.standby:
+        parts.append(new.standby_reason)
+    return "; ".join(p for p in parts if p) or new.reason
 
 
 def decide(data: ControlInput, settings: Settings) -> Decision:

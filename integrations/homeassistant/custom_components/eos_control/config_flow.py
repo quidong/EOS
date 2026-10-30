@@ -24,6 +24,7 @@ from .const import (
     CONF_HEATING_SEASON_ENTITY,
     CONF_HEATING_SEASON_STATES,
     CONF_HOLIDAY_DHW_LEAD,
+    CONF_SETTLE,
     CONF_HOLIDAY_ENTITY,
     CONF_HOLIDAY_FLOOR,
     CONF_HOLIDAY_RESTART,
@@ -169,6 +170,7 @@ RULE_KEYS = (
     CONF_HOLIDAY_FLOOR,
     CONF_HOLIDAY_RESTART,
     CONF_HOLIDAY_DHW_LEAD,
+    CONF_SETTLE,
     CONF_HEATING_SEASON_STATES,
     CONF_STANDBY_REFERENCE_STATE,
 )
@@ -272,6 +274,7 @@ class EosControlOptionsFlow(OptionsFlow):
                 vol.Required(
                     CONF_HOLIDAY_DHW_LEAD, default=options[CONF_HOLIDAY_DHW_LEAD]
                 ): _number(0, 12, 0.5, "h"),
+                vol.Required(CONF_SETTLE, default=options[CONF_SETTLE]): _number(0, 300, 1, "s"),
                 vol.Required(
                     CONF_HEATING_SEASON_STATES, default=options[CONF_HEATING_SEASON_STATES]
                 ): str,

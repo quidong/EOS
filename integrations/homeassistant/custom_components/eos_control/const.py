@@ -40,6 +40,7 @@ CONF_AIRING_RUN_ON = "airing_run_on_min"
 CONF_HOLIDAY_FLOOR = "holiday_floor_c"
 CONF_HOLIDAY_RESTART = "holiday_restart_hours"
 CONF_HOLIDAY_DHW_LEAD = "holiday_dhw_lead_hours"
+CONF_SETTLE = "settle_seconds"
 
 # Room subentry
 CONF_NAME = "name"
@@ -70,6 +71,7 @@ DEFAULTS = {
     CONF_HOLIDAY_FLOOR: 16.0,
     CONF_HOLIDAY_RESTART: 1.0,
     CONF_HOLIDAY_DHW_LEAD: 3.0,
+    CONF_SETTLE: 10,
     CONF_LOWER: 19.5,
     CONF_UPPER: 23.5,
     CONF_HUMIDITY_MAX: 65.0,

@@ -260,3 +260,78 @@ def test_holiday_without_reduced_setpoint_uses_the_holiday_floor():
     d = run([0] * 4, rooms(16.5, 17.0), holiday=True, away=[1] * 4)
     assert d.sg_target == 1  # floor 16 instead of the room limit 19.5
     assert run([0] * 4, rooms(15.5, 17.0), holiday=True, away=[1] * 4).sg_target == 2
+
+
+# ----------------------------------------------------------------------
+# Settle: a changed decision is accepted only after it stayed the same
+# ----------------------------------------------------------------------
+
+
+def _decision(sg, standby=False, reason=None, standby_reason=""):
+    return logic.Decision(
+        sg_target=sg,
+        reason=reason or f"SG {sg}",
+        standby=standby,
+        standby_reason=standby_reason,
+    )
+
+
+def test_settle_accepts_the_first_decision_at_once():
+    settle = logic.Settle(seconds=10)
+    decision, wait = settle.apply(_decision(1), NOW)
+    assert decision.sg_target == 1 and wait is None and decision.pending is None
+
+
+def test_settle_holds_a_change_for_the_settle_time():
+    settle = logic.Settle(seconds=10)
+    settle.apply(_decision(2), NOW)
+    held, wait = settle.apply(_decision(1, reason="REDUCED -> SG 1"), NOW)
+    assert held.sg_target == 2 and held.reason == "SG 2"
+    assert held.pending == "REDUCED -> SG 1 (in 10 s)"
+    assert wait == pytest.approx(10)
+    held, wait = settle.apply(_decision(1), NOW + timedelta(seconds=6))
+    assert held.sg_target == 2 and wait == pytest.approx(4)
+    accepted, wait = settle.apply(_decision(1), NOW + timedelta(seconds=10))
+    assert accepted.sg_target == 1 and accepted.pending is None and wait is None
+
+
+def test_settle_restarts_when_the_change_flips_back_or_changes():
+    settle = logic.Settle(seconds=10)
+    settle.apply(_decision(2), NOW)
+    settle.apply(_decision(1), NOW)
+    # back to the accepted value: nothing pending any more
+    back, wait = settle.apply(_decision(2), NOW + timedelta(seconds=5))
+    assert back.sg_target == 2 and back.pending is None and wait is None
+    settle.apply(_decision(1), NOW + timedelta(seconds=8))
+    # another change restarts the time
+    held, wait = settle.apply(_decision(3), NOW + timedelta(seconds=15))
+    assert held.sg_target == 2 and wait == pytest.approx(10)
+    accepted, _ = settle.apply(_decision(3), NOW + timedelta(seconds=25))
+    assert accepted.sg_target == 3
+
+
+def test_settle_holds_standby_and_names_its_reason():
+    settle = logic.Settle(seconds=10)
+    settle.apply(_decision(2, standby=True, standby_reason="standby: EOS plans standby"), NOW)
+    held, _ = settle.apply(
+        _decision(2, standby=False, standby_reason="no standby: EOS plans NORMAL"), NOW
+    )
+    assert held.standby is True
+    assert held.standby_reason == "standby: EOS plans standby"
+    assert held.pending == "no standby: EOS plans NORMAL (in 10 s)"
+
+
+def test_settle_keeps_current_measurements_while_holding():
+    settle = logic.Settle(seconds=10)
+    settle.apply(_decision(2), NOW)
+    new = _decision(1)
+    new.room_mean_c = 20.4
+    held, _ = settle.apply(new, NOW)
+    assert held.sg_target == 2 and held.room_mean_c == 20.4
+
+
+def test_settle_zero_accepts_every_change():
+    settle = logic.Settle(seconds=0)
+    settle.apply(_decision(2), NOW)
+    decision, wait = settle.apply(_decision(1), NOW)
+    assert decision.sg_target == 1 and wait is None
