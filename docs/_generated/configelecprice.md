@@ -325,8 +325,10 @@ price applicable during that interval.
                        {
                            "start_time": "00:00:00.000000",
                            "duration": "8 hours",
+                           "end_time": null,
                            "day_of_week": null,
                            "date": null,
+                           "month": null,
                            "months": null,
                            "locale": null,
                            "value": 0.288
@@ -334,8 +336,10 @@ price applicable during that interval.
                        {
                            "start_time": "08:00:00.000000",
                            "duration": "16 hours",
+                           "end_time": null,
                            "day_of_week": null,
                            "date": null,
+                           "month": null,
                            "months": null,
                            "locale": null,
                            "value": 0.34

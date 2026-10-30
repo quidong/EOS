@@ -4,6 +4,7 @@ import math
 from pathlib import Path
 from typing import Annotated, Any, Optional
 
+import pandas as pd
 from loguru import logger
 from pydantic import AliasChoices, Field, field_validator
 
@@ -170,16 +171,20 @@ class ConfigOptimizationRequest(
                     end_datetime=observation_time.add(seconds=1),
                     dropna=False,
                 )
+                # Records without a SoC value (e.g. a meter reading stored by an
+                # adapter, or pandas NA) must not hide an older SoC within the age
+                # limit (#1447). An explicit NaN stays an invalid sample.
                 samples = [
                     (date, value)
                     for date, value in zip(dates, values)
                     if date.timestamp() <= observation_time.timestamp()
+                    and value is not None
+                    and value is not pd.NA
                 ]
                 date, value = max(samples, key=lambda sample: sample[0].timestamp())
                 if (
                     observation_time.timestamp() - date.timestamp()
                     > settings.measurement_max_age_seconds
-                    or value is None
                     or not math.isfinite(value)
                     or not 0 <= value <= 1
                 ):
@@ -244,13 +249,14 @@ class ConfigOptimizationRequest(
                 )
             except KeyError:
                 continue
-            # RL29 fork: records written for other keys (e.g. the request
-            # measurements) carry no count; only reported counts are considered.
+            # Skip records without a count (e.g. an adapter's meter reading, #1447,
+            # or the RL29 request measurements).
             samples = [
                 (date, count)
                 for date, count in zip(dates, counts)
                 if date.timestamp() <= observation_time.timestamp()
                 and count is not None
+                and count is not pd.NA
                 and not (isinstance(count, float) and math.isnan(count))
             ]
             if not samples:

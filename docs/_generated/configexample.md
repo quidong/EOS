@@ -274,8 +274,10 @@
                                {
                                    "start_time": "00:00:00.000000",
                                    "duration": "6 hours",
+                                   "end_time": null,
                                    "day_of_week": null,
                                    "date": null,
+                                   "month": null,
                                    "months": null,
                                    "locale": null,
                                    "value": 19.5
@@ -283,8 +285,10 @@
                                {
                                    "start_time": "06:00:00.000000",
                                    "duration": "16 hours",
+                                   "end_time": null,
                                    "day_of_week": null,
                                    "date": null,
+                                   "month": null,
                                    "months": null,
                                    "locale": null,
                                    "value": 20.5
@@ -292,8 +296,10 @@
                                {
                                    "start_time": "22:00:00.000000",
                                    "duration": "2 hours",
+                                   "end_time": null,
                                    "day_of_week": null,
                                    "date": null,
+                                   "month": null,
                                    "months": null,
                                    "locale": null,
                                    "value": 19.5
@@ -378,8 +384,10 @@
                                {
                                    "start_time": "22:00:00.000000",
                                    "duration": "2 hours",
+                                   "end_time": null,
                                    "day_of_week": null,
                                    "date": null,
+                                   "month": null,
                                    "months": null,
                                    "locale": null,
                                    "value": null
@@ -387,8 +395,10 @@
                                {
                                    "start_time": "00:00:00.000000",
                                    "duration": "12 hours",
+                                   "end_time": null,
                                    "day_of_week": 0,
                                    "date": null,
+                                   "month": null,
                                    "months": null,
                                    "locale": null,
                                    "value": null
@@ -396,8 +406,10 @@
                                {
                                    "start_time": "00:00:00.000000",
                                    "duration": "12 hours",
+                                   "end_time": null,
                                    "day_of_week": 1,
                                    "date": null,
+                                   "month": null,
                                    "months": null,
                                    "locale": null,
                                    "value": null
@@ -405,8 +417,10 @@
                                {
                                    "start_time": "00:00:00.000000",
                                    "duration": "12 hours",
+                                   "end_time": null,
                                    "day_of_week": 2,
                                    "date": null,
+                                   "month": null,
                                    "months": null,
                                    "locale": null,
                                    "value": null
@@ -414,8 +428,10 @@
                                {
                                    "start_time": "00:00:00.000000",
                                    "duration": "12 hours",
+                                   "end_time": null,
                                    "day_of_week": 3,
                                    "date": null,
+                                   "month": null,
                                    "months": null,
                                    "locale": null,
                                    "value": null
@@ -423,8 +439,10 @@
                                {
                                    "start_time": "00:00:00.000000",
                                    "duration": "12 hours",
+                                   "end_time": null,
                                    "day_of_week": 4,
                                    "date": null,
+                                   "month": null,
                                    "months": null,
                                    "locale": null,
                                    "value": null
@@ -432,8 +450,10 @@
                                {
                                    "start_time": "00:00:00.000000",
                                    "duration": "8 hours",
+                                   "end_time": null,
                                    "day_of_week": 5,
                                    "date": null,
+                                   "month": null,
                                    "months": null,
                                    "locale": null,
                                    "value": null
@@ -441,8 +461,10 @@
                                {
                                    "start_time": "00:00:00.000000",
                                    "duration": "8 hours",
+                                   "end_time": null,
                                    "day_of_week": 6,
                                    "date": null,
+                                   "month": null,
                                    "months": null,
                                    "locale": null,
                                    "value": null
@@ -589,6 +611,21 @@
            "replan_pv_deviation_w": null,
            "replan_min_interval_sec": 300.0,
            "notify_url": null
+       },
+       "eosdash": {
+           "plan": {
+               "visible": {},
+               "alias": {},
+               "color": {},
+               "style": {},
+               "width": {},
+               "line_dash": {},
+               "device_alias": {},
+               "plan_table_open": false,
+               "energy_kwh": true,
+               "factor_percent": true,
+               "price_minor_unit": true
+           }
        },
        "feedintariff": {
            "direct_marketing_enabled": false,

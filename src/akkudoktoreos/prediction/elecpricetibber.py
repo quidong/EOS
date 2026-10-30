@@ -301,7 +301,7 @@ class ElecPriceTibber(ElecPriceProvider):
         series_data = pd.Series(dtype=float)
         for point in points:
             orig_datetime = to_datetime(point.startsAt, in_timezone=self.config.general.timezone)
-            series_data.at[orig_datetime] = point.total / 1000.0
+            series_data.loc[(orig_datetime,)] = point.total / 1000.0
 
         return series_data.sort_index()
 
@@ -317,7 +317,11 @@ class ElecPriceTibber(ElecPriceProvider):
         if series.empty:
             return series
         series = series.sort_index()
-        series.index = pd.to_datetime([to_datetime(index).isoformat() for index in series.index])
+        # Parse via UTC: around a DST change the series mixes UTC offsets
+        # (e.g. +02:00 and +01:00), which pd.to_datetime() refuses to combine.
+        index = pd.to_datetime([to_datetime(index).isoformat() for index in series.index], utc=True)
+        timezone = self.config.general.timezone
+        series.index = index.tz_convert(timezone) if timezone else index
         series = series.groupby(level=0).mean().sort_index()
         return series.dropna()
 

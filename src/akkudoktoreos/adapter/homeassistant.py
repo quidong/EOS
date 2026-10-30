@@ -9,7 +9,7 @@ from typing import Iterable, Optional, Union
 import pandas as pd
 import requests
 from loguru import logger
-from pydantic import Field, computed_field, field_validator
+from pydantic import Field, PrivateAttr, computed_field, field_validator
 
 from akkudoktoreos.adapter.adapterabc import AdapterProvider
 from akkudoktoreos.config.configabc import SettingsBaseModel
@@ -211,7 +211,11 @@ class HomeAssistantAdapterCommonSettings(SettingsBaseModel):
     device_measurement_entity_ids: Optional[dict[str, str]] = Field(
         default=None,
         json_schema_extra={
-            "description": "Mapping of EOS measurement keys used by device (resource) simulations to Home Assistant entity IDs.",
+            "description": (
+                "Mapping of EOS device measurement keys to Home Assistant entity IDs. "
+                "Registered keys such as 'battery1-soc-factor' are accepted; legacy "
+                "underscore spellings are resolved when they uniquely match a registered key."
+            ),
             "examples": [
                 {
                     "ev11-soc-factor": "sensor.ev11_soc_factor",
@@ -349,6 +353,8 @@ class HomeAssistantAdapterCommonSettings(SettingsBaseModel):
 
 
 class HomeAssistantAdapter(AdapterProvider):
+    _legacy_device_measurement_key_warning_emitted: bool = PrivateAttr(default=False)
+
     @classmethod
     def provider_id(cls) -> str:
         """Return the unique identifier for the adapter provider."""
@@ -408,6 +414,22 @@ class HomeAssistantAdapter(AdapterProvider):
         except Exception:
             solution_entity_ids = []
         return solution_entity_ids
+
+    @staticmethod
+    def _resolve_device_measurement_key(measurement_key: str, registered_keys: set[str]) -> str:
+        """Resolve a legacy underscore alias to one registered device measurement key."""
+        if measurement_key in registered_keys:
+            return measurement_key
+
+        aliases = {key for key in registered_keys if key.replace("-", "_") == measurement_key}
+        if len(aliases) == 1:
+            return next(iter(aliases))
+        if len(aliases) > 1:
+            logger.warning(
+                "Ambiguous legacy device measurement key '{}'; leaving it unchanged.",
+                measurement_key,
+            )
+        return measurement_key
 
     def _entity_id_from_resource_id(self, resource_id: str) -> str:
         return HOMEASSISTANT_ENTITY_ID_PREFIX + resource_id
@@ -611,6 +633,10 @@ class HomeAssistantAdapter(AdapterProvider):
     async def _update_data(self) -> None:
         stage = self.ems.stage()
         if stage == EnergyManagementStage.DATA_ACQUISITION:
+            # Device states (e.g. SoC) are read now: stamp them with the unrounded run
+            # time, not the slot start, so freshness checks see their real age (#1447).
+            # Meter readings stay on the slot start: energy is aggregated per slot.
+            measured_at = self.ems.observation_datetime
             # Sync configuration
             entity_ids = self.config.adapter.homeassistant.config_entity_ids
             if entity_ids:
@@ -630,12 +656,6 @@ class HomeAssistantAdapter(AdapterProvider):
             # Retrieve measurements necessary for device simulations
             entity_ids = self.config.adapter.homeassistant.device_measurement_entity_ids
             if entity_ids:
-                # RL29 fork: device states are judged against the unrounded run
-                # time (``observation_datetime``) with ``measurement_max_age_seconds``.
-                # Stamping them with the slot start (rounded down to the full hour
-                # with 1 h slots) made them "stale" in every run later than
-                # max_age into the slot, so the optimizer fell back to defaults.
-                observed_at = self.ems.observation_datetime
                 known_keys = self.measurement.record_keys_writable
                 for (
                     configured_key,
@@ -645,8 +665,14 @@ class HomeAssistantAdapter(AdapterProvider):
                     if measurement_key is None:
                         logger.error(message)
                         continue
-                    if message:
-                        logger.warning(message)
+                    if message and not self._legacy_device_measurement_key_warning_emitted:
+                        # Warn once per adapter instance (upstream #1447 behaviour).
+                        logger.warning(
+                            "Legacy device measurement key '{}' mapped to registered key '{}'.",
+                            configured_key,
+                            measurement_key,
+                        )
+                        self._legacy_device_measurement_key_warning_emitted = True
                     history_keys = (
                         self.config.adapter.homeassistant.device_measurement_history_keys or []
                     )
@@ -672,7 +698,7 @@ class HomeAssistantAdapter(AdapterProvider):
                             elif state:
                                 measurement_value = state_to_float(state)
                                 await self.measurement.update_value(
-                                    observed_at, measurement_key, measurement_value
+                                    measured_at, measurement_key, measurement_value
                                 )
                         except Exception as e:
                             logger.error(f"Entity {entity_id} ({measurement_key}): {e}")

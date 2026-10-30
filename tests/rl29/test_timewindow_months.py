@@ -90,7 +90,9 @@ class TestMonthsBehaviour:
         assert self.window.earliest_start_time(duration, dt(2026, 7, 5)) is None
         assert self.window.latest_start_time(duration, dt(2026, 7, 5)) is None
         assert self.window.available_duration(dt(2026, 7, 5)) is None
-        assert self.window.available_duration(dt(2026, 12, 5)) == to_duration("3 hours")
+        available = self.window.available_duration(dt(2026, 12, 5))
+        assert available is not None
+        assert available.total_seconds() == to_duration("3 hours").total_seconds()
 
     def test_sequence_contains(self):
         seq = TimeWindowSequence(windows=[self.window])
@@ -111,15 +113,21 @@ REGULAR = 0.0800
 
 
 def mvv_modul3_sequence() -> ValueTimeWindowSequence:
+    """Consecutive windows with explicit end times.
+
+    Upstream EOS counts ``duration`` in elapsed time, so windows chained by
+    duration overlap or leave gaps on DST change days. Explicit ``end_time``
+    bounds follow the wall clock and keep the chain gap-free.
+    """
     return ValueTimeWindowSequence.model_validate(
         {
             "windows": [
-                {"start_time": "00:00", "duration": "2 hours", "months": Q1_Q4, "value": STANDARD},
-                {"start_time": "02:00", "duration": "4 hours", "months": Q1_Q4, "value": NIEDRIG},
-                {"start_time": "06:00", "duration": "11 hours", "months": Q1_Q4, "value": STANDARD},
-                {"start_time": "17:00", "duration": "3 hours", "months": Q1_Q4, "value": HOCH},
-                {"start_time": "20:00", "duration": "4 hours", "months": Q1_Q4, "value": STANDARD},
-                {"start_time": "00:00", "duration": "24 hours", "months": Q2_Q3, "value": REGULAR},
+                {"start_time": "00:00", "end_time": "02:00", "months": Q1_Q4, "value": STANDARD},
+                {"start_time": "02:00", "end_time": "06:00", "months": Q1_Q4, "value": NIEDRIG},
+                {"start_time": "06:00", "end_time": "17:00", "months": Q1_Q4, "value": STANDARD},
+                {"start_time": "17:00", "end_time": "20:00", "months": Q1_Q4, "value": HOCH},
+                {"start_time": "20:00", "end_time": "00:00", "months": Q1_Q4, "value": STANDARD},
+                {"start_time": "00:00", "end_time": "00:00", "months": Q2_Q3, "value": REGULAR},
             ]
         }
     )
@@ -166,7 +174,7 @@ class TestMvvModul3:
 
 
 # ---------------------------------------------------------------------------
-# DST handling of window bounds (fix in TimeWindow._window_start_end)
+# DST handling of window bounds (explicit end times, upstream semantics)
 # ---------------------------------------------------------------------------
 
 
@@ -182,22 +190,30 @@ class TestDstBounds:
             assert len(hits) == 1, f"{current}: {len(hits)} windows"
             current = current.add(minutes=15)
 
-    def test_bounds_independent_of_fold_of_reference(self):
-        window = TimeWindow(start_time="02:00", duration="4 hours")
-        early = pendulum.datetime(2026, 10, 25, 0, 30, tz=TZ)  # CEST
-        late = pendulum.datetime(2026, 10, 25, 5, 30, tz=TZ)  # CET
-        assert window._window_start_end(early) == window._window_start_end(late)
-        start, end = window._window_start_end(late)
-        # 02:00 first occurrence (CEST) to 06:00 CET = 5 real hours on this day.
-        assert (end - start).in_hours() == 5
+    def test_end_time_bounds_on_autumn_change_day(self):
+        # 2026-10-25: 02:00-03:00 occurs twice; ambiguous bounds use the second
+        # occurrence (upstream rule), so 00:00-02:00 has 3 real hours and
+        # 02:00-06:00 keeps 4.
+        night = TimeWindow(start_time="00:00", end_time="02:00")
+        low = TimeWindow(start_time="02:00", end_time="06:00")
+        _, night_end = night._window_start_end(dt(2026, 10, 25))
+        low_start, low_end = low._window_start_end(dt(2026, 10, 25))
+        assert night_end == low_start
+        assert (low_end - low_start).in_hours() == 4
 
-    def test_nonexistent_start_moves_past_gap(self):
-        # 02:00-03:00 does not exist on 2026-03-29; the window starts when the clocks jump.
+    def test_end_time_bounds_on_spring_change_day(self):
+        # 2026-03-29: 02:00-03:00 does not exist; the chain stays closed.
+        night = TimeWindow(start_time="00:00", end_time="02:00")
+        low = TimeWindow(start_time="02:00", end_time="06:00")
+        _, night_end = night._window_start_end(dt(2026, 3, 29))
+        low_start, _ = low._window_start_end(dt(2026, 3, 29))
+        assert night_end == low_start
+
+    def test_duration_counts_elapsed_time(self):
+        # Upstream semantics: duration is elapsed time, also across DST changes.
         window = TimeWindow(start_time="02:00", duration="4 hours")
-        start, end = window._window_start_end(dt(2026, 3, 29, 12))
-        assert (start.hour, start.minute) == (3, 0)
-        assert (end.hour, end.minute) == (6, 0)
-        assert (end - start).in_hours() == 3
+        start, end = window._window_start_end(dt(2026, 10, 25))
+        assert (end - start).in_hours() == 4
 
     def test_naive_reference_unchanged(self):
         window = TimeWindow(start_time="02:00", duration="4 hours")

@@ -18,31 +18,31 @@ TZ = "Europe/Berlin"
 WINDOWS = [
     {
         "start_time": "00:00",
-        "duration": "2 hours",
+        "end_time": "02:00",
         "months": [1, 2, 3, 10, 11, 12],
         "value": 0.0432,
     },
     {
         "start_time": "02:00",
-        "duration": "4 hours",
+        "end_time": "06:00",
         "months": [1, 2, 3, 10, 11, 12],
         "value": 0.0173,
     },
     {
         "start_time": "06:00",
-        "duration": "11 hours",
+        "end_time": "17:00",
         "months": [1, 2, 3, 10, 11, 12],
         "value": 0.0432,
     },
     {
         "start_time": "17:00",
-        "duration": "3 hours",
+        "end_time": "20:00",
         "months": [1, 2, 3, 10, 11, 12],
         "value": 0.0596,
     },
     {
         "start_time": "20:00",
-        "duration": "4 hours",
+        "end_time": "00:00",
         "months": [1, 2, 3, 10, 11, 12],
         "value": 0.0432,
     },
