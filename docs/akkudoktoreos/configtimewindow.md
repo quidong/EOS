@@ -52,8 +52,6 @@ Each `TimeWindow` object supports the following fields:
 - **`day_of_week`** (optional): Restricts the window's start date to a weekday.
 - **`date`** (optional): Restricts the window's start date to a specific calendar date.
 - **`month`** (optional): Restricts the window's start date to a calendar month, from 1 to 12.
-- **`months`** (optional, RL29 fork): Restricts the window's start date to a list of months,
-  e.g. `[1, 2, 3, 10, 11, 12]` for Q1 and Q4.
 - **`locale`** (optional): Locale used when parsing localized weekday names.
 
 The `date`, `day_of_week`, and `month` restrictions are independent. If more than one is
@@ -589,14 +587,15 @@ into November, it remains applicable during the part of the window that falls on
 A month restriction is useful for seasonal schedules, such as restricting an appliance window
 to winter or summer months.
 
-`months` (RL29 fork) takes a list of months and follows the same start-date rule. It avoids
-one window per month, e.g. for time-variable grid fees under §14a EnWG module 3 that apply in
-Q1 and Q4 only. For a chain of consecutive windows (00:00-02:00, 02:00-06:00, ...) use
-`end_time` instead of `duration`: `duration` is elapsed time, so on DST change days windows
-chained by duration overlap or leave a gap, while `end_time` follows the wall clock.
+For a schedule that spans several months, configure one window per month. Time-variable
+grid fees under §14a EnWG module 3 that apply in Q1 and Q4 only need each band once for
+every month 1, 2, 3, 10, 11 and 12. For a chain of consecutive windows (00:00-02:00,
+02:00-06:00, ...) use `end_time` instead of `duration`: `duration` is elapsed time, so on DST
+change days windows chained by duration overlap or leave a gap, while `end_time` follows the
+wall clock.
 
 ```json
-{ "start_time": "02:00", "end_time": "06:00", "months": [1, 2, 3, 10, 11, 12], "value": 0.0173 }
+{ "start_time": "02:00", "end_time": "06:00", "month": 1, "value": 0.0173 }
 ```
 
 ### Combining Restrictions

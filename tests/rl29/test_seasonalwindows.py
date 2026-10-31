@@ -1,7 +1,8 @@
-"""Month restriction for time windows (RL29 fork).
+"""Seasonal time windows with the upstream `month` restriction (RL29 fork).
 
 Needed for time-variable grid fees under §14a EnWG Modul 3: MVV Netze applies the
-time-variable fee only in Q1 and Q4; in Q2/Q3 the standard grid fee applies.
+time-variable fee only in Q1 and Q4; in Q2/Q3 the standard grid fee applies. Upstream
+TimeWindow restricts a window to one month, so a seasonal band needs one window per month.
 """
 
 from __future__ import annotations
@@ -9,7 +10,6 @@ from __future__ import annotations
 import numpy as np
 import pendulum
 import pytest
-from pydantic import ValidationError
 
 from akkudoktoreos.config.configabc import (
     TimeWindow,
@@ -27,77 +27,45 @@ def dt(*args) -> pendulum.DateTime:
     return pendulum.datetime(*args, tz=TZ)
 
 
-# ---------------------------------------------------------------------------
-# Validation
-# ---------------------------------------------------------------------------
-
-
-class TestMonthsValidation:
-    def test_default_is_none(self):
-        assert TimeWindow(start_time="00:00", duration="1 hour").months is None
-
-    def test_sorted_and_deduplicated(self):
-        window = TimeWindow(start_time="00:00", duration="1 hour", months=[12, 1, 1, 10])
-        assert window.months == [1, 10, 12]
-
-    @pytest.mark.parametrize("months", [[0], [13], [1, 14], [-1]])
-    def test_out_of_range_rejected(self, months):
-        with pytest.raises(ValidationError):
-            TimeWindow(start_time="00:00", duration="1 hour", months=months)
-
-    def test_empty_list_rejected(self):
-        with pytest.raises(ValidationError):
-            TimeWindow(start_time="00:00", duration="1 hour", months=[])
-
-    def test_roundtrip_serialisation(self):
-        window = TimeWindow(start_time="17:00", duration="3 hours", months=Q1_Q4)
-        again = TimeWindow.model_validate(window.model_dump())
-        assert again.months == Q1_Q4
-        assert again.contains(dt(2026, 1, 15, 18))
+def per_month(window: dict, months: list[int]) -> list[dict]:
+    """One copy of ``window`` per month."""
+    return [{**window, "month": month} for month in months]
 
 
 # ---------------------------------------------------------------------------
-# Behaviour of a single window
+# Behaviour of a seasonal window
 # ---------------------------------------------------------------------------
 
 
-class TestMonthsBehaviour:
-    window = TimeWindow(start_time="17:00", duration="3 hours", months=Q1_Q4)
+class TestSeasonalWindow:
+    sequence = TimeWindowSequence.model_validate(
+        {"windows": per_month({"start_time": "17:00", "duration": "3 hours"}, Q1_Q4)}
+    )
 
     @pytest.mark.parametrize("month", Q1_Q4)
     def test_contains_in_listed_months(self, month):
-        assert self.window.contains(dt(2026, month, 10, 18))
+        assert self.sequence.contains(dt(2026, month, 10, 18))
 
     @pytest.mark.parametrize("month", Q2_Q3)
     def test_not_contained_in_other_months(self, month):
-        assert not self.window.contains(dt(2026, month, 10, 18))
+        assert not self.sequence.contains(dt(2026, month, 10, 18))
 
     def test_month_boundary_follows_local_time(self):
         # 2026-09-30 22:30 UTC is already 2026-10-01 00:30 in Berlin.
-        night = TimeWindow(start_time="00:00", duration="2 hours", months=[10])
+        night = TimeWindow(start_time="00:00", duration="2 hours", month=10)
         local = pendulum.datetime(2026, 9, 30, 22, 30, tz="UTC").in_timezone(TZ)
         assert night.contains(local)
 
     def test_combined_with_day_of_week(self):
-        window = TimeWindow(start_time="08:00", duration="1 hour", day_of_week=0, months=[11])
+        window = TimeWindow(start_time="08:00", duration="1 hour", day_of_week=0, month=11)
         assert window.contains(dt(2026, 11, 2, 8, 30))  # Monday in November
         assert not window.contains(dt(2026, 11, 3, 8, 30))  # Tuesday
         assert not window.contains(dt(2026, 6, 1, 8, 30))  # Monday in June
 
-    def test_start_time_helpers_respect_months(self):
-        duration = to_duration("1 hour")
-        assert self.window.earliest_start_time(duration, dt(2026, 11, 5)) is not None
-        assert self.window.earliest_start_time(duration, dt(2026, 7, 5)) is None
-        assert self.window.latest_start_time(duration, dt(2026, 7, 5)) is None
-        assert self.window.available_duration(dt(2026, 7, 5)) is None
-        available = self.window.available_duration(dt(2026, 12, 5))
-        assert available is not None
-        assert available.total_seconds() == to_duration("3 hours").total_seconds()
-
-    def test_sequence_contains(self):
-        seq = TimeWindowSequence(windows=[self.window])
-        assert seq.contains(dt(2026, 2, 1, 19))
-        assert not seq.contains(dt(2026, 8, 1, 19))
+    def test_matches_day_uses_month(self):
+        window = TimeWindow(start_time="08:00", duration="1 hour", month=11)
+        assert window.matches_day(dt(2026, 11, 2))
+        assert not window.matches_day(dt(2026, 12, 2))
 
 
 # ---------------------------------------------------------------------------
@@ -122,12 +90,12 @@ def mvv_modul3_sequence() -> ValueTimeWindowSequence:
     return ValueTimeWindowSequence.model_validate(
         {
             "windows": [
-                {"start_time": "00:00", "end_time": "02:00", "months": Q1_Q4, "value": STANDARD},
-                {"start_time": "02:00", "end_time": "06:00", "months": Q1_Q4, "value": NIEDRIG},
-                {"start_time": "06:00", "end_time": "17:00", "months": Q1_Q4, "value": STANDARD},
-                {"start_time": "17:00", "end_time": "20:00", "months": Q1_Q4, "value": HOCH},
-                {"start_time": "20:00", "end_time": "00:00", "months": Q1_Q4, "value": STANDARD},
-                {"start_time": "00:00", "end_time": "00:00", "months": Q2_Q3, "value": REGULAR},
+                *per_month({"start_time": "00:00", "end_time": "02:00", "value": STANDARD}, Q1_Q4),
+                *per_month({"start_time": "02:00", "end_time": "06:00", "value": NIEDRIG}, Q1_Q4),
+                *per_month({"start_time": "06:00", "end_time": "17:00", "value": STANDARD}, Q1_Q4),
+                *per_month({"start_time": "17:00", "end_time": "20:00", "value": HOCH}, Q1_Q4),
+                *per_month({"start_time": "20:00", "end_time": "00:00", "value": STANDARD}, Q1_Q4),
+                *per_month({"start_time": "00:00", "end_time": "00:00", "value": REGULAR}, Q2_Q3),
             ]
         }
     )
@@ -227,3 +195,51 @@ class TestDstBounds:
         start, end = window._window_start_end(dt(2026, 11, 3, 21))
         assert start == dt(2026, 11, 3, 20)
         assert end == dt(2026, 11, 4, 0)
+
+
+# ---------------------------------------------------------------------------
+# Compatibility with configurations of earlier fork releases (`months`)
+# ---------------------------------------------------------------------------
+
+
+class TestLegacyMonths:
+    def test_months_expand_to_one_window_per_month(self):
+        seq = ValueTimeWindowSequence.model_validate(
+            {"windows": [{"start_time": "17:00", "end_time": "20:00", "months": [11, 1], "value": 1.0}]}
+        )
+        assert [w.month for w in seq.windows] == [1, 11]
+        assert all(w.value == 1.0 for w in seq.windows)
+        assert seq.contains(dt(2026, 11, 3, 18))
+        assert not seq.contains(dt(2026, 6, 3, 18))
+
+    def test_legacy_mvv_config_keeps_seasonal_fees(self):
+        legacy = ValueTimeWindowSequence.model_validate(
+            {
+                "windows": [
+                    {"start_time": "17:00", "end_time": "20:00", "months": Q1_Q4, "value": HOCH},
+                    {"start_time": "00:00", "end_time": "00:00", "months": Q2_Q3, "value": REGULAR},
+                ]
+            }
+        )
+        start = dt(2026, 7, 14)
+        summer = legacy.to_array(start, start.add(days=1), to_duration("1 hour"))
+        np.testing.assert_allclose(summer, [REGULAR] * 24)
+
+    def test_months_combined_with_month_keeps_intersection(self):
+        seq = TimeWindowSequence.model_validate(
+            {"windows": [{"start_time": "08:00", "duration": "1 hour", "month": 2, "months": [1, 2]}]}
+        )
+        assert [w.month for w in seq.windows] == [2]
+
+    @pytest.mark.parametrize("months", [[], [0], [13]])
+    def test_invalid_legacy_months_rejected(self, months):
+        with pytest.raises(ValueError):
+            TimeWindowSequence.model_validate(
+                {"windows": [{"start_time": "08:00", "duration": "1 hour", "months": months}]}
+            )
+
+    def test_windows_without_months_unchanged(self):
+        seq = TimeWindowSequence.model_validate(
+            {"windows": [{"start_time": "08:00", "duration": "1 hour", "month": 3}]}
+        )
+        assert [w.month for w in seq.windows] == [3]

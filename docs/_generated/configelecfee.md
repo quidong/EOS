@@ -121,7 +121,7 @@
 | dimming_power_w | `float` | `rw` | `4200.0` | Power a controllable device may still draw while dimmed [W] (4.2 kW, or 0.4 x connected power for larger devices). |
 | module | `Literal['none', 'module1', 'module2', 'module1_3']` | `rw` | `none` | Grid fee module: 'none', 'module1' (flat reduction), 'module2' (separate meter, reduced network energy price), 'module1_3' (module 1 plus time-variable network energy price). |
 | module2_reduction_percent | `float` | `rw` | `60.0` | Module 2: reduction of the network energy price of the device [%]. |
-| module3_network_amt_kwh | `ValueTimeWindowSequence` | `rw` | `required` | Module 3: network energy price by time window [currency/kWh, net]; use 'months' to restrict windows to the quarters with module 3 prices. Times without a window keep the regular network energy price. |
+| module3_network_amt_kwh | `ValueTimeWindowSequence` | `rw` | `required` | Module 3: network energy price by time window [currency/kWh, net]; use 'month' to restrict windows to the quarters with module 3 prices, with one window per band and month (the example shows January; repeat it for the other months). Times without a window keep the regular network energy price. |
 | regular_network_amt_kwh | `Optional[float]` | `rw` | `None` | Regular network energy price contained in the configured consumption fee [currency/kWh, net]. Needed for module 2 and module 3. |
 :::
 <!-- pyml enable line-length -->
@@ -149,15 +149,7 @@
                            "end_time": "02:00:00.000000",
                            "day_of_week": null,
                            "date": null,
-                           "month": null,
-                           "months": [
-                               1,
-                               2,
-                               3,
-                               10,
-                               11,
-                               12
-                           ],
+                           "month": 1,
                            "locale": null,
                            "value": 0.0432
                        },
@@ -167,15 +159,7 @@
                            "end_time": "06:00:00.000000",
                            "day_of_week": null,
                            "date": null,
-                           "month": null,
-                           "months": [
-                               1,
-                               2,
-                               3,
-                               10,
-                               11,
-                               12
-                           ],
+                           "month": 1,
                            "locale": null,
                            "value": 0.0173
                        },
@@ -185,15 +169,7 @@
                            "end_time": "17:00:00.000000",
                            "day_of_week": null,
                            "date": null,
-                           "month": null,
-                           "months": [
-                               1,
-                               2,
-                               3,
-                               10,
-                               11,
-                               12
-                           ],
+                           "month": 1,
                            "locale": null,
                            "value": 0.0432
                        },
@@ -203,15 +179,7 @@
                            "end_time": "20:00:00.000000",
                            "day_of_week": null,
                            "date": null,
-                           "month": null,
-                           "months": [
-                               1,
-                               2,
-                               3,
-                               10,
-                               11,
-                               12
-                           ],
+                           "month": 1,
                            "locale": null,
                            "value": 0.0596
                        },
@@ -221,15 +189,7 @@
                            "end_time": "00:00:00.000000",
                            "day_of_week": null,
                            "date": null,
-                           "month": null,
-                           "months": [
-                               1,
-                               2,
-                               3,
-                               10,
-                               11,
-                               12
-                           ],
+                           "month": 1,
                            "locale": null,
                            "value": 0.0432
                        }
@@ -293,7 +253,6 @@ This model extends `TimeWindow` by associating a value with the defined time int
 | end_time | `Optional[akkudoktoreos.utils.datetimeutil.Time]` | `rw` | `None` | Optional exclusive end time of the window. The effective end is the later of end_time and start_time + duration. End time follows local wall-clock time across daylight saving time changes. If None (the default), the window ends at start_time + duration. |
 | locale | `Optional[str]` | `rw` | `None` | Locale used to parse weekday names in `day_of_week` when given as string. If not set, Pendulum's default locale is used. Examples: 'en', 'de', 'fr', etc. |
 | month | `Optional[int]` | `rw` | `None` | Optional calendar month restriction (1=January to 12=December). The window's start date must fall in this month, including for overnight windows that extend into the following month. |
-| months | `Optional[list[int]]` | `rw` | `None` | Optional month restriction (1=January to 12=December). The window only applies in the listed months, matched against the local date on which the window starts. If None, applies in every month. Useful for seasonal tariffs, e.g. quarters Q1 and Q4 = [1, 2, 3, 10, 11, 12]. (RL29 fork; combines with 'month'.) |
 | start_time | `Time` | `rw` | `required` | Naive start time of the time window (time of day, no timezone). Interpreted in the timezone of the datetime passed to contains() or earliest_start_time(). |
 | value | `Optional[float]` | `rw` | `None` | Value applicable during this time window. |
 :::
@@ -317,7 +276,6 @@ This model extends `TimeWindow` by associating a value with the defined time int
                            "day_of_week": null,
                            "date": null,
                            "month": null,
-                           "months": null,
                            "locale": null,
                            "value": 0.288
                        }
@@ -403,7 +361,6 @@ fee applicable during that interval.
                            "day_of_week": null,
                            "date": null,
                            "month": null,
-                           "months": null,
                            "locale": null,
                            "value": 0.00288
                        },
@@ -414,7 +371,6 @@ fee applicable during that interval.
                            "day_of_week": null,
                            "date": null,
                            "month": null,
-                           "months": null,
                            "locale": null,
                            "value": 0.0034
                        }
@@ -429,7 +385,6 @@ fee applicable during that interval.
                            "day_of_week": null,
                            "date": null,
                            "month": null,
-                           "months": null,
                            "locale": null,
                            "value": 19.0
                        }
@@ -444,7 +399,6 @@ fee applicable during that interval.
                            "day_of_week": null,
                            "date": null,
                            "month": null,
-                           "months": null,
                            "locale": null,
                            "value": 0.00288
                        },
@@ -455,7 +409,6 @@ fee applicable during that interval.
                            "day_of_week": null,
                            "date": null,
                            "month": null,
-                           "months": null,
                            "locale": null,
                            "value": 0.0034
                        }
@@ -470,7 +423,6 @@ fee applicable during that interval.
                            "day_of_week": null,
                            "date": null,
                            "month": null,
-                           "months": null,
                            "locale": null,
                            "value": 19.0
                        }

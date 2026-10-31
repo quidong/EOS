@@ -172,22 +172,6 @@ class TimeWindow(SettingsBaseModel):
             "examples": [None, 10],
         },
     )
-    months: Optional[list[int]] = Field(
-        default=None,
-        json_schema_extra={
-            "description": (
-                "Optional month restriction (1=January to 12=December). "
-                "The window only applies in the listed months, matched against the "
-                "local date on which the window starts. If None, applies in every month. "
-                "Useful for seasonal tariffs, e.g. quarters Q1 and Q4 = [1, 2, 3, 10, 11, 12]. "
-                "(RL29 fork; combines with 'month'.)"
-            ),
-            "examples": [
-                None,
-                [1, 2, 3, 10, 11, 12],
-            ],
-        },
-    )
     locale: Optional[str] = Field(
         default=None,
         json_schema_extra={
@@ -241,21 +225,6 @@ class TimeWindow(SettingsBaseModel):
             Duration: The converted Duration object.
         """
         return to_duration(value)
-
-    @field_validator("months", mode="after")
-    @classmethod
-    def validate_months(cls, value: Optional[list[int]]) -> Optional[list[int]]:
-        """Ensure months are within 1..12, unique and sorted; an empty list is rejected."""
-        if value is None:
-            return None
-        if len(value) == 0:
-            raise ValueError("months must contain at least one month (1-12) or be None")
-        for month in value:
-            if not 1 <= month <= 12:
-                raise ValueError(
-                    f"month {month} out of range, expected 1 (January) to 12 (December)"
-                )
-        return sorted(set(value))
 
     @model_validator(mode="after")
     def validate_day_of_week_with_locale(self) -> "TimeWindow":
@@ -399,13 +368,10 @@ class TimeWindow(SettingsBaseModel):
         if self.month is not None and start_date.month != self.month:
             return False
 
-        if self.months is not None and start_date.month not in self.months:
-            return False
-
         return True
 
     def matches_day(self, date_time: DateTime) -> bool:
-        """Check the calendar constraints (date, weekday, month, months) for a day.
+        """Check the calendar constraints (date, weekday, month) for a day.
 
         RL29 fork API, kept for callers that check a day before computing
         window bounds; same rules as the window start date.
@@ -556,6 +522,39 @@ class TimeWindowSequence(SettingsBaseModel, Generic[TimeWindowT]):
         default_factory=list,
         json_schema_extra={"description": "List of TimeWindow objects that make up this sequence."},
     )
+
+    @field_validator("windows", mode="before")
+    @classmethod
+    def expand_legacy_months(cls, value: Any) -> Any:
+        """Expand the retired fork field ``months`` into one window per month.
+
+        Earlier fork releases accepted ``months: list[int]`` on a time window.
+        Upstream only knows ``month``, and pydantic would silently drop the
+        unknown field, so the window would apply in every month. Each such
+        window is replaced by one copy per listed month (combined with an
+        explicit ``month``, only that month is kept).
+        """
+        if not isinstance(value, list):
+            return value
+        expanded: list[Any] = []
+        for window in value:
+            if not isinstance(window, dict) or window.get("months") is None:
+                expanded.append(window)
+                continue
+            base = {key: item for key, item in window.items() if key != "months"}
+            months = sorted({int(month) for month in window["months"]})
+            if not months or any(not 1 <= month <= 12 for month in months):
+                raise ValueError(f"Invalid legacy 'months' {window['months']}: expected 1 to 12.")
+            if base.get("month") is not None:
+                months = [month for month in months if month == int(base["month"])]
+            logger.warning(
+                "Time window field 'months' is no longer supported; replace it by one window "
+                "per month ('month'). Expanded {} to months {}.",
+                {key: item for key, item in base.items() if key != "value"},
+                months,
+            )
+            expanded.extend({**base, "month": month} for month in months)
+        return expanded
 
     # EOS collections iterate over their elements instead of BaseModel field/value pairs.
     def __iter__(self) -> Iterator[TimeWindowT]:  # type: ignore[override]

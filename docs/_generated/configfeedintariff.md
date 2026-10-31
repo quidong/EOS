@@ -182,7 +182,6 @@
                            "day_of_week": null,
                            "date": null,
                            "month": null,
-                           "months": null,
                            "locale": null,
                            "value": 0.028
                        },
@@ -193,7 +192,6 @@
                            "day_of_week": null,
                            "date": null,
                            "month": null,
-                           "months": null,
                            "locale": null,
                            "value": 0.034
                        }

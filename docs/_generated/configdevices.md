@@ -258,7 +258,6 @@ config path from ``self.device_id`` without needing an external index.
                                    "day_of_week": null,
                                    "date": null,
                                    "month": null,
-                                   "months": null,
                                    "locale": null,
                                    "value": 19.5
                                },
@@ -269,7 +268,6 @@ config path from ``self.device_id`` without needing an external index.
                                    "day_of_week": null,
                                    "date": null,
                                    "month": null,
-                                   "months": null,
                                    "locale": null,
                                    "value": 20.5
                                },
@@ -280,7 +278,6 @@ config path from ``self.device_id`` without needing an external index.
                                    "day_of_week": null,
                                    "date": null,
                                    "month": null,
-                                   "months": null,
                                    "locale": null,
                                    "value": 19.5
                                }
@@ -368,7 +365,6 @@ config path from ``self.device_id`` without needing an external index.
                                    "day_of_week": null,
                                    "date": null,
                                    "month": null,
-                                   "months": null,
                                    "locale": null,
                                    "value": null
                                },
@@ -379,7 +375,6 @@ config path from ``self.device_id`` without needing an external index.
                                    "day_of_week": 0,
                                    "date": null,
                                    "month": null,
-                                   "months": null,
                                    "locale": null,
                                    "value": null
                                },
@@ -390,7 +385,6 @@ config path from ``self.device_id`` without needing an external index.
                                    "day_of_week": 1,
                                    "date": null,
                                    "month": null,
-                                   "months": null,
                                    "locale": null,
                                    "value": null
                                },
@@ -401,7 +395,6 @@ config path from ``self.device_id`` without needing an external index.
                                    "day_of_week": 2,
                                    "date": null,
                                    "month": null,
-                                   "months": null,
                                    "locale": null,
                                    "value": null
                                },
@@ -412,7 +405,6 @@ config path from ``self.device_id`` without needing an external index.
                                    "day_of_week": 3,
                                    "date": null,
                                    "month": null,
-                                   "months": null,
                                    "locale": null,
                                    "value": null
                                },
@@ -423,7 +415,6 @@ config path from ``self.device_id`` without needing an external index.
                                    "day_of_week": 4,
                                    "date": null,
                                    "month": null,
-                                   "months": null,
                                    "locale": null,
                                    "value": null
                                },
@@ -434,7 +425,6 @@ config path from ``self.device_id`` without needing an external index.
                                    "day_of_week": 5,
                                    "date": null,
                                    "month": null,
-                                   "months": null,
                                    "locale": null,
                                    "value": null
                                },
@@ -445,7 +435,6 @@ config path from ``self.device_id`` without needing an external index.
                                    "day_of_week": 6,
                                    "date": null,
                                    "month": null,
-                                   "months": null,
                                    "locale": null,
                                    "value": null
                                }
@@ -786,7 +775,6 @@ config path from ``self.device_id`` without needing an external index.
                                    "day_of_week": null,
                                    "date": null,
                                    "month": null,
-                                   "months": null,
                                    "locale": null,
                                    "value": 19.5
                                },
@@ -797,7 +785,6 @@ config path from ``self.device_id`` without needing an external index.
                                    "day_of_week": null,
                                    "date": null,
                                    "month": null,
-                                   "months": null,
                                    "locale": null,
                                    "value": 20.5
                                },
@@ -808,7 +795,6 @@ config path from ``self.device_id`` without needing an external index.
                                    "day_of_week": null,
                                    "date": null,
                                    "month": null,
-                                   "months": null,
                                    "locale": null,
                                    "value": 19.5
                                }
@@ -896,7 +882,6 @@ config path from ``self.device_id`` without needing an external index.
                                    "day_of_week": null,
                                    "date": null,
                                    "month": null,
-                                   "months": null,
                                    "locale": null,
                                    "value": null
                                },
@@ -907,7 +892,6 @@ config path from ``self.device_id`` without needing an external index.
                                    "day_of_week": 0,
                                    "date": null,
                                    "month": null,
-                                   "months": null,
                                    "locale": null,
                                    "value": null
                                },
@@ -918,7 +902,6 @@ config path from ``self.device_id`` without needing an external index.
                                    "day_of_week": 1,
                                    "date": null,
                                    "month": null,
-                                   "months": null,
                                    "locale": null,
                                    "value": null
                                },
@@ -929,7 +912,6 @@ config path from ``self.device_id`` without needing an external index.
                                    "day_of_week": 2,
                                    "date": null,
                                    "month": null,
-                                   "months": null,
                                    "locale": null,
                                    "value": null
                                },
@@ -940,7 +922,6 @@ config path from ``self.device_id`` without needing an external index.
                                    "day_of_week": 3,
                                    "date": null,
                                    "month": null,
-                                   "months": null,
                                    "locale": null,
                                    "value": null
                                },
@@ -951,7 +932,6 @@ config path from ``self.device_id`` without needing an external index.
                                    "day_of_week": 4,
                                    "date": null,
                                    "month": null,
-                                   "months": null,
                                    "locale": null,
                                    "value": null
                                },
@@ -962,7 +942,6 @@ config path from ``self.device_id`` without needing an external index.
                                    "day_of_week": 5,
                                    "date": null,
                                    "month": null,
-                                   "months": null,
                                    "locale": null,
                                    "value": null
                                },
@@ -973,7 +952,6 @@ config path from ``self.device_id`` without needing an external index.
                                    "day_of_week": 6,
                                    "date": null,
                                    "month": null,
-                                   "months": null,
                                    "locale": null,
                                    "value": null
                                }

@@ -84,46 +84,26 @@ class GridControl14aSettings(SettingsBaseModel):
         json_schema_extra={
             "description": (
                 "Module 3: network energy price by time window [currency/kWh, net]; use "
-                "'months' to restrict windows to the quarters with module 3 prices. Times "
-                "without a window keep the regular network energy price."
+                "'month' to restrict windows to the quarters with module 3 prices, with one "
+                "window per band and month (the example shows January; repeat it for the "
+                "other months). Times without a window keep the regular network energy price."
             ),
             "examples": [
                 {
                     "windows": [
-                        {
-                            "start_time": "00:00",
-                            "end_time": "02:00",
-                            "months": [1, 2, 3, 10, 11, 12],
-                            "value": 0.0432,
-                        },
-                        {
-                            "start_time": "02:00",
-                            "end_time": "06:00",
-                            "months": [1, 2, 3, 10, 11, 12],
-                            "value": 0.0173,
-                        },
-                        {
-                            "start_time": "06:00",
-                            "end_time": "17:00",
-                            "months": [1, 2, 3, 10, 11, 12],
-                            "value": 0.0432,
-                        },
-                        {
-                            "start_time": "17:00",
-                            "end_time": "20:00",
-                            "months": [1, 2, 3, 10, 11, 12],
-                            "value": 0.0596,
-                        },
-                        {
-                            "start_time": "20:00",
-                            "end_time": "00:00",
-                            "months": [1, 2, 3, 10, 11, 12],
-                            "value": 0.0432,
-                        },
+                        {"start_time": start, "end_time": end, "month": month, "value": value}
+                        for month in (1,)
+                        for start, end, value in (
+                            ("00:00", "02:00", 0.0432),
+                            ("02:00", "06:00", 0.0173),
+                            ("06:00", "17:00", 0.0432),
+                            ("17:00", "20:00", 0.0596),
+                            ("20:00", "00:00", 0.0432),
+                        )
                     ]
                 }
             ],
-        },  # fmt: skip
+        },
     )
     dimming_power_w: float = Field(
         default=4200.0,

@@ -45,16 +45,17 @@ def module3_windows(
     months: list[int] = MODUL3_MONTHS,
     bands: list[tuple[str, int, str]] = MVV_BANDS,
 ) -> dict[str, Any]:
-    """Network price windows of module 3 [EUR/kWh, net]."""
+    """Network price windows of module 3 [EUR/kWh, net], one window per band and month."""
     prices = {"low": low_amt_kwh, "standard": standard_amt_kwh, "high": high_amt_kwh}
     return {
         "windows": [
             {
                 "start_time": start,
                 "duration": f"{hours} hours",
-                "months": list(months),
+                "month": month,
                 "value": prices[band],
             }
+            for month in sorted(set(months))
             for start, hours, band in bands
         ]
     }

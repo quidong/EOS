@@ -11348,72 +11348,37 @@
           },
           "module3_network_amt_kwh": {
             "$ref": "#/components/schemas/ValueTimeWindowSequence-Input",
-            "description": "Module 3: network energy price by time window [currency/kWh, net]; use 'months' to restrict windows to the quarters with module 3 prices. Times without a window keep the regular network energy price.",
+            "description": "Module 3: network energy price by time window [currency/kWh, net]; use 'month' to restrict windows to the quarters with module 3 prices, with one window per band and month (the example shows January; repeat it for the other months). Times without a window keep the regular network energy price.",
             "examples": [
               {
                 "windows": [
                   {
                     "end_time": "02:00",
-                    "months": [
-                      1,
-                      2,
-                      3,
-                      10,
-                      11,
-                      12
-                    ],
+                    "month": 1,
                     "start_time": "00:00",
                     "value": 0.0432
                   },
                   {
                     "end_time": "06:00",
-                    "months": [
-                      1,
-                      2,
-                      3,
-                      10,
-                      11,
-                      12
-                    ],
+                    "month": 1,
                     "start_time": "02:00",
                     "value": 0.0173
                   },
                   {
                     "end_time": "17:00",
-                    "months": [
-                      1,
-                      2,
-                      3,
-                      10,
-                      11,
-                      12
-                    ],
+                    "month": 1,
                     "start_time": "06:00",
                     "value": 0.0432
                   },
                   {
                     "end_time": "20:00",
-                    "months": [
-                      1,
-                      2,
-                      3,
-                      10,
-                      11,
-                      12
-                    ],
+                    "month": 1,
                     "start_time": "17:00",
                     "value": 0.0596
                   },
                   {
                     "end_time": "00:00",
-                    "months": [
-                      1,
-                      2,
-                      3,
-                      10,
-                      11,
-                      12
-                    ],
+                    "month": 1,
                     "start_time": "20:00",
                     "value": 0.0432
                   }
@@ -11499,72 +11464,37 @@
           },
           "module3_network_amt_kwh": {
             "$ref": "#/components/schemas/ValueTimeWindowSequence-Output",
-            "description": "Module 3: network energy price by time window [currency/kWh, net]; use 'months' to restrict windows to the quarters with module 3 prices. Times without a window keep the regular network energy price.",
+            "description": "Module 3: network energy price by time window [currency/kWh, net]; use 'month' to restrict windows to the quarters with module 3 prices, with one window per band and month (the example shows January; repeat it for the other months). Times without a window keep the regular network energy price.",
             "examples": [
               {
                 "windows": [
                   {
                     "end_time": "02:00",
-                    "months": [
-                      1,
-                      2,
-                      3,
-                      10,
-                      11,
-                      12
-                    ],
+                    "month": 1,
                     "start_time": "00:00",
                     "value": 0.0432
                   },
                   {
                     "end_time": "06:00",
-                    "months": [
-                      1,
-                      2,
-                      3,
-                      10,
-                      11,
-                      12
-                    ],
+                    "month": 1,
                     "start_time": "02:00",
                     "value": 0.0173
                   },
                   {
                     "end_time": "17:00",
-                    "months": [
-                      1,
-                      2,
-                      3,
-                      10,
-                      11,
-                      12
-                    ],
+                    "month": 1,
                     "start_time": "06:00",
                     "value": 0.0432
                   },
                   {
                     "end_time": "20:00",
-                    "months": [
-                      1,
-                      2,
-                      3,
-                      10,
-                      11,
-                      12
-                    ],
+                    "month": 1,
                     "start_time": "17:00",
                     "value": 0.0596
                   },
                   {
                     "end_time": "00:00",
-                    "months": [
-                      1,
-                      2,
-                      3,
-                      10,
-                      11,
-                      12
-                    ],
+                    "month": 1,
                     "start_time": "20:00",
                     "value": 0.0432
                   }
@@ -20616,32 +20546,6 @@
               10
             ]
           },
-          "months": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "integer"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Months",
-            "description": "Optional month restriction (1=January to 12=December). The window only applies in the listed months, matched against the local date on which the window starts. If None, applies in every month. Useful for seasonal tariffs, e.g. quarters Q1 and Q4 = [1, 2, 3, 10, 11, 12]. (RL29 fork; combines with 'month'.)",
-            "examples": [
-              null,
-              [
-                1,
-                2,
-                3,
-                10,
-                11,
-                12
-              ]
-            ]
-          },
           "locale": {
             "anyOf": [
               {
@@ -20749,32 +20653,6 @@
             "examples": [
               null,
               10
-            ]
-          },
-          "months": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "integer"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Months",
-            "description": "Optional month restriction (1=January to 12=December). The window only applies in the listed months, matched against the local date on which the window starts. If None, applies in every month. Useful for seasonal tariffs, e.g. quarters Q1 and Q4 = [1, 2, 3, 10, 11, 12]. (RL29 fork; combines with 'month'.)",
-            "examples": [
-              null,
-              [
-                1,
-                2,
-                3,
-                10,
-                11,
-                12
-              ]
             ]
           },
           "locale": {
@@ -20961,32 +20839,6 @@
               10
             ]
           },
-          "months": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "integer"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Months",
-            "description": "Optional month restriction (1=January to 12=December). The window only applies in the listed months, matched against the local date on which the window starts. If None, applies in every month. Useful for seasonal tariffs, e.g. quarters Q1 and Q4 = [1, 2, 3, 10, 11, 12]. (RL29 fork; combines with 'month'.)",
-            "examples": [
-              null,
-              [
-                1,
-                2,
-                3,
-                10,
-                11,
-                12
-              ]
-            ]
-          },
           "locale": {
             "anyOf": [
               {
@@ -21110,32 +20962,6 @@
             "examples": [
               null,
               10
-            ]
-          },
-          "months": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "integer"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Months",
-            "description": "Optional month restriction (1=January to 12=December). The window only applies in the listed months, matched against the local date on which the window starts. If None, applies in every month. Useful for seasonal tariffs, e.g. quarters Q1 and Q4 = [1, 2, 3, 10, 11, 12]. (RL29 fork; combines with 'month'.)",
-            "examples": [
-              null,
-              [
-                1,
-                2,
-                3,
-                10,
-                11,
-                12
-              ]
             ]
           },
           "locale": {
