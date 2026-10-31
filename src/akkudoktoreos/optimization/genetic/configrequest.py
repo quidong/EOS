@@ -20,7 +20,7 @@ from akkudoktoreos.optimization.genetic.geneticparams import (
     GeneticEnergyManagementParameters,
     GeneticOptimizationParameters,
 )
-from akkudoktoreos.utils.datetimeutil import DateTime, to_duration
+from akkudoktoreos.utils.datetimeutil import DateTime, Duration, to_duration
 
 
 class RuntimeForecasts(GeneticParametersBaseModel):
@@ -228,6 +228,9 @@ class ConfigOptimizationRequest(
                 raise ValueError(f"Missing or invalid {key} within the control horizon.")
         if any(value < 0 for values in (pv, load) for value in values[first:last]):
             raise ValueError("PV and load energy must be nonnegative.")
+        temperatures = await self._temperature_forecast(
+            supplied.temperature_forecast, origin, end, interval, length
+        )
         previous = ems.genetic_solution()
         warm_start = self.start_solution
         warm_start_time = self.start_solution_datetime
@@ -247,11 +250,55 @@ class ConfigOptimizationRequest(
             ev=ev,
             inverter=inverter,
             home_appliances=appliances,
-            temperature_forecast=(
-                (supplied.temperature_forecast[:length] + [None] * length)[:length]
-                if supplied.temperature_forecast is not None
-                else None
-            ),
+            temperature_forecast=temperatures,
             start_solution=warm_start,
             start_solution_datetime=warm_start_time,
         )
+
+    async def _temperature_forecast(
+        self,
+        supplied: Optional[list[Optional[float]]],
+        origin: DateTime,
+        end: DateTime,
+        interval: Duration,
+        length: int,
+    ) -> Optional[list[Optional[float]]]:
+        """Resolve the outdoor temperature per slot, aligned with the other forecasts.
+
+        A supplied series takes precedence and is padded or truncated to ``length``.
+        Otherwise ``weather_temp_air`` of the configured weather provider is read
+        from the prediction store with the same slot alignment as the energy
+        forecasts. The temperature is optional: missing slots stay ``None``, no
+        data at all yields ``None``, and a missing weather provider never cancels
+        the optimization.
+
+        Args:
+            supplied: Temperature series supplied by the request, in degC per slot.
+            origin: Local midnight the slot grid starts at.
+            end: End of the prediction horizon.
+            interval: Slot duration.
+            length: Number of slots of the resolved energy forecasts.
+
+        Returns:
+            Temperatures in degC per slot, or ``None`` if no temperature is known.
+        """
+        if supplied is not None:
+            return (list(supplied[:length]) + [None] * length)[:length]
+        try:
+            values = await bounded_forecast_array(
+                self.prediction,
+                key="weather_temp_air",
+                start_datetime=origin,
+                end_datetime=end,
+                interval=interval,
+            )
+        except (KeyError, ValueError) as exc:
+            logger.debug("No outdoor temperature forecast available: {}", exc)
+            return None
+        temperatures: list[Optional[float]] = [
+            float(value) if math.isfinite(value) else None for value in values[:length]
+        ]
+        temperatures += [None] * (length - len(temperatures))
+        if all(value is None for value in temperatures):
+            return None
+        return temperatures

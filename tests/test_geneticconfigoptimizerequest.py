@@ -653,3 +653,97 @@ async def test_missing_newest_soc_value_falls_back_to_older_fresh_sample(
     parameters = await ConfigOptimizationRequest.model_validate(data).resolve()
     assert parameters.pv_battery is not None
     assert parameters.pv_battery.initial_soc_percentage == 42
+
+
+def _hourly_series(values, start="2026-09-12T00:00:00Z"):
+    return pd.Series(values, index=pd.date_range(start, periods=len(values), freq="h"))
+
+
+def _prediction_with_temperature(temperature):
+    """Prediction mock that serves constant energy forecasts and an optional temperature."""
+    series = {
+        "pvforecast_ac_power": 1000.0,
+        "loadforecast_power_w": 2000.0,
+        "elecprice_marketprice_wh": 0.0003,
+        "feed_in_tariff_wh": 0.00007,
+    }
+
+    async def read(key, **kwargs):
+        if key == "weather_temp_air":
+            if temperature is None:
+                raise KeyError(key)
+            return temperature
+        return _hourly_series([series[key]] * 48)
+
+    return Mock(update_data=AsyncMock(), key_to_raw_series=AsyncMock(side_effect=read))
+
+
+@pytest.mark.asyncio
+async def test_outdoor_temperature_is_read_from_weather_provider(configured_request, monkeypatch):
+    _, _, _, data = configured_request
+    data["forecasts"] = {}
+    # 0 degC at local midnight, rising by 1 K per hour.
+    prediction = _prediction_with_temperature(_hourly_series([float(h) for h in range(48)]))
+    monkeypatch.setattr(ConfigOptimizationRequest, "prediction", prediction)
+    parameters = await ConfigOptimizationRequest.model_validate(data).resolve()
+    temperatures = parameters.temperature_forecast
+    assert temperatures is not None
+    assert len(temperatures) == len(parameters.ems.pv_forecast_wh)
+    # Quarter-hour slots inherit the hourly interval average.
+    assert temperatures[0] == pytest.approx(0.0)
+    assert temperatures[3] == pytest.approx(0.0)
+    assert temperatures[4] == pytest.approx(1.0)
+    assert temperatures[40] == pytest.approx(10.0)
+    prediction.update_data.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_outdoor_temperature_gaps_stay_none(configured_request, monkeypatch):
+    _, _, _, data = configured_request
+    data["forecasts"] = {}
+    values = [5.0] * 48
+    values[2] = np.nan
+    monkeypatch.setattr(
+        ConfigOptimizationRequest,
+        "prediction",
+        _prediction_with_temperature(_hourly_series(values)),
+    )
+    parameters = await ConfigOptimizationRequest.model_validate(data).resolve()
+    temperatures = parameters.temperature_forecast
+    assert temperatures[8:12] == [None, None, None, None]  # 02:00-03:00 is missing
+    assert temperatures[12] == pytest.approx(5.0)
+
+
+@pytest.mark.asyncio
+async def test_missing_outdoor_temperature_does_not_cancel_run(configured_request, monkeypatch):
+    _, _, _, data = configured_request
+    data["forecasts"] = {}
+    monkeypatch.setattr(ConfigOptimizationRequest, "prediction", _prediction_with_temperature(None))
+    parameters = await ConfigOptimizationRequest.model_validate(data).resolve()
+    assert parameters.temperature_forecast is None
+    assert len(parameters.ems.pv_forecast_wh) > 0
+
+
+@pytest.mark.asyncio
+async def test_supplied_outdoor_temperature_takes_precedence(configured_request, monkeypatch):
+    _, _, _, data = configured_request
+    data["forecasts"]["temperature_forecast"] = [-3.0] * 10
+    prediction = _prediction_with_temperature(_hourly_series([20.0] * 48))
+    monkeypatch.setattr(ConfigOptimizationRequest, "prediction", prediction)
+    parameters = await ConfigOptimizationRequest.model_validate(data).resolve()
+    temperatures = parameters.temperature_forecast
+    assert temperatures[:10] == [-3.0] * 10
+    assert temperatures[10:] == [None] * (len(temperatures) - 10)
+    prediction.key_to_raw_series.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_supplied_forecasts_read_stored_temperature_without_update(
+    configured_request, monkeypatch
+):
+    _, _, _, data = configured_request
+    prediction = _prediction_with_temperature(_hourly_series([7.0] * 48))
+    monkeypatch.setattr(ConfigOptimizationRequest, "prediction", prediction)
+    parameters = await ConfigOptimizationRequest.model_validate(data).resolve()
+    prediction.update_data.assert_not_awaited()
+    assert parameters.temperature_forecast[0] == pytest.approx(7.0)
