@@ -58,7 +58,8 @@ class PVForecastHomeAssistantCommonSettings(SettingsBaseModel):
         json_schema_extra={
             "description": (
                 "Base URL of the Home Assistant instance. Only required when EOS is not "
-                "running as a Home Assistant add-on (no SUPERVISOR_TOKEN available)."
+                "running as a Home Assistant add-on (no SUPERVISOR_TOKEN available) and "
+                "'adapter.homeassistant.base_url' is not set."
             ),
             "examples": ["http://homeassistant.local:8123"],
         },
@@ -68,7 +69,8 @@ class PVForecastHomeAssistantCommonSettings(SettingsBaseModel):
         json_schema_extra={
             "description": (
                 "Long-lived access token for the Home Assistant instance. Only required "
-                "when EOS is not running as a Home Assistant add-on."
+                "when EOS is not running as a Home Assistant add-on and "
+                "'adapter.homeassistant.base_url' is not set."
             ),
             "examples": [None],
         },
@@ -90,17 +92,37 @@ class PVForecastHomeAssistant(PVForecastProvider):
         return "PVForecastHomeAssistant"
 
     def _api_base_and_token(self) -> tuple[str, str]:
+        """Return the Home Assistant API base URL and access token.
+
+        The provider's own ``base_url``/``token`` take precedence. Otherwise the
+        direct connection of the Home Assistant adapter
+        (``adapter.homeassistant.base_url``/``token``) is reused, and without
+        that the Supervisor API of the Home Assistant add-on.
+
+        Returns:
+            The API base URL and the access token.
+
+        Raises:
+            RuntimeError: If no access token is available.
+        """
         settings = self.config.pvforecast.homeassistant
+        adapter_settings = self.config.adapter.homeassistant
         if settings.base_url:
             base_url = settings.base_url.rstrip("/") + "/api"
             token = settings.token
+        elif adapter_settings.base_url:
+            base_url = adapter_settings.base_url.rstrip("/")
+            if not base_url.endswith("/api"):
+                base_url += "/api"
+            token = adapter_settings.token
         else:
             base_url = CORE_API
             token = os.environ.get("SUPERVISOR_TOKEN")
         if not token:
             raise RuntimeError(
                 "No Home Assistant access token available. Set "
-                "'pvforecast.homeassistant.token' (and 'base_url') when EOS is not "
+                "'pvforecast.homeassistant.token' (and 'base_url') or "
+                "'adapter.homeassistant.base_url' and 'token' when EOS is not "
                 "running as a Home Assistant add-on."
             )
         return base_url, token

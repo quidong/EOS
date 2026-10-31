@@ -224,3 +224,30 @@ def test_request_entity_state_raises_without_token(pvforecast_instance):
     with pytest.raises(RuntimeError) as exc_info:
         pvforecast_instance._request_entity_state()
     assert "No Home Assistant access token available" in str(exc_info.value)
+
+
+def test_api_reuses_adapter_direct_connection(config_eos, monkeypatch):
+    monkeypatch.delenv("SUPERVISOR_TOKEN", raising=False)
+    config_eos.merge_settings_from_dict(
+        {
+            "adapter": {
+                "homeassistant": {"base_url": "http://ha.local:8123", "token": "adapter-token"}
+            },
+            "pvforecast": {"homeassistant": {"entity_id": "sensor.pv1_power_now"}},
+        }
+    )
+    start_dt = pendulum.datetime(2026, 8, 18, tz="Europe/Berlin")
+    provider = PVForecastHomeAssistant(config=config_eos.load, start_datetime=start_dt)
+
+    assert provider._api_base_and_token() == ("http://ha.local:8123/api", "adapter-token")
+
+
+def test_api_own_connection_takes_precedence(pvforecast_instance):
+    config = pvforecast_instance.config
+    config.adapter.homeassistant.base_url = "http://other.local:8123"
+    config.adapter.homeassistant.token = "adapter-token"
+
+    assert pvforecast_instance._api_base_and_token() == (
+        "http://homeassistant.local:8123/api",
+        "dummy-token",
+    )

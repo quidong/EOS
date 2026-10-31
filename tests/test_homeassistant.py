@@ -427,3 +427,133 @@ class TestHomeAssistantDeviceMeasurementKeys:
         registered_keys = {"battery-1-soc-factor", "battery_1-soc-factor"}
 
         assert HomeAssistantAdapter._resolve_device_measurement_key(key, registered_keys) == key
+
+
+class TestHomeAssistantApi:
+    """Connection selection: add-on Supervisor API or direct connection."""
+
+    def test_direct_connection_uses_base_url_and_token(self) -> None:
+        api, headers = homeassistant_module.homeassistant_api(
+            "http://homeassistant.local:8123", "long-lived-token"
+        )
+
+        assert api == "http://homeassistant.local:8123/api"
+        assert headers["Authorization"] == "Bearer long-lived-token"
+        assert headers["Content-Type"] == "application/json"
+
+    @pytest.mark.parametrize(
+        "base_url",
+        [
+            "http://ha.local:8123",
+            "http://ha.local:8123/",
+            "http://ha.local:8123/api",
+            "http://ha.local:8123/api/",
+        ],
+    )
+    def test_direct_connection_normalizes_base_url(self, base_url: str) -> None:
+        api, _ = homeassistant_module.homeassistant_api(base_url, "token")
+
+        assert api == "http://ha.local:8123/api"
+
+    def test_direct_connection_requires_token(self, monkeypatch) -> None:
+        monkeypatch.setattr(homeassistant_module, "TOKEN", "supervisor-token")
+
+        with pytest.raises(RuntimeError, match="token"):
+            homeassistant_module.homeassistant_api("http://ha.local:8123", None)
+
+    def test_supervisor_api_without_base_url(self, monkeypatch) -> None:
+        monkeypatch.setattr(homeassistant_module, "TOKEN", "supervisor-token")
+
+        api, headers = homeassistant_module.homeassistant_api(None, "ignored-token")
+
+        assert api == homeassistant_module.CORE_API
+        assert headers["Authorization"] == "Bearer supervisor-token"
+
+    def test_supervisor_api_without_supervisor_token_fails(self, monkeypatch) -> None:
+        monkeypatch.setattr(homeassistant_module, "TOKEN", None)
+
+        with pytest.raises(RuntimeError, match="SUPERVISOR_TOKEN"):
+            homeassistant_module.homeassistant_api(None, None)
+
+
+class TestHomeAssistantDirectConnection:
+    """The adapter talks to Home Assistant directly when base_url is configured."""
+
+    @pytest.fixture
+    def adapter(self, config_eos, monkeypatch) -> HomeAssistantAdapter:
+        monkeypatch.setattr(homeassistant_module, "TOKEN", None)
+        config_eos.merge_settings_from_dict(
+            {
+                "adapter": {
+                    "provider": ["HomeAssistant"],
+                    "homeassistant": {
+                        "base_url": "http://homeassistant.local:8123",
+                        "token": "long-lived-token",
+                    },
+                }
+            }
+        )
+        return HomeAssistantAdapter()
+
+    @staticmethod
+    def _response(status_code: int = 200, payload: object = None) -> Mock:
+        response = Mock(ok=200 <= status_code < 300, status_code=status_code, text="")
+        response.json.return_value = payload
+        return response
+
+    def test_get_entity_state(self, adapter, monkeypatch) -> None:
+        get = Mock(return_value=self._response(payload={"state": "21.5"}))
+        monkeypatch.setattr(homeassistant_module.requests, "get", get)
+
+        assert adapter.get_entity_state("sensor.room_temperature") == "21.5"
+        assert get.call_args.args[0] == (
+            "http://homeassistant.local:8123/api/states/sensor.room_temperature"
+        )
+        assert get.call_args.kwargs["headers"]["Authorization"] == "Bearer long-lived-token"
+
+    def test_set_entity_state(self, adapter, monkeypatch) -> None:
+        post = Mock(return_value=self._response(status_code=201))
+        monkeypatch.setattr(homeassistant_module.requests, "post", post)
+
+        adapter.set_entity_state("sensor.eos_test", "1", {"unit_of_measurement": "W"})
+
+        assert post.call_args.args[0] == "http://homeassistant.local:8123/api/states/sensor.eos_test"
+        assert post.call_args.kwargs["json"] == {
+            "state": "1",
+            "attributes": {"unit_of_measurement": "W"},
+        }
+        assert post.call_args.kwargs["headers"]["Authorization"] == "Bearer long-lived-token"
+
+    def test_get_homeassistant_entity_ids(self, adapter, monkeypatch) -> None:
+        payload = [
+            {"entity_id": "sensor.a"},
+            {"entity_id": "sensor.eos_plan"},
+            {"entity_id": "light.b"},
+        ]
+        get = Mock(return_value=self._response(payload=payload))
+        monkeypatch.setattr(homeassistant_module.requests, "get", get)
+
+        entity_ids = adapter.get_homeassistant_entity_ids()
+
+        assert "sensor.a" in entity_ids
+        assert "light.b" in entity_ids
+        assert get.call_args.args[0] == "http://homeassistant.local:8123/api/states"
+
+    def test_settings_from_environment(self, config_eos, monkeypatch) -> None:
+        monkeypatch.setenv("EOS_ADAPTER__HOMEASSISTANT__BASE_URL", "http://ha.local:8123")
+        monkeypatch.setenv("EOS_ADAPTER__HOMEASSISTANT__TOKEN", "from-environment")
+
+        config_eos.reset_settings()
+
+        assert config_eos.adapter.homeassistant.base_url == "http://ha.local:8123"
+        assert config_eos.adapter.homeassistant.token == "from-environment"
+
+    def test_addon_behaviour_unchanged_without_base_url(self, config_eos, monkeypatch) -> None:
+        monkeypatch.setattr(homeassistant_module, "TOKEN", "supervisor-token")
+        config_eos.merge_settings_from_dict({"adapter": {"provider": ["HomeAssistant"]}})
+        get = Mock(return_value=self._response(payload={"state": "on"}))
+        monkeypatch.setattr(homeassistant_module.requests, "get", get)
+
+        assert HomeAssistantAdapter().get_entity_state("switch.x") == "on"
+        assert get.call_args.args[0] == "http://supervisor/core/api/states/switch.x"
+        assert get.call_args.kwargs["headers"]["Authorization"] == "Bearer supervisor-token"

@@ -22,16 +22,79 @@ from akkudoktoreos.utils.datetimeutil import to_datetime
 CORE_API = "http://supervisor/core/api"
 TOKEN = os.environ.get("SUPERVISOR_TOKEN")
 
-HEADERS = {
-    "Authorization": f"Bearer {TOKEN}",
-    "Content-Type": "application/json",
-}
-
 HOMEASSISTANT_ENTITY_ID_PREFIX = "sensor.eos_"
+
+
+def homeassistant_api(
+    base_url: Optional[str],
+    token: Optional[str],
+    settings_prefix: str = "adapter.homeassistant",
+) -> tuple[str, dict[str, str]]:
+    """Return the Home Assistant REST API base URL and request headers.
+
+    With ``base_url`` set, EOS connects to Home Assistant directly, e.g. when it
+    runs as a standalone container. The API URL is ``<base_url>/api`` and
+    ``token`` must be a long-lived access token. Without ``base_url`` the
+    Supervisor API of the Home Assistant add-on is used with the injected
+    ``SUPERVISOR_TOKEN``, and ``token`` is ignored.
+
+    Args:
+        base_url: Base URL of the Home Assistant instance, or None for the add-on.
+        token: Long-lived access token for the direct connection.
+        settings_prefix: Configuration path used in error messages.
+
+    Returns:
+        The API base URL and the request headers.
+
+    Raises:
+        RuntimeError: If no access token is available.
+    """
+    if base_url:
+        api = base_url.rstrip("/")
+        if not api.endswith("/api"):
+            api += "/api"
+        if not token:
+            raise RuntimeError(
+                f"'{settings_prefix}.token' is required when '{settings_prefix}.base_url' is set."
+            )
+        bearer = token
+    else:
+        api = CORE_API
+        bearer = TOKEN or ""
+        if not bearer:
+            raise RuntimeError(
+                "Missing SUPERVISOR_TOKEN environment variable. When EOS is not running as "
+                f"a Home Assistant add-on, set '{settings_prefix}.base_url' and "
+                f"'{settings_prefix}.token'."
+            )
+    return api, {"Authorization": f"Bearer {bearer}", "Content-Type": "application/json"}
 
 
 class HomeAssistantAdapterCommonSettings(SettingsBaseModel):
     """Common settings for the home assistant adapter."""
+
+    base_url: Optional[str] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "Base URL of the Home Assistant instance for a direct connection, e.g. when "
+                "EOS runs as a standalone container. Leave unset when EOS runs as a Home "
+                "Assistant add-on; the Supervisor API is used then."
+            ),
+            "examples": [None, "http://homeassistant.local:8123"],
+        },
+    )
+    token: Optional[str] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "Long-lived access token for the direct connection. Only used together "
+                "with `base_url`. Prefer the environment variable "
+                "EOS_ADAPTER__HOMEASSISTANT__TOKEN over storing it in the configuration file."
+            ),
+            "examples": [None],
+        },
+    )
 
     config_entity_ids: Optional[dict[str, str]] = Field(
         default=None,
@@ -230,6 +293,11 @@ class HomeAssistantAdapter(AdapterProvider):
         """Return the unique identifier for the adapter provider."""
         return "HomeAssistant"
 
+    def _api(self) -> tuple[str, dict[str, str]]:
+        """Return the API base URL and request headers of the configured connection."""
+        settings = self.config.adapter.homeassistant
+        return homeassistant_api(settings.base_url, settings.token)
+
     def get_homeassistant_entity_ids(self) -> list[str]:
         """Retrieve the available entity IDs from Home Assistant.
 
@@ -241,13 +309,12 @@ class HomeAssistantAdapter(AdapterProvider):
             >>> print(entity_ids)
             ["sensor.pv_all", "sensor.battery1_soc"]
         """
-        if not TOKEN:
-            raise RuntimeError("Missing SUPERVISOR_TOKEN environment variable.")
+        api, headers = self._api()
 
         entity_ids = []
 
-        url = f"{CORE_API}/states"
-        resp = requests.get(url, headers=HEADERS, timeout=10)
+        url = f"{api}/states"
+        resp = requests.get(url, headers=headers, timeout=10)
         if resp.ok:
             data = resp.json()
             entity_ids = [
@@ -331,12 +398,11 @@ class HomeAssistantAdapter(AdapterProvider):
         Example:
             >>> set_entity_state("sensor.energy_optimizer_status", "running")
         """
-        if not TOKEN:
-            raise RuntimeError("Missing SUPERVISOR_TOKEN environment variable.")
+        api, headers = self._api()
 
-        url = f"{CORE_API}/states/{entity_id}"
+        url = f"{api}/states/{entity_id}"
         data = {"state": state_value, "attributes": attributes or {}}
-        resp = requests.post(url, headers=HEADERS, json=data, timeout=10)
+        resp = requests.post(url, headers=headers, json=data, timeout=10)
         if resp.status_code not in (200, 201):
             error_msg = f"Failed to update {entity_id}: {resp.text}"
             logger.error(error_msg)
@@ -359,11 +425,10 @@ class HomeAssistantAdapter(AdapterProvider):
             >>> print(state)
             "on"
         """
-        if not TOKEN:
-            raise RuntimeError("Missing SUPERVISOR_TOKEN environment variable.")
+        api, headers = self._api()
 
-        url = f"{CORE_API}/states/{entity_id}"
-        resp = requests.get(url, headers=HEADERS, timeout=10)
+        url = f"{api}/states/{entity_id}"
+        resp = requests.get(url, headers=headers, timeout=10)
         if resp.ok:
             data = resp.json()
             debug_msg = f"{entity_id}: {data['state']}"

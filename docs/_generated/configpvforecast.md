@@ -524,10 +524,10 @@
 | Name | Type | Read-Only | Default | Description |
 | ---- | ---- | --------- | ------- | ----------- |
 | attribute | `str` | `rw` | `forecast` | Entity attribute holding the forecast list. |
-| base_url | `Optional[str]` | `rw` | `None` | Base URL of the Home Assistant instance. Only required when EOS is not running as a Home Assistant add-on (no SUPERVISOR_TOKEN available). |
+| base_url | `Optional[str]` | `rw` | `None` | Base URL of the Home Assistant instance. Only required when EOS is not running as a Home Assistant add-on (no SUPERVISOR_TOKEN available) and 'adapter.homeassistant.base_url' is not set. |
 | datetime_key | `str` | `rw` | `datetime` | Key for the timestamp in each forecast entry. |
 | entity_id | `str` | `rw` | `sensor.pv_forecast` | Home Assistant entity providing the PV forecast. |
-| token | `Optional[str]` | `rw` | `None` | Long-lived access token for the Home Assistant instance. Only required when EOS is not running as a Home Assistant add-on. |
+| token | `Optional[str]` | `rw` | `None` | Long-lived access token for the Home Assistant instance. Only required when EOS is not running as a Home Assistant add-on and 'adapter.homeassistant.base_url' is not set. |
 | value_key | `str` | `rw` | `watts` | Key for the AC power value in each forecast entry. |
 | value_unit | `Literal['W', 'kW']` | `rw` | `W` | Unit of the forecast value. Converted to W internally. |
 :::

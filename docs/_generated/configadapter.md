@@ -26,6 +26,8 @@
                "HomeAssistant"
            ],
            "homeassistant": {
+               "base_url": null,
+               "token": null,
                "config_entity_ids": null,
                "load_emr_entity_ids": null,
                "grid_export_emr_entity_ids": null,
@@ -56,6 +58,8 @@
                "HomeAssistant"
            ],
            "homeassistant": {
+               "base_url": null,
+               "token": null,
                "config_entity_ids": null,
                "load_emr_entity_ids": null,
                "grid_export_emr_entity_ids": null,
@@ -134,6 +138,7 @@ There are two URLs that are used:
 
 | Name | Type | Read-Only | Default | Description |
 | ---- | ---- | --------- | ------- | ----------- |
+| base_url | `Optional[str]` | `rw` | `None` | Base URL of the Home Assistant instance for a direct connection, e.g. when EOS runs as a standalone container. Leave unset when EOS runs as a Home Assistant add-on; the Supervisor API is used then. |
 | config_entity_ids | `Optional[dict[str, str]]` | `rw` | `None` | Mapping of EOS config keys to Home Assistant entity IDs.
 The config key has to be given by a ‘/’-separated path
 e.g. devices/batteries/0/capacity_wh |
@@ -151,6 +156,7 @@ E.g. The instruction for device id 'battery1' becomes the entity_id 'sensor.eos_
 | solution_entity_ids | `Optional[list[str]]` | `rw` | `None` | Entity IDs for optimization solution keys to be updated by EOS.
 The solution keys have to be prepended by 'sensor.eos_' to build the entity_id.
 E.g. solution key 'battery1_idle_op_mode' becomes the entity_id 'sensor.eos_battery1_idle_op_mode'. |
+| token | `Optional[str]` | `rw` | `None` | Long-lived access token for the direct connection. Only used together with `base_url`. Prefer the environment variable EOS_ADAPTER__HOMEASSISTANT__TOKEN over storing it in the configuration file. |
 :::
 <!-- pyml enable line-length -->
 
@@ -163,6 +169,8 @@ E.g. solution key 'battery1_idle_op_mode' becomes the entity_id 'sensor.eos_batt
    {
        "adapter": {
            "homeassistant": {
+               "base_url": null,
+               "token": null,
                "config_entity_ids": {
                    "devices/batteries/0/capacity_wh": "sensor.battery1_capacity"
                },
@@ -203,6 +211,8 @@ E.g. solution key 'battery1_idle_op_mode' becomes the entity_id 'sensor.eos_batt
    {
        "adapter": {
            "homeassistant": {
+               "base_url": null,
+               "token": null,
                "config_entity_ids": {
                    "devices/batteries/0/capacity_wh": "sensor.battery1_capacity"
                },

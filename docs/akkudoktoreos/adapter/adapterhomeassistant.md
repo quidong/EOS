@@ -37,8 +37,25 @@ Typical use cases in Home Assistant:
 
 #### 1. Enable and configure the Home Assistant adapter
 
-EOS must be configured with access to the Home Assistant API. It must be run
-as a Home Assistant add-on.
+EOS must be configured with access to the Home Assistant API.
+
+When EOS runs as a Home Assistant add-on, no connection settings are needed. EOS uses
+the Supervisor API with the token that the Supervisor injects into the add-on container.
+
+When EOS runs outside Home Assistant, e.g. as a standalone container, connect it to
+Home Assistant directly:
+
+* `adapter.homeassistant.base_url`: Base URL of the Home Assistant instance,
+  e.g. `http://homeassistant.local:8123`.
+* `adapter.homeassistant.token`: A long-lived access token, created in the Home Assistant
+  user profile under **Security**.
+
+Prefer to provide the token by the environment variable
+`EOS_ADAPTER__HOMEASSISTANT__TOKEN` instead of storing it in the configuration file.
+If `base_url` is not set, the add-on behaviour is used and `token` is ignored.
+
+The `PVForecastHomeAssistant` provider reuses this direct connection unless
+`pvforecast.homeassistant.base_url` and `token` are set.
 
 #### 2. Define source entity IDs
 

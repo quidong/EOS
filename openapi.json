@@ -11037,6 +11037,37 @@
       },
       "HomeAssistantAdapterCommonSettings-Input": {
         "properties": {
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url",
+            "description": "Base URL of the Home Assistant instance for a direct connection, e.g. when EOS runs as a standalone container. Leave unset when EOS runs as a Home Assistant add-on; the Supervisor API is used then.",
+            "examples": [
+              null,
+              "http://homeassistant.local:8123"
+            ]
+          },
+          "token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token",
+            "description": "Long-lived access token for the direct connection. Only used together with `base_url`. Prefer the environment variable EOS_ADAPTER__HOMEASSISTANT__TOKEN over storing it in the configuration file.",
+            "examples": [
+              null
+            ]
+          },
           "config_entity_ids": {
             "anyOf": [
               {
@@ -11213,6 +11244,37 @@
       },
       "HomeAssistantAdapterCommonSettings-Output": {
         "properties": {
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url",
+            "description": "Base URL of the Home Assistant instance for a direct connection, e.g. when EOS runs as a standalone container. Leave unset when EOS runs as a Home Assistant add-on; the Supervisor API is used then.",
+            "examples": [
+              null,
+              "http://homeassistant.local:8123"
+            ]
+          },
+          "token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token",
+            "description": "Long-lived access token for the direct connection. Only used together with `base_url`. Prefer the environment variable EOS_ADAPTER__HOMEASSISTANT__TOKEN over storing it in the configuration file.",
+            "examples": [
+              null
+            ]
+          },
           "config_entity_ids": {
             "anyOf": [
               {
@@ -14785,7 +14847,7 @@
               }
             ],
             "title": "Base Url",
-            "description": "Base URL of the Home Assistant instance. Only required when EOS is not running as a Home Assistant add-on (no SUPERVISOR_TOKEN available).",
+            "description": "Base URL of the Home Assistant instance. Only required when EOS is not running as a Home Assistant add-on (no SUPERVISOR_TOKEN available) and 'adapter.homeassistant.base_url' is not set.",
             "examples": [
               "http://homeassistant.local:8123"
             ]
@@ -14800,7 +14862,7 @@
               }
             ],
             "title": "Token",
-            "description": "Long-lived access token for the Home Assistant instance. Only required when EOS is not running as a Home Assistant add-on.",
+            "description": "Long-lived access token for the Home Assistant instance. Only required when EOS is not running as a Home Assistant add-on and 'adapter.homeassistant.base_url' is not set.",
             "examples": [
               null
             ]
