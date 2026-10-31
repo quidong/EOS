@@ -980,6 +980,11 @@ The following prediction keys are provided:
 - `pvforecast_ac_power`: Total AC power (W).
 - `pvforecast_dc_power`: Total DC power (W).
 
+The plane `loss` (sum of system losses in percent) reduces the DC power of
+the plane before the inverter model. The plane `inverter_paco` limits the AC
+power of that plane. If several planes share one inverter, set
+`pvforecast.pvlib.max_ac_power_w` to limit the summed AC power of all planes.
+
 Currently, the configuration options `userhorizon`, `optimalangles`, and
 tracking systems (`trackingtype != 0`) are ignored. If no `albedo` is
 configured, a default value of `0.2` is used.

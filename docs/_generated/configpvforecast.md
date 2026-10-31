@@ -78,7 +78,9 @@
                "base_url": null,
                "token": null
            },
-           "pvlib": {},
+           "pvlib": {
+               "max_ac_power_w": null
+           },
            "pvnode": {
                "api_key": "",
                "site_id": null,
@@ -194,7 +196,9 @@
                "base_url": null,
                "token": null
            },
-           "pvlib": {},
+           "pvlib": {
+               "max_ac_power_w": null
+           },
            "pvnode": {
                "api_key": "",
                "site_id": null,
@@ -401,6 +405,7 @@
 
 | Name | Type | Read-Only | Default | Description |
 | ---- | ---- | --------- | ------- | ----------- |
+| max_ac_power_w | `Optional[float]` | `rw` | `None` | Optional AC power limit of the whole PV system [W]. Use it when several planes share one inverter: the summed AC power of all planes is clipped to this value. Per-plane limits use `inverter_paco` of the plane. |
 :::
 <!-- pyml enable line-length -->
 
@@ -412,7 +417,9 @@
 ```json
    {
        "pvforecast": {
-           "pvlib": {}
+           "pvlib": {
+               "max_ac_power_w": null
+           }
        }
    }
 ```

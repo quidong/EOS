@@ -8,6 +8,7 @@ from typing import ClassVar, Literal, Optional, Union
 import numpy as np
 import pandas as pd
 from loguru import logger
+from pydantic import Field
 
 from akkudoktoreos.config.configabc import SettingsBaseModel
 from akkudoktoreos.core.coreabc import PredictionMixin, get_config
@@ -179,7 +180,18 @@ def _cec_inverters() -> pd.DataFrame:
 class PVForecastPVLibCommonSettings(SettingsBaseModel):
     """Common settings for pvforecast data calculation with PVLib."""
 
-    # Nothing in here
+    max_ac_power_w: Optional[float] = Field(
+        default=None,
+        gt=0,
+        json_schema_extra={
+            "description": (
+                "Optional AC power limit of the whole PV system [W]. Use it when several "
+                "planes share one inverter: the summed AC power of all planes is clipped "
+                "to this value. Per-plane limits use `inverter_paco` of the plane."
+            ),
+            "examples": [None, 20000],
+        },
+    )
 
 
 class PVForecastPVLib(PredictionMixin, PVForecastProvider):
@@ -313,20 +325,10 @@ class PVForecastPVLib(PredictionMixin, PVForecastProvider):
                     "optimalangles",
                     f"optimalangles is currently not supported by the {self.provider_id()} provider.",
                 )
-            if plane.loss not in (None, 0):
-                self._warn_once(
-                    "loss",
-                    f"loss is currently not supported by the {self.provider_id()} provider.",
-                )
             if plane.trackingtype not in (None, 0):
                 self._warn_once(
                     "trackingtype",
                     f"trackingtype is currently not supported by the {self.provider_id()} provider.",
-                )
-            if plane.inverter_paco is not None:
-                self._warn_once(
-                    "inverter_paco",
-                    f"inverter_paco is currently not supported by the {self.provider_id()} provider.",
                 )
             # - mandatory parameters
             if plane.surface_tilt is None:
@@ -365,6 +367,29 @@ class PVForecastPVLib(PredictionMixin, PVForecastProvider):
             else:
                 df_weather["albedo"] = plane.albedo
 
+            # `loss` is the PVGIS-style lump of soiling, mismatch, wiring and ageing
+            # in percent. Apply it to the DC power before the inverter model through
+            # pvlib's PVWatts loss model with all other components set to zero, so
+            # the configured value is the total loss.
+            loss = float(plane.loss) if plane.loss is not None else 0.0
+            if not 0.0 <= loss < 100.0:
+                raise ValueError(f"Plane {plane_idx}: loss must be in [0, 100), got {loss}.")
+            losses_parameters = dict.fromkeys(
+                (
+                    "shading",
+                    "snow",
+                    "mismatch",
+                    "wiring",
+                    "connections",
+                    "lid",
+                    "nameplate_rating",
+                    "age",
+                    "availability",
+                ),
+                0.0,
+            )
+            losses_parameters["soiling"] = loss
+
             system = PVSystem(
                 surface_tilt=plane.surface_tilt,
                 surface_azimuth=plane.surface_azimuth,
@@ -373,9 +398,15 @@ class PVForecastPVLib(PredictionMixin, PVForecastProvider):
                 temperature_model_parameters=temp_params,
                 modules_per_string=plane.modules_per_string,
                 strings_per_inverter=plane.strings_per_inverter,
+                losses_parameters=losses_parameters,
             )
 
-            mc = ModelChain(system, location, aoi_model="physical")
+            mc = ModelChain(
+                system,
+                location,
+                aoi_model="physical",
+                losses_model="pvwatts" if loss > 0.0 else "no_loss",
+            )
 
             # For testing split out parameter preparation
             # mc.prepare_inputs(df_weather)
@@ -404,8 +435,19 @@ class PVForecastPVLib(PredictionMixin, PVForecastProvider):
         )
         for plane_idx in range(len(self.config.pvforecast.planes)):
             result = run_single_config(plane_idx)
+            plane_ac = result.ac.fillna(0.0)
+            # Per-plane inverter rating. The CEC model selected by `inverter_model`
+            # may be rated higher than the real device.
+            paco = self.config.pvforecast.planes[plane_idx].inverter_paco
+            if paco is not None and paco > 0:
+                plane_ac = plane_ac.clip(upper=float(paco))
             df_pvforecast["pv_dc_power"] += result.dc["p_mp"].fillna(0.0)
-            df_pvforecast["ac_power"] += result.ac.fillna(0.0)
+            df_pvforecast["ac_power"] += plane_ac
+
+        # Planes that share one inverter: limit the system AC power.
+        max_ac = self.config.pvforecast.pvlib.max_ac_power_w
+        if max_ac is not None:
+            df_pvforecast["ac_power"] = df_pvforecast["ac_power"].clip(upper=float(max_ac))
 
         # replace any negative PV values with zero
         df_pvforecast["pv_dc_power"] = df_pvforecast["pv_dc_power"].clip(lower=0.0)

@@ -14853,7 +14853,25 @@
         "description": "Common settings for pvforecast data import from file or JSON string."
       },
       "PVForecastPVLibCommonSettings": {
-        "properties": {},
+        "properties": {
+          "max_ac_power_w": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Ac Power W",
+            "description": "Optional AC power limit of the whole PV system [W]. Use it when several planes share one inverter: the summed AC power of all planes is clipped to this value. Per-plane limits use `inverter_paco` of the plane.",
+            "examples": [
+              null,
+              20000
+            ]
+          }
+        },
         "type": "object",
         "title": "PVForecastPVLibCommonSettings",
         "description": "Common settings for pvforecast data calculation with PVLib."

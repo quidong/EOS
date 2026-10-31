@@ -1687,3 +1687,116 @@ class TestIntegration:
         result = provider._calculate_pvlib_power(weather)
 
         pd.testing.assert_index_equal(result.index, weather.index)
+
+
+# ---------------------------------------------------------------------------
+# Plane losses and AC limits
+# ---------------------------------------------------------------------------
+
+
+LOSS_TEST_PLANE = {
+    "surface_tilt": 20,
+    "surface_azimuth": 180,
+    "peakpower": 4.9,
+    "module_model": "AXITEC_AC_410MH_144S",
+    "inverter_model": "Sungrow__SH25T",
+    "modules_per_string": 12,
+    "strings_per_inverter": 1,
+}
+
+
+def _clear_sky_noon_weather(periods: int = 8) -> pd.DataFrame:
+    index = pd.date_range("2024-06-21 11:00", periods=periods, freq="15min", tz="Europe/Berlin")
+    return pd.DataFrame(
+        {
+            "ghi": [900.0] * periods,
+            "dni": [800.0] * periods,
+            "dhi": [100.0] * periods,
+            "temp_air": [20.0] * periods,
+            "wind_speed": [2.0] * periods,
+            "relative_humidity": [45.0] * periods,
+            "precipitable_water": [1.5] * periods,
+            "cloud_cover": [0.0] * periods,
+        },
+        index=index,
+    )
+
+
+class TestLossesAndLimits:
+    """Plane losses, per-plane inverter rating and the system AC limit."""
+
+    @staticmethod
+    def _calculate(config_eos, planes, pvlib=None) -> pd.DataFrame:
+        settings = {
+            "general": {"latitude": 52.52, "longitude": 13.405},
+            "prediction": {"hours": 48, "historic_hours": 24},
+            "pvforecast": {"provider": "PVForecastPVLib", "max_planes": 4, "planes": planes},
+        }
+        if pvlib is not None:
+            settings["pvforecast"]["pvlib"] = pvlib
+        config_eos.merge_settings_from_dict(settings)
+        PVForecastPVLib.reset_instance()
+        return PVForecastPVLib()._calculate_pvlib_power(_clear_sky_noon_weather())
+
+    def test_loss_reduces_dc_power_by_configured_percentage(self, config_eos):
+        """The plane loss scales the DC power by (1 - loss / 100)."""
+        base = self._calculate(config_eos, [{**LOSS_TEST_PLANE, "loss": 0.0}])
+        lossy = self._calculate(config_eos, [{**LOSS_TEST_PLANE, "loss": 14.0}])
+
+        ratio = lossy["pv_dc_power"].sum() / base["pv_dc_power"].sum()
+        assert ratio == pytest.approx(0.86, abs=1e-6)
+        # AC follows DC through the (slightly non-linear) inverter model.
+        ac_ratio = lossy["ac_power"].sum() / base["ac_power"].sum()
+        assert 0.84 < ac_ratio < 0.88
+
+    def test_zero_and_unset_loss_are_equal(self, config_eos):
+        """A loss of 0 and an unset loss give the same result."""
+        zero = self._calculate(config_eos, [{**LOSS_TEST_PLANE, "loss": 0.0}])
+        unset = self._calculate(config_eos, [{**LOSS_TEST_PLANE, "loss": None}])
+
+        pd.testing.assert_frame_equal(zero, unset)
+
+    @pytest.mark.parametrize("loss", [-1.0, 100.0])
+    def test_invalid_loss_is_rejected(self, config_eos, loss):
+        """Losses outside [0, 100) are rejected."""
+        with pytest.raises(ValueError, match="loss"):
+            self._calculate(config_eos, [{**LOSS_TEST_PLANE, "loss": loss}])
+
+    def test_inverter_paco_clips_plane_ac_power(self, config_eos):
+        """The per-plane inverter rating clips AC power but leaves DC power unchanged."""
+        unlimited = self._calculate(config_eos, [{**LOSS_TEST_PLANE, "loss": 0.0}])
+        assert unlimited["ac_power"].max() > 2000
+
+        limited = self._calculate(
+            config_eos, [{**LOSS_TEST_PLANE, "loss": 0.0, "inverter_paco": 2000}]
+        )
+
+        assert limited["ac_power"].max() == pytest.approx(2000.0)
+        pd.testing.assert_series_equal(limited["pv_dc_power"], unlimited["pv_dc_power"])
+
+    def test_max_ac_power_clips_planes_sharing_one_inverter(self, config_eos):
+        """The system AC limit clips the summed AC power of all planes."""
+        east = {**LOSS_TEST_PLANE, "loss": 0.0, "surface_azimuth": 90}
+        west = {**LOSS_TEST_PLANE, "loss": 0.0, "surface_azimuth": 270}
+        unlimited = self._calculate(config_eos, [east, west])
+        cap = 0.8 * unlimited["ac_power"].max()
+
+        limited = self._calculate(config_eos, [east, west], pvlib={"max_ac_power_w": cap})
+
+        assert limited["ac_power"].max() == pytest.approx(cap)
+        assert (limited["ac_power"] <= unlimited["ac_power"] + 1e-9).all()
+        pd.testing.assert_series_equal(limited["pv_dc_power"], unlimited["pv_dc_power"])
+
+    def test_max_ac_power_must_be_positive(self):
+        """A non-positive system AC limit is rejected."""
+        with pytest.raises(ValueError):
+            PVForecastPVLibCommonSettings(max_ac_power_w=0)
+
+    def test_supported_options_do_not_warn(self, config_eos, caplog):
+        """Loss and inverter_paco no longer log an unsupported-feature warning."""
+        PVForecastPVLib._warned_features.clear()
+
+        self._calculate(config_eos, [{**LOSS_TEST_PLANE, "loss": 10.0, "inverter_paco": 5000}])
+
+        assert "loss is currently not supported" not in caplog.text
+        assert "inverter_paco is currently not supported" not in caplog.text

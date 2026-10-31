@@ -345,7 +345,9 @@
                "base_url": null,
                "token": null
            },
-           "pvlib": {},
+           "pvlib": {
+               "max_ac_power_w": null
+           },
            "pvnode": {
                "api_key": "",
                "site_id": null,
