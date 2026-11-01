@@ -34,6 +34,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Optional, Sequence
 
 from loguru import logger
@@ -173,6 +174,16 @@ class GeneticHeatPumpParameters(GeneticParametersBaseModel):
         le=1,
         json_schema_extra={
             "description": "RL29 fork: share of the monitored windows open now (0..1)."
+        },
+    )
+    ventilation_fixed: Optional[dict[str, Optional[str]]] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: decided airing recommendations per local day (ISO date): the "
+                "slot start (ISO) that was already announced, or None for no "
+                "recommendation that day. Other days are chosen in the run."
+            )
         },
     )
     room_min_margin_k: Optional[float] = Field(
@@ -1255,17 +1266,30 @@ def _apply_zone_setback_and_ventilation(
                 continue
             if vent.recommend_start_hour <= start.hour < vent.recommend_end_hour:
                 by_day.setdefault(start.date(), []).append(i)
-        for candidates in by_day.values():
+        fixed = parameters.ventilation_fixed or {}
+        for day, candidates in by_day.items():
+            key = day.isoformat()
+            if key in fixed:
+                # Decided earlier (announced slot, or already aired): keep it, no new slot.
+                announced = fixed[key]
+                if announced is None:
+                    continue
+                stamp = datetime.fromisoformat(announced).timestamp()
+                match = [i for i in candidates if abs(slot_starts[i].timestamp() - stamp) < 1.0]
+                if not match:
+                    continue  # the announced slot has passed
+                best = match[0]
+            else:
 
-            def score(i: int) -> tuple[float, float]:
-                surplus = (
-                    float(pv_surplus_w[i])
-                    if pv_surplus_w is not None and i < len(pv_surplus_w)
-                    else 0.0
-                )
-                return (inputs[i].outdoor_c, surplus)
+                def score(i: int) -> tuple[float, float]:
+                    surplus = (
+                        float(pv_surplus_w[i])
+                        if pv_surplus_w is not None and i < len(pv_surplus_w)
+                        else 0.0
+                    )
+                    return (inputs[i].outdoor_c, surplus)
 
-            best = max(candidates, key=score)
+                best = max(candidates, key=score)
             vent_slots[best] = True
             # plan the recommended airing on top of what the profile expects in the window
             expected = sum(vent.open_hours(slot_starts[i]) * slot_hours for i in candidates)

@@ -593,6 +593,62 @@ class ConfigOptimizationRequest(
             return None
         return {**entry, "program": code}
 
+    async def _ventilation_fixed(
+        self, device: Any, observation_time: DateTime
+    ) -> dict[str, Optional[str]]:
+        """Airing recommendations already decided for the days (RL29 fork).
+
+        An announced slot stays for its day; a day on which enough windows were
+        already open in the window gets none (see ``heatpumpventilation``).
+        """
+        from akkudoktoreos.devices.heatpumpventilation import (
+            VentilationStore,
+            _as_aware,
+            aired_in_window,
+            fixed_days,
+            store_path,
+        )
+
+        vent = device.ventilation
+        now = _as_aware(observation_time.in_timezone(self.config.general.timezone))
+        aired = False
+        if vent.recommend_skip_aired_share is not None:
+            day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            begin = day_start.replace(hour=vent.recommend_start_hour)
+            samples: list[tuple[Any, float]] = []
+            try:
+                dates, values = await self.measurement.key_to_lists(
+                    key=device.measurement_key_window_open,
+                    start_datetime=observation_time.subtract(
+                        seconds=max(0.0, (now - begin).total_seconds()) + 12 * 3600
+                    ),
+                    end_datetime=observation_time.add(seconds=1),
+                    dropna=True,
+                )
+                samples = [
+                    (date, float(value))
+                    for date, value in zip(dates, values)
+                    if value is not None and math.isfinite(float(value))
+                ]
+            except (KeyError, ValueError):
+                samples = []
+            aired = aired_in_window(
+                samples,
+                day_start,
+                vent.recommend_start_hour,
+                vent.recommend_end_hour,
+                now,
+                vent.recommend_skip_aired_share,
+            )
+            if aired:
+                logger.info(
+                    "Heat pump {}: windows already aired today, no airing recommendation.",
+                    device.device_id,
+                )
+        folder = self.config.general.data_folder_path
+        store = VentilationStore(store_path(Path(folder))) if folder is not None else None
+        return fixed_days(store, device.device_id, now, aired)
+
     async def _latest_measurement(
         self, key: str, observation_time: DateTime, max_age_seconds: float
     ) -> Optional[float]:
@@ -814,6 +870,12 @@ class ConfigOptimizationRequest(
                         device.device_id,
                         window_share * 100,
                     )
+        ventilation_fixed: Optional[dict[str, Optional[str]]] = None
+        if device.ventilation.enabled and device.ventilation.recommend:
+            try:
+                ventilation_fixed = await self._ventilation_fixed(device, observation_time)
+            except Exception as exc:  # the memory must never cancel the optimization
+                logger.warning("Heat pump {}: airing memory skipped: {}", device.device_id, exc)
         # Per-room margins and humidity reported by the controller (fork), both optional.
         min_margin: Optional[float] = None
         max_margin: Optional[float] = None
@@ -886,6 +948,7 @@ class ConfigOptimizationRequest(
             humidity_pct=humidity,
             setback_room_c=setback_room,
             window_open_share=window_share,
+            ventilation_fixed=ventilation_fixed,
             away=away,
             away_until=away_until if away else None,
             away_room_c=away_room,

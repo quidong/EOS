@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2610300998040469"
+    "version": "v0.3.0.dev2611011571546813"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -10295,6 +10295,28 @@
             "title": "Window Open Share",
             "description": "RL29 fork: share of the monitored windows open now (0..1)."
           },
+          "ventilation_fixed": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ventilation Fixed",
+            "description": "RL29 fork: decided airing recommendations per local day (ISO date): the slot start (ISO) that was already announced, or None for no recommendation that day. Other days are chosen in the run."
+          },
           "room_min_margin_k": {
             "anyOf": [
               {
@@ -12985,11 +13007,30 @@
             "examples": [
               0.15
             ]
+          },
+          "recommend_skip_aired_share": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recommend Skip Aired Share",
+            "description": "No recommendation for the rest of the day once at least this share of the monitored windows was open in today's window; None = never skip.",
+            "default": 0.7,
+            "examples": [
+              0.7,
+              null
+            ]
           }
         },
         "type": "object",
         "title": "HeatPumpVentilationSettings",
-        "description": "Window ventilation (RL29 fork).\n\nThe controller reports ``<device_id>-window-open``: the share of the monitored\nwindows that are open (0..1). Airing removes heat with ``loss_w_per_k`` times\nthe open share times (room - outdoor temperature). The expected airing per\nhour of day is the profile (open share x hours); the calibration learns it\nfrom the window measurement and takes the measured airing out of the building\nbalance, so ``building.loss_w_per_k`` stays the closed-window loss. Slots with\nopen windows are left out of the plan-versus-actual room comparison.\n\nWith ``recommend`` EOS picks one slot per day in the midday window\n(warmest outdoor temperature, ties by PV surplus) and plans the airing there;\nthe solution column ``<device_id>_ventilate`` is 1 in that slot, for a\nnotification."
+        "description": "Window ventilation (RL29 fork).\n\nThe controller reports ``<device_id>-window-open``: the share of the monitored\nwindows that are open (0..1). Airing removes heat with ``loss_w_per_k`` times\nthe open share times (room - outdoor temperature). The expected airing per\nhour of day is the profile (open share x hours); the calibration learns it\nfrom the window measurement and takes the measured airing out of the building\nbalance, so ``building.loss_w_per_k`` stays the closed-window loss. Slots with\nopen windows are left out of the plan-versus-actual room comparison.\n\nWith ``recommend`` EOS picks one slot per day in the midday window\n(warmest outdoor temperature, ties by PV surplus) and plans the airing there;\nthe solution column ``<device_id>_ventilate`` is 1 in that slot, for a\nnotification. Once the slot has started it is kept for the day (no new slot\nin later runs), and a day on which ``recommend_skip_aired_share`` of the\nwindows were already open in the window gets no recommendation."
       },
       "HeatPumpWeatherWarningSettings": {
         "properties": {

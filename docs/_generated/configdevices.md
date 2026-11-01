@@ -485,7 +485,8 @@ config path from ``self.device_id`` without needing an external index.
                        "recommend": false,
                        "recommend_start_hour": 11,
                        "recommend_end_hour": 15,
-                       "recommend_open_hours": 0.15
+                       "recommend_open_hours": 0.15,
+                       "recommend_skip_aired_share": 0.7
                    },
                    "room_limits": {
                        "enabled": false,
@@ -1013,7 +1014,8 @@ config path from ``self.device_id`` without needing an external index.
                        "recommend": false,
                        "recommend_start_hour": 11,
                        "recommend_end_hour": 15,
-                       "recommend_open_hours": 0.15
+                       "recommend_open_hours": 0.15,
+                       "recommend_skip_aired_share": 0.7
                    },
                    "room_limits": {
                        "enabled": false,

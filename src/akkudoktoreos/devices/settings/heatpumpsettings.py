@@ -810,7 +810,9 @@ class HeatPumpVentilationSettings(SettingsBaseModel):
     With ``recommend`` EOS picks one slot per day in the midday window
     (warmest outdoor temperature, ties by PV surplus) and plans the airing there;
     the solution column ``<device_id>_ventilate`` is 1 in that slot, for a
-    notification.
+    notification. Once the slot has started it is kept for the day (no new slot
+    in later runs), and a day on which ``recommend_skip_aired_share`` of the
+    windows were already open in the window gets no recommendation.
     """
 
     enabled: bool = Field(
@@ -861,6 +863,18 @@ class HeatPumpVentilationSettings(SettingsBaseModel):
         json_schema_extra={
             "description": "Airing planned in the recommended slot: open share x hours.",
             "examples": [0.15],
+        },
+    )
+    recommend_skip_aired_share: Optional[float] = Field(
+        default=0.7,
+        ge=0,
+        le=1,
+        json_schema_extra={
+            "description": (
+                "No recommendation for the rest of the day once at least this share of the "
+                "monitored windows was open in today's window; None = never skip."
+            ),
+            "examples": [0.7, None],
         },
     )
 

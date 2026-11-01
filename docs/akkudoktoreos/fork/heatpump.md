@@ -215,7 +215,11 @@ violations. Solution key `<id>_zone_setback` tells the controller when.
 `ventilation`: `<id>-window-open` (share of open windows, 0…1) is an extra room loss
 (`loss_w_per_k` × share × (room − outdoor)); the expected airing per hour (`profile`) is learned by the
 calibration. With `recommend`, EOS picks one slot per day for airing (warmest, most PV surplus) and
-publishes `<id>_ventilate`.
+publishes `<id>_ventilate`. The slot is remembered in `<data folder>/rl29/heatpump_ventilation.json`:
+until it starts a newer forecast may move it, once it has started it is final and later runs of the
+day recommend nothing else (before, the afternoon runs marked the current slot again and again). A day
+on which at least `recommend_skip_aired_share` (default 0.7) of the windows were already open in the
+window (`recommend_start_hour` … `recommend_end_hour`) gets no recommendation; `None` turns that off.
 
 ## Room limits and humidity
 

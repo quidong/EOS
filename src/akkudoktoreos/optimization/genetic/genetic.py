@@ -1293,6 +1293,12 @@ class GeneticOptimization(OptimizationBase):
             for device in heat_pumps
             if getattr(device.settings, "calibration", None) and device.settings.calibration.enabled
         }
+        # RL29 fork: heat pumps with an airing recommendation keep the slot of the day.
+        self._hp_record_ventilation_ids = {
+            device.device_id
+            for device in heat_pumps
+            if device.settings.ventilation.enabled and device.settings.ventilation.recommend
+        }
         self._hp_slot_starts = starts
         # A load forecast that still contains the heat pump would count it
         # twice: subtract the status quo consumption.
@@ -4723,6 +4729,17 @@ class GeneticOptimization(OptimizationBase):
                 logger.info(
                     "Heat pump {}: {}", plan.device_id, heat_pump_results[plan.device_id]["summary"]
                 )
+                # RL29 fork: remember the announced airing slot of the day.
+                if plan.device_id in getattr(self, "_hp_record_ventilation_ids", set()):
+                    from akkudoktoreos.devices.heatpumpventilation import record_ventilation
+
+                    record_ventilation(
+                        plan.device_id,
+                        Path(self.config.general.data_folder_path),
+                        self.ems.observation_datetime or self.ems.start_datetime,
+                        getattr(self, "_hp_slot_starts", []),
+                        heat_pump_results[plan.device_id].get("ventilate") or [],
+                    )
                 if plan.device_id in getattr(self, "_hp_record_plan_ids", set()):
                     from akkudoktoreos.devices.heatpumpplanactual import record_plan
 
