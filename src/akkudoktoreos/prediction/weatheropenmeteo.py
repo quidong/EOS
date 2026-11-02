@@ -6,6 +6,8 @@ humidity, cloud cover, and solar irradiance. The data is mapped to the `WeatherD
 format, enabling consistent access to forecasted and historical weather attributes.
 """
 
+import math
+import time
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -15,7 +17,12 @@ from loguru import logger
 
 from akkudoktoreos.core.cache import cache_in_file
 from akkudoktoreos.prediction.weatherabc import WeatherDataRecord, WeatherProvider
-from akkudoktoreos.utils.datetimeutil import to_datetime, to_duration
+from akkudoktoreos.utils.datetimeutil import compare_datetimes, to_datetime, to_duration
+
+# Open-Meteo answers 503 when it is overloaded or rotates its model runs and 429 when
+# the free tier is briefly saturated. Both usually clear within seconds.
+OPENMETEO_RETRYABLE_STATUS = (429, 500, 502, 503, 504)
+OPENMETEO_ATTEMPTS = 3
 
 WeatherDataOpenMeteoMapping: List[Tuple[str, Optional[str], Optional[Union[str, float]]]] = [
     # openmeteo_key, description, corr_factor
@@ -181,8 +188,25 @@ class WeatherOpenMeteo(WeatherProvider):
 
         logger.debug(f"Open-Meteo Request params: {params}")
 
-        response = requests.get(source, params=params, timeout=10)
-        response.raise_for_status()  # Raise an error for bad responses
+        response = None
+        for attempt in range(1, OPENMETEO_ATTEMPTS + 1):
+            try:
+                response = requests.get(source, params=params, timeout=10)
+                response.raise_for_status()  # Raise an error for bad responses
+                break
+            except requests.RequestException as e:
+                status = getattr(getattr(e, "response", None), "status_code", None)
+                retryable = status is None or status in OPENMETEO_RETRYABLE_STATUS
+                if not retryable or attempt == OPENMETEO_ATTEMPTS:
+                    raise
+                logger.warning(
+                    "Open-Meteo weather request attempt {}/{} failed: {}",
+                    attempt,
+                    OPENMETEO_ATTEMPTS,
+                    e,
+                )
+                time.sleep(2 * attempt)
+        assert response is not None  # noqa: S101
         logger.debug(f"Response from {source}: {response.status_code}")
 
         openmeteo_data = response.json()
@@ -241,6 +265,18 @@ class WeatherOpenMeteo(WeatherProvider):
             raise ValueError(error_msg)
         await self.key_from_series(key, data)
 
+    async def _holds_usable_forecast(self) -> bool:
+        """Whether a finite air temperature remains at or after the run start."""
+        dates, values = await self.key_to_lists(
+            "weather_temp_air", start_datetime=self.ems_start_datetime
+        )
+        return any(
+            compare_datetimes(date, self.ems_start_datetime).ge
+            and value is not None
+            and math.isfinite(float(value))
+            for date, value in zip(dates, values)
+        )
+
     async def _update_data(self, force_update: Optional[bool] = False) -> None:
         """Update forecast data in the WeatherDataRecord format.
 
@@ -253,7 +289,23 @@ class WeatherOpenMeteo(WeatherProvider):
         import pvlib
 
         # Retrieve Open-Meteo weather data for the given coordinates
-        openmeteo_data = self._request_forecast(force_update=force_update)  # type: ignore
+        try:
+            openmeteo_data = self._request_forecast(force_update=force_update)  # type: ignore
+        except Exception as exc:
+            if not await self._holds_usable_forecast():
+                # Cold start: nothing to fall back to, the caller must see the failure.
+                raise
+            # RL29: an Open-Meteo outage (e.g. 503 "overloaded") must not fail the
+            # prediction update. An enabled provider that raises stops the container
+            # update and cancels the whole optimization. The previous forecast stays
+            # in the store; consumers still check that it covers their window.
+            logger.warning(
+                "Open-Meteo weather update failed ({}); keeping the forecast from the "
+                "previous run until {}.",
+                exc,
+                await self.max_datetime(),
+            )
+            return
 
         # Create key mapping from the description
         openmeteo_key_mapping: Dict[str, Tuple[Optional[str], Optional[Union[str, float]]]] = {}

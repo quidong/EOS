@@ -57,3 +57,13 @@ forecast from what was known then. The model is used only if it beats the provid
 
 Backtest on real German day-ahead prices (15 minutes, site weather, 14 holdout days): mean absolute error
 4.0–4.3 ct/kWh instead of 5.1 ct/kWh with ETS (−15 to −25 %).
+
+## Weather outages (`WeatherOpenMeteo`)
+
+Open-Meteo sometimes answers `503 Service Unavailable` ("The service is overloaded") or `429`. The weather
+provider retries such answers (and connection errors) three times with a short pause. If the API still fails
+and the store holds a finite air temperature at or after the run start, the provider keeps the forecast from
+the previous run and logs a warning instead of raising. Before, the failing provider stopped the prediction
+update and every GENETIC run was cancelled ("Parameter preparation failed") until Open-Meteo recovered.
+A cold start without stored data still fails, and the optimization still checks that PV, load and prices
+cover the control horizon.
