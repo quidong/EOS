@@ -60,8 +60,8 @@ Legionella runs (`dhw.legionella_c`, `dhw.legionella_interval_days`) are planned
 option that reaches the temperature; without one, no run is planned and the log says so.
 
 The objective contains, besides the energy costs: comfort shortfall (`optimization.comfort_penalty_amt_per_kh`),
-overheating, hot water below its minimum, a missed legionella run, mode changes and active modes without
-effect, and the **value of the heat stored at the horizon end** (it replaces heat produced later in the
+overheating, hot water below its minimum, a missed legionella run, mode changes (also against the mode the
+previous plan set for now, see plan stability) and active modes without effect, and the **value of the heat stored at the horizon end** (it replaces heat produced later in the
 cheapest hours: mean of the cheapest `stored_heat_price_quantile` of the marginal prices, divided by the COP).
 
 ## Interface to the controller
@@ -118,9 +118,10 @@ One working mapping (SG Ready contacts plus room thermostats):
 Recommended rules in the controller, independent of EOS:
 
 - plan missing or older than 45 min → NORMAL;
-- no reduction while a room is below a lower limit (with hysteresis; rooms with open windows excluded),
-  no raising while the warmest room is above an upper limit – report the margins to EOS as well
-  (see room limits below), so the plan already respects them;
+- report the per-room margins, humidity and a manual reduction lock to EOS (see room limits below)
+  and execute a fresh plan as it is: EOS plans with these limits. A controller that overrides the
+  plan (e.g. no reduction while a room is cold, with its own hysteresis) disagrees with the plan and
+  makes the executed mode jump; report such rooms instead;
 - maximum duration of a reduction, minimum holding time per mode, a daily limit of switchings and
   hot water charges;
 - manual changes at the unit pause the automation and notify;
@@ -220,6 +221,26 @@ until it starts a newer forecast may move it, once it has started it is final an
 day recommend nothing else (before, the afternoon runs marked the current slot again and again). A day
 on which at least `recommend_skip_aired_share` (default 0.7) of the windows were already open in the
 window (`recommend_start_hour` … `recommend_end_hour`) gets no recommendation; `None` turns that off.
+
+## Plan stability
+
+EOS replans every few minutes. Three rules keep the running mode from flipping with every run:
+
+- **Change against the running mode.** The mode the previous plan set for now (heating and hot
+  water) is passed to the run; a plan that starts with another mode pays
+  `optimization.mode_change_penalty_amt` like any other change (example: 0.05). A switch therefore
+  has to save more than the penalty; marginal differences of a stochastic search no longer flip it.
+- **Gene periods on full hours.** With 15 minute slots one gene controls one hour. The periods start
+  on full hours (the first one is shorter, the last one longer), so runs at :15, :30 and :45 keep the
+  same period boundaries and the warm start of the previous run fits slot for slot.
+- **One planned hot water charge per block.** `HEAT_PUMP` charges the tank once to the setpoint, as the
+  controller switches the push contact once per block; the model no longer tops the tank up for every
+  few tenths of a kelvin (that drew a saw tooth into the planned hot water temperature). Below
+  setpoint − hysteresis the heat pump's own controller still reheats.
+
+The controller's measurements must be younger than `optimization.genetic.measurement_max_age_seconds`;
+set it above the controller's sending interval (example: 900 s for a 5 minute interval), otherwise
+runs start from model defaults (room setpoint, tank setpoint − hysteresis/2) and the plan jumps.
 
 ## Room limits and humidity
 

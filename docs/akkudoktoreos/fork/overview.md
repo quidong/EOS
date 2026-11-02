@@ -52,8 +52,9 @@ Optional services (history database, MCP server) are described on their pages.
 - **EOS plans, the controller executes.** EOS decides *what* a device should do (a mode per slot).
   How that reaches the device (relay contacts, Modbus, KNX, a manufacturer API) is the job of the
   controller, typically Home Assistant. EOS knows no contacts, registers or group addresses.
-- **Safety in the controller.** Fallbacks when the plan is missing, comfort limits, emergency rules and
-  manual overrides belong into the controller, so that a failing EOS never leaves a house cold.
+- **Safety in the controller, planning in EOS.** Fallbacks when the plan is missing, emergency rules and
+  manual overrides belong into the controller, so that a failing EOS never leaves a house cold. Comfort
+  limits are passed to EOS as measurements and planned with; a fresh plan is executed as it is.
 
 ## Testing and updating
 

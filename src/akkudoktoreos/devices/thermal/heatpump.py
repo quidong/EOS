@@ -206,6 +206,10 @@ class ThermalState:
     """The heat pump is in its standby operating mode (RL29 fork)."""
     charge_target_c: Optional[float] = None
     """Target of an active restart charge (RL29 fork); None = the normal setpoint."""
+    dhw_push_done: bool = False
+    """RL29 fork: the planned hot water charge of the current ``HEAT_PUMP`` block has
+    reached the setpoint. The push is one charge (Home Assistant switches DE2 once);
+    the tank is not topped up again for every few tenths of a kelvin it cools down."""
 
     def copy(self) -> "ThermalState":
         return ThermalState(
@@ -216,6 +220,7 @@ class ThermalState:
             self.hp_dhw_forced,
             self.standby,
             self.charge_target_c,
+            self.dhw_push_done,
         )
 
 
@@ -530,7 +535,9 @@ class HeatPumpSystem:
             # Restart charge: the heat pump's own decision, not the plan's.
             charge_target = hp_setpoint
             forced_dhw = True
-        elif (dhw_mode == DhwMode.HEAT_PUMP or raised_dhw) and state.dhw_c < hp_setpoint - 0.2:
+        elif (
+            (dhw_mode == DhwMode.HEAT_PUMP and not state.dhw_push_done) or raised_dhw
+        ) and state.dhw_c < hp_setpoint - 0.2:
             hp_dhw_active = True
         elif hp_dhw_active and dhw_mode != DhwMode.HEAT_PUMP:
             # Own controller reheats below the switch-on temperature; the whole
@@ -671,6 +678,8 @@ class HeatPumpSystem:
         still_charging = hp_dhw_active and dhw < hp_setpoint - 0.1
         still_forced = still_charging and forced_dhw
         next_target = charge_target if still_charging else None
+        # One planned charge per HEAT_PUMP block: done once it no longer continues.
+        push_done = dhw_mode == DhwMode.HEAT_PUMP and (state.dhw_push_done or not still_charging)
 
         comfort_violation = max(0.0, inputs.comfort_min_c - room) * dt
         overheat = max(0.0, room - self.comfort_band(inputs)[2]) * dt
@@ -679,7 +688,14 @@ class HeatPumpSystem:
 
         return SlotResult(
             state=ThermalState(
-                slab, room, dhw, still_charging, still_forced, in_standby, next_target
+                slab,
+                room,
+                dhw,
+                still_charging,
+                still_forced,
+                in_standby,
+                next_target,
+                push_done,
             ),
             hp_electric_wh=hp_el_w * dt,
             rod_electric_wh=rod_w * dt,

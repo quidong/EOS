@@ -230,18 +230,18 @@ def decide(data: ControlInput, settings: Settings) -> Decision:
             sg = settings.sg_by_mode.get(mode, 2)
         decision.sg_target = sg
         decision.reason = f"{MODE_NAMES.get(mode, mode)} -> SG {sg}"
+        # EOS plans with the room limits, humidity and margins it receives: a fresh
+        # plan is executed as it is. Only a manual reduction lock and missing room
+        # data (no basis for the plan) still keep NORMAL; rooms outside their limits
+        # are reported as a note, not overridden.
         if sg == 1:
             blocked = _reduction_blocked(data, settings, decision)
             if blocked:
                 decision.sg_target = 2
                 decision.reason = f"NORMAL instead of {MODE_NAMES.get(mode, mode)}: {blocked}"
-        elif sg >= 3 and decision.warmest_temp is not None:
-            if decision.warmest_temp >= settings.max_room_c:
-                decision.sg_target = 2
-                decision.reason = (
-                    f"NORMAL instead of {MODE_NAMES.get(mode, mode)}: {decision.warmest_room} "
-                    f"{decision.warmest_temp:.1f} degC >= {settings.max_room_c:.1f} degC"
-                )
+        notes = _plan_notes(data, settings, decision, sg)
+        if notes:
+            decision.reason += f" (note: {notes})"
 
     # -- Holiday: standby and hot water ----------------------------------
     if data.holiday:
@@ -349,32 +349,48 @@ def _room_figures(data: ControlInput, settings: Settings, decision: Decision) ->
 
 
 def _reduction_blocked(data: ControlInput, settings: Settings, decision: Decision) -> str:
-    """Reason why REDUCED (SG 1) must not run now, empty = allowed."""
+    """Reason why REDUCED (SG 1) must not run now, empty = allowed.
+
+    Only conditions EOS cannot plan with: too few room values (the plan has no room
+    basis) and the manual reduction lock.
+    """
     if decision.valid_rooms < settings.min_valid_rooms:
         return f"only {decision.valid_rooms} room values (< {settings.min_valid_rooms})"
-    if decision.humidity_warning:
-        return "humidity warning"
     if (
         not data.holiday
         and data.reduction_locked_until is not None
         and data.now < data.reduction_locked_until
     ):
         return f"reduction locked until {data.reduction_locked_until:%H:%M}"
-    running = data.sg_actual == 1
+    return ""
+
+
+def _plan_notes(data: ControlInput, settings: Settings, decision: Decision, sg: int) -> str:
+    """Rooms outside their limits while the plan runs (information only)."""
     zone_active = _zone_active(data)
     cold: list[str] = []
     for room in data.rooms:
         if room.temperature is None or room.airing:
             continue
         limit = _lower_limit(room, data, settings, zone_active)
-        if not data.holiday and not (zone_active and room.in_zone):
-            limit += 0.0 if running else settings.reduction_hysteresis_k
         if room.temperature < limit:
             cold.append(f"{room.name} {room.temperature:.1f} < {limit:.1f}")
     decision.cold_rooms = cold
-    if cold:
-        return "too cold: " + ", ".join(cold)
-    return ""
+    notes: list[str] = []
+    if cold and sg == 1:
+        notes.append("below limit: " + ", ".join(cold))
+    if decision.humidity_warning and sg == 1:
+        notes.append("humidity warning")
+    if (
+        sg >= 3
+        and decision.warmest_temp is not None
+        and decision.warmest_temp >= settings.max_room_c
+    ):
+        notes.append(
+            f"{decision.warmest_room} {decision.warmest_temp:.1f} degC >= "
+            f"{settings.max_room_c:.1f} degC"
+        )
+    return "; ".join(notes)
 
 
 def _mode_name(mode: Optional[int]) -> str:

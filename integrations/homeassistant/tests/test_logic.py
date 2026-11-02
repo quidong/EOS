@@ -102,19 +102,22 @@ def test_not_heating_season_is_normal():
     assert run([0] * 4, heating_season=False).sg_target == 2
 
 
-def test_reduction_needs_every_room_above_its_limit_plus_hysteresis():
-    d = run([0] * 4, rooms(21.0, 19.8, 21.2))
-    assert d.sg_target == 2 and "r1 19.8 < 20.0" in d.reason
-    # running reduction ends only below the limit itself
-    assert run([0] * 4, rooms(21.0, 19.8, 21.2), sg_actual=1).sg_target == 1
-    assert run([0] * 4, rooms(21.0, 19.4, 21.2), sg_actual=1).sg_target == 2
+def test_a_fresh_plan_is_executed_even_with_a_room_below_its_limit():
+    """EOS plans with the room margins; HA only reports a cold room (2026-11-02)."""
+    d = run([0] * 4, rooms(21.0, 19.4, 21.2))
+    assert d.sg_target == 1
+    assert "note: below limit: r1 19.4 < 19.5" in d.reason
+    assert d.cold_rooms == ["r1 19.4 < 19.5"]
+    # no hysteresis note above the limit itself
+    assert "note" not in run([0] * 4, rooms(21.0, 19.8, 21.2)).reason
 
 
 def test_per_room_limits():
     office = logic.RoomState("office", 17.0, lower_c=16.5, upper_c=22.0)
-    assert run([0] * 4, rooms(21.0, 21.0) + [office]).sg_target == 1
+    assert "note" not in run([0] * 4, rooms(21.0, 21.0) + [office]).reason
     office.lower_c = 19.5
-    assert run([0] * 4, rooms(21.0, 21.0) + [office]).sg_target == 2
+    d = run([0] * 4, rooms(21.0, 21.0) + [office])
+    assert d.sg_target == 1 and "office 17.0 < 19.5" in d.reason
 
 
 def test_airing_rooms_are_not_too_cold():
@@ -125,10 +128,11 @@ def test_airing_rooms_are_not_too_cold():
     assert d.room_min_margin_k == pytest.approx(1.5)  # aired room left out of the margin
 
 
-def test_humidity_warning_and_too_few_rooms_block_reduction():
+def test_humidity_is_a_note_and_too_few_rooms_block_reduction():
     humid = rooms(21.0, 21.0)
     humid[0].humidity_high = True
-    assert run([0] * 4, humid).sg_target == 2
+    d = run([0] * 4, humid)
+    assert d.sg_target == 1 and "humidity warning" in d.reason
     settings = logic.Settings(min_valid_rooms=3)
     assert "only 2 room values" in run([0] * 4, rooms(21.0, 21.0), settings=settings).reason
 
@@ -139,18 +143,19 @@ def test_reduction_lock():
     assert run([0] * 4, reduction_locked_until=NOW - timedelta(minutes=1)).sg_target == 1
 
 
-def test_raising_stops_at_the_warmest_room():
+def test_raising_above_the_warmest_room_limit_is_only_noted():
     d = run([2] * 4, rooms(21.0, 23.6))
-    assert d.sg_target == 2 and "r1 23.6" in d.reason
-    assert run([2] * 4, rooms(21.0, 23.4)).sg_target == 3
+    assert d.sg_target == 3 and "r1 23.6" in d.reason
+    assert "note" not in run([2] * 4, rooms(21.0, 23.4)).reason
 
 
 def test_zone_rooms_use_the_reduced_setpoint():
     upstairs = rooms(19.6, in_zone=True)
     downstairs = rooms(21.0)
     d = run([0] * 4, upstairs + downstairs, zone=[1] * 4, reduced_setpoint_c=19.0)
-    assert d.sg_target == 1  # zone limit 18.0
-    assert run([0] * 4, upstairs + downstairs, zone=[0] * 4, reduced_setpoint_c=19.0).sg_target == 2
+    assert d.sg_target == 1 and "note" not in d.reason  # zone limit 18.0
+    outside = run([0] * 4, upstairs + downstairs, zone=[0] * 4, reduced_setpoint_c=19.0)
+    assert outside.sg_target == 1 and "r0 19.6 < 19.5" not in outside.reason
 
 
 # ----------------------------------------------------------------------
@@ -258,5 +263,7 @@ def test_margins_use_the_limits_valid_now():
 
 def test_holiday_without_reduced_setpoint_uses_the_holiday_floor():
     d = run([0] * 4, rooms(16.5, 17.0), holiday=True, away=[1] * 4)
-    assert d.sg_target == 1  # floor 16 instead of the room limit 19.5
-    assert run([0] * 4, rooms(15.5, 17.0), holiday=True, away=[1] * 4).sg_target == 2
+    assert d.sg_target == 1 and "note" not in d.reason  # floor 16, not the room limit 19.5
+    cold = run([0] * 4, rooms(15.5, 17.0), holiday=True, away=[1] * 4)
+    assert cold.sg_target == 1 and "r0 15.5 < 16.0" in cold.reason
+    assert not cold.standby  # the frost floor still blocks the holiday standby

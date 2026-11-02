@@ -4726,6 +4726,14 @@ class GeneticOptimization(OptimizationBase):
             hp_genes = self._heat_pump_genes(list(start_solution))
             for plan, genes in zip(hp_layout.plans, hp_layout.split(hp_genes)):
                 heat_pump_results[plan.device_id] = plan_result(plan, genes)
+                # RL29 fork: slot grid of the schedule, so the next run knows which
+                # mode is in effect (plan stability).
+                hp_starts = getattr(self, "_hp_slot_starts", [])
+                if hp_starts:
+                    heat_pump_results[plan.device_id]["start_datetime"] = hp_starts[0].isoformat()
+                    heat_pump_results[plan.device_id]["slot_seconds"] = int(
+                        round(self.slot_duration_h * 3600)
+                    )
                 logger.info(
                     "Heat pump {}: {}", plan.device_id, heat_pump_results[plan.device_id]["summary"]
                 )

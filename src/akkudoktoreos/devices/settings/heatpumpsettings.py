@@ -578,8 +578,10 @@ class HeatPumpOptimizationSettings(SettingsBaseModel):
         ge=0,
         json_schema_extra={
             "description": (
-                "Cost per change of the heating or hot water mode between two hours; "
-                "keeps relay switching and compressor starts rare [currency]."
+                "Cost per change of the heating or hot water mode between two hours "
+                "and, RL29 fork, against the mode the previous plan set for now; keeps "
+                "relay switching and compressor starts rare and the plan stable from "
+                "one run to the next [currency]."
             )
         },
     )

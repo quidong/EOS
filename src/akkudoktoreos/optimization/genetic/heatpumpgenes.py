@@ -49,7 +49,7 @@ from akkudoktoreos.devices.thermal.heatpump import (
     ThermalState,
 )
 from akkudoktoreos.optimization.genetic.geneticabc import GeneticParametersBaseModel
-from akkudoktoreos.utils.datetimeutil import DateTime
+from akkudoktoreos.utils.datetimeutil import DateTime, to_datetime
 
 
 class GeneticHeatPumpParameters(GeneticParametersBaseModel):
@@ -229,6 +229,24 @@ class GeneticHeatPumpParameters(GeneticParametersBaseModel):
             )
         },
     )
+    active_heating_mode: Optional[int] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: heating mode in effect now (from the previous plan); a plan "
+                "that starts with another mode pays the mode change penalty. None = unknown."
+            )
+        },
+    )
+    active_dhw_mode: Optional[int] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: hot water mode in effect now (from the previous plan); see "
+                "active_heating_mode. None = unknown."
+            )
+        },
+    )
 
 
 def _nearest(allowed: Sequence[int], wanted: int) -> int:
@@ -319,6 +337,14 @@ class HeatPumpRunPlan:
     tank_heat_value_above_setpoint: Optional[float] = None
     """Value of tank heat above the heat pump setpoint [currency/Wh]; None = tank_heat_value.
     Water the rod heated beyond the setpoint loses more and is valued with a discount."""
+    period_offset: int = 0
+    """RL29 fork: slots between the start of the first gene period and slot 0. Gene
+    periods start on full hours, so consecutive runs every 15 minutes keep the same
+    period boundaries instead of moving them by one slot each run."""
+    active_heating_mode: Optional[int] = None
+    """RL29 fork: heating mode in effect now; changing it at the start counts as a change."""
+    active_dhw_mode: Optional[int] = None
+    """RL29 fork: hot water mode in effect now; changing it at the start counts as a change."""
     _cache: dict[tuple[int, ...], HeatPumpOutcome] = field(default_factory=dict, repr=False)
 
     CACHE_SIZE = 20000
@@ -330,6 +356,24 @@ class HeatPumpRunPlan:
     @property
     def n_periods(self) -> int:
         return max(1, math.ceil(self.n_slots / self.slots_per_gene))
+
+    def period_of(self, slot: int) -> int:
+        """Gene period that controls ``slot``.
+
+        With ``period_offset`` the first period is shorter (until the next full
+        hour) and the last one longer, so the number of genes stays the same.
+        """
+        return min(self.n_periods - 1, (slot + self.period_offset) // self.slots_per_gene)
+
+    def period_slots(self, period: int) -> range:
+        """Slots controlled by ``period``."""
+        spg = self.slots_per_gene
+        first = 0 if period == 0 else min(self.n_slots, period * spg - self.period_offset)
+        if period >= self.n_periods - 1:
+            last = self.n_slots
+        else:
+            last = min(self.n_slots, (period + 1) * spg - self.period_offset)
+        return range(first, max(first, last))
 
     @property
     def n_genes(self) -> int:
@@ -433,7 +477,6 @@ class HeatPumpRunPlan:
         heating, dhw = self.modes(genes)
         system = self.system
         step = system.step
-        spg = self.slots_per_gene
         state = self.initial.copy()
         electric: list[float] = []
         comfort_kh = 0.0
@@ -472,7 +515,7 @@ class HeatPumpRunPlan:
             ):
                 rows[name] = []
         for slot, inputs in enumerate(self.inputs):
-            period = slot // spg
+            period = self.period_of(slot)
             option = dhw[period]
             result = step(state, inputs, heating[period], option.mode, option.rod_target_c)
             state = result.state
@@ -528,11 +571,17 @@ class HeatPumpRunPlan:
                 rows["ventilation_w_per_k"].append(float(inputs.ventilation_w_per_k))
                 rows["standby"].append(1.0 if state.standby else 0.0)
 
-        # Mode changes between consecutive gene periods.
+        # Mode changes between consecutive gene periods and,
+        # RL29 fork, against the mode in effect now: a replan every 15 minutes must
+        # not flip the current mode for a negligible saving.
         n = self.n_periods
         changes = sum(1 for i in range(1, n) if heating[i] != heating[i - 1]) + sum(
             1 for i in range(1, n) if dhw[i] != dhw[i - 1]
         )
+        if self.active_heating_mode is not None and int(heating[0]) != self.active_heating_mode:
+            changes += 1
+        if self.active_dhw_mode is not None and int(dhw[0].mode) != self.active_dhw_mode:
+            changes += 1
 
         # Value of the heat stored (or used up) compared to the start. Room heat
         # above the comfort maximum has no value: the room controllers do not use it.
@@ -616,12 +665,11 @@ class HeatPumpRunPlan:
         each of them.
         """
         n = self.n_periods
-        spg = self.slots_per_gene
         n_slots = min(self.n_slots, len(pv_wh), len(load_wh), len(price_per_wh))
         surplus: list[float] = []
         price: list[float] = []
         for p in range(n):
-            slots = range(p * spg, min((p + 1) * spg, n_slots))
+            slots = range(self.period_slots(p).start, min(self.period_slots(p).stop, n_slots))
             if not slots:
                 surplus.append(0.0)
                 price.append(0.0)
@@ -705,7 +753,7 @@ class HeatPumpRunPlan:
         mode = None if rod is not None else self.heating_mode_reaching_dhw(self.legionella_c)
         if rod is None and mode is None:
             return
-        last_period = max(0, min(self.n_periods - 1, (deadline - 1) // self.slots_per_gene))
+        last_period = max(0, min(self.n_periods - 1, self.period_of(max(0, deadline - 1))))
         if rod is not None and any(water[p] == rod for p in range(last_period + 1)):
             return
         periods = [0] if last_period < 1 else None
@@ -743,6 +791,18 @@ class HeatPumpRunPlan:
             genes[offset + start] = (old + 1 + rng.randrange(upper)) % (upper + 1)
             changed = True
         return changed
+
+    def elapsed_periods(self, elapsed_slots: int) -> int:
+        """Whole gene periods of a warm start that ended during ``elapsed_slots``.
+
+        Periods start on full hours: the earlier run's offset follows from this
+        run's offset and the elapsed slots.
+        """
+        if elapsed_slots <= 0:
+            return 0
+        spg = self.slots_per_gene
+        earlier_offset = (self.period_offset - elapsed_slots) % spg
+        return (earlier_offset + elapsed_slots) // spg
 
     def shift(self, genes: list[int], elapsed_periods: int) -> list[int]:
         """Drop elapsed periods of a warm start and repeat the last one."""
@@ -844,7 +904,7 @@ class HeatPumpGeneLayout:
     def shift(self, genes: list[int], elapsed_slots: int) -> list[int]:
         shifted: list[int] = []
         for plan, part in zip(self.plans, self.split(genes)):
-            shifted.extend(plan.shift(list(part), elapsed_slots // plan.slots_per_gene))
+            shifted.extend(plan.shift(list(part), plan.elapsed_periods(elapsed_slots)))
         return shifted
 
 
@@ -1163,12 +1223,22 @@ def build_run_plan(
         # the tank at the restart anyway - it has no value at the end.
         tank_value = tank_value_above = 0.0
 
+    spg = max(1, round(1.0 / slot_hours))
+    period_offset = 0
+    if spg > 1 and slot_starts:
+        # Gene periods start on full hours (RL29 fork).
+        first_start = to_datetime(slot_starts[0])
+        seconds = first_start.minute * 60 + first_start.second
+        period_offset = int(seconds // round(slot_hours * 3600)) % spg
     return HeatPumpRunPlan(
         device_id=parameters.device_id,
         system=system,
         inputs=inputs,
         initial=initial,
-        slots_per_gene=max(1, round(1.0 / slot_hours)),
+        slots_per_gene=spg,
+        period_offset=period_offset,
+        active_heating_mode=parameters.active_heating_mode,
+        active_dhw_mode=parameters.active_dhw_mode,
         heating_modes=heating_modes,
         dhw_options=dhw_options,
         comfort_penalty=opt.comfort_penalty_amt_per_kh,

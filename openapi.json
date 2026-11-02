@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2611011571546813"
+    "version": "v0.3.0.dev2611021993980281"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -10393,6 +10393,30 @@
             ],
             "title": "Reduce Locked Until",
             "description": "Fork: the controller does not reduce before this time (manual lock); REDUCED runs as NORMAL and there is no standby until then. None = no lock."
+          },
+          "active_heating_mode": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Heating Mode",
+            "description": "RL29 fork: heating mode in effect now (from the previous plan); a plan that starts with another mode pays the mode change penalty. None = unknown."
+          },
+          "active_dhw_mode": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Dhw Mode",
+            "description": "RL29 fork: hot water mode in effect now (from the previous plan); see active_heating_mode. None = unknown."
           }
         },
         "additionalProperties": false,
@@ -12764,7 +12788,7 @@
             "type": "number",
             "minimum": 0.0,
             "title": "Mode Change Penalty Amt",
-            "description": "Cost per change of the heating or hot water mode between two hours; keeps relay switching and compressor starts rare [currency].",
+            "description": "Cost per change of the heating or hot water mode between two hours and, RL29 fork, against the mode the previous plan set for now; keeps relay switching and compressor starts rare and the plan stable from one run to the next [currency].",
             "default": 0.002
           },
           "stored_heat_price_quantile": {

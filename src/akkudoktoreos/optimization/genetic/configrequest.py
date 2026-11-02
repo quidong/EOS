@@ -707,6 +707,46 @@ class ConfigOptimizationRequest(
             return device
         return device.calibrated(result)
 
+    @staticmethod
+    def _active_heat_pump_modes(
+        device_id: str, observation_time: DateTime
+    ) -> tuple[Optional[int], Optional[int]]:
+        """Heating and hot water mode the previous plan set for now (RL29 fork).
+
+        The optimizer counts a change against these modes, so a replan every
+        15 minutes keeps the running mode unless another one pays off. (None, None)
+        without a previous plan covering now.
+        """
+        from akkudoktoreos.devices.thermal.heatpump import HeatingMode
+        from akkudoktoreos.optimization.genetic.heatpumpgenes import dhw_mode_value
+
+        try:
+            previous = get_ems().genetic_solution()
+            schedule = (getattr(previous, "heat_pumps", None) or {}).get(device_id) or {}
+            start = schedule.get("start_datetime")
+            seconds = int(schedule.get("slot_seconds") or 0)
+            heating = list(schedule.get("heating_mode") or [])
+            dhw = list(schedule.get("dhw_mode") or [])
+            if start is None or seconds <= 0 or not heating:
+                return None, None
+            elapsed = observation_time.timestamp() - to_datetime(start).timestamp()
+            index = int(elapsed // seconds)
+            if index < 0 or index >= len(heating):
+                return None, None
+
+            def heating_value(value: Any) -> int:
+                return int(HeatingMode[value]) if isinstance(value, str) else int(value)
+
+            def dhw_value(value: Any) -> int:
+                return int(dhw_mode_value(value)) if isinstance(value, str) else int(value)
+
+            active_heating = heating_value(heating[index])
+            active_dhw = dhw_value(dhw[index]) if index < len(dhw) else None
+            return active_heating, active_dhw
+        except Exception as exc:  # stability is optional, never cancel the run
+            logger.debug("Heat pump {}: no active mode from the previous plan: {}", device_id, exc)
+            return None, None
+
     async def _heat_pump_state(
         self, device: Any, observation_time: DateTime
     ) -> GeneticHeatPumpParameters:
@@ -938,6 +978,9 @@ class ConfigOptimizationRequest(
                     warning_start.isoformat(),
                     warning_end.isoformat(),
                 )
+        active_heating, active_dhw = self._active_heat_pump_modes(
+            device.device_id, observation_time
+        )
         return GeneticHeatPumpParameters(
             device_id=device.device_id,
             warning_start=warning_start,
@@ -964,4 +1007,6 @@ class ConfigOptimizationRequest(
             power_limited_hours=grid_14a.dimming_hold_hours,
             separate_meter_price_reduction_amt_wh=reduction_wh,
             hours_since_legionella=hours_since,
+            active_heating_mode=active_heating,
+            active_dhw_mode=active_dhw,
         )

@@ -466,7 +466,6 @@ def project_modes(
     Ties go to the less active modes (NORMAL/HOLD first).
     """
     system = plan.system
-    spg = plan.slots_per_gene
     cs = system.building.params.slab_capacity_wh_per_k
     cr = system.building.params.room_capacity_wh_per_k
     ct = system.tank.capacity
@@ -477,8 +476,13 @@ def project_modes(
     default_dhw = plan.dhw_index(DhwMode.HOLD)
     n = plan.n_slots
     for period in range(plan.n_periods):
-        first = period * spg
-        last = min(n, first + spg) - 1
+        slots = plan.period_slots(period)
+        if not slots:  # pragma: no cover - every period controls at least one slot
+            heating_genes.append(default_heating)
+            dhw_genes.append(default_dhw)
+            continue
+        first = slots.start
+        last = slots.stop - 1
         best: Optional[tuple[float, int, int, ThermalState]] = None
         for h_index, h_mode in enumerate(plan.heating_modes):
             for d_index, option in enumerate(plan.dhw_options):

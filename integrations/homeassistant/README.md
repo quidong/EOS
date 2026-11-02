@@ -63,7 +63,11 @@ lock of the reduction (`<id>-reduce-lock-until-ts`, so EOS plans NORMAL until th
 ## Execution and safety
 
 - Plan missing, older than the limit or EOS unreachable → NORMAL (SG 2) and a repair issue.
-- Coldest room below its lower limit → no REDUCED; warmest room above its upper limit → no RAISED.
+- A fresh plan is executed as planned: EOS receives the room margins, humidity and lock and plans
+  with them. A room below its lower limit or above the upper limit while the plan runs is only
+  reported (reason "note: …", attribute `cold_rooms`). Only too few room values and the manual
+  reduction lock still keep NORMAL instead of REDUCED. (Up to 2026-11 the controller overrode the
+  plan here, which made the plan and the executed mode disagree.)
 - Switching limit per day, minimum holding time, maximum reduction duration.
 - Manual change at the unit → pause and notification event.
 - Watchdogs for timed contacts (hot water push, SG contact 2); time logic in the actuator stays

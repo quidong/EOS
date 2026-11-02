@@ -110,9 +110,12 @@ def test_plan_charges_before_the_warning():
     run = run_plan(start_h=3, end_h=6, hours=8)
     n = run.n_periods
     hold = run.evaluate(run.genes_for_modes([HeatingMode.NORMAL] * n, [DhwMode.HOLD] * n))
+    # One planned charge (HA switches DE2 once per block) right before the warning;
+    # the tank starts at its setpoint, a charge at once would do nothing.
     charge = run.evaluate(
         run.genes_for_modes(
-            [HeatingMode.NORMAL] * n, [DhwMode.HEAT_PUMP] * 3 + [DhwMode.HOLD] * (n - 3)
+            [HeatingMode.NORMAL] * n,
+            [DhwMode.HOLD] * 2 + [DhwMode.HEAT_PUMP] + [DhwMode.HOLD] * (n - 3),
         )
     )
     assert hold.dhw_kh > 0
