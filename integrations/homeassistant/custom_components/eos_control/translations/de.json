@@ -74,7 +74,8 @@
             "humidity_max_pct": "Feuchtegrenze",
             "humidity_delay_min": "Feuchte-Verzögerung",
             "in_zone": "Gehört zur EOS-Absenkzone",
-            "setpoint_entity": "Raum-Sollwert für das Komfort-Lernen (optional)"
+            "setpoint_entity": "Raum-Sollwert für das Komfort-Lernen (optional)",
+            "zone": "Heizzone (z. B. og, eg; leer = keine)"
           }
         },
         "reconfigure": {
@@ -89,7 +90,8 @@
             "humidity_max_pct": "Feuchtegrenze",
             "humidity_delay_min": "Feuchte-Verzögerung",
             "in_zone": "Gehört zur EOS-Absenkzone",
-            "setpoint_entity": "Raum-Sollwert für das Komfort-Lernen (optional)"
+            "setpoint_entity": "Raum-Sollwert für das Komfort-Lernen (optional)",
+            "zone": "Heizzone (z. B. og, eg; leer = keine)"
           }
         }
       },
@@ -129,6 +131,18 @@
       },
       "comfort_suggestions": {
         "name": "Komfort-Vorschläge"
+      },
+      "zone_mode": {
+        "name": "Zone {zone} Modus"
+      },
+      "zone_room_mean": {
+        "name": "Zone {zone} Raumtemperatur Mittel"
+      },
+      "zone_room_min_margin": {
+        "name": "Zone {zone} Abstand zur Untergrenze"
+      },
+      "zone_room_max_margin": {
+        "name": "Zone {zone} Abstand zur Obergrenze"
       }
     },
     "binary_sensor": {

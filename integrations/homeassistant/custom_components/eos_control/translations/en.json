@@ -74,7 +74,8 @@
             "humidity_max_pct": "Humidity limit",
             "humidity_delay_min": "Humidity delay",
             "in_zone": "Belongs to the EOS set-back zone",
-            "setpoint_entity": "Room setpoint for comfort learning (optional)"
+            "setpoint_entity": "Room setpoint for comfort learning (optional)",
+            "zone": "Heating zone (e.g. og, eg; empty = none)"
           }
         },
         "reconfigure": {
@@ -89,7 +90,8 @@
             "humidity_max_pct": "Humidity limit",
             "humidity_delay_min": "Humidity delay",
             "in_zone": "Belongs to the EOS set-back zone",
-            "setpoint_entity": "Room setpoint for comfort learning (optional)"
+            "setpoint_entity": "Room setpoint for comfort learning (optional)",
+            "zone": "Heating zone (e.g. og, eg; empty = none)"
           }
         }
       },
@@ -129,6 +131,18 @@
       },
       "comfort_suggestions": {
         "name": "Comfort suggestions"
+      },
+      "zone_mode": {
+        "name": "Zone {zone} mode"
+      },
+      "zone_room_mean": {
+        "name": "Zone {zone} room temperature mean"
+      },
+      "zone_room_min_margin": {
+        "name": "Zone {zone} margin to lower limit"
+      },
+      "zone_room_max_margin": {
+        "name": "Zone {zone} margin to upper limit"
       }
     },
     "binary_sensor": {

@@ -32,6 +32,7 @@ from .const import (
     CONF_HUMIDITY_MAX,
     CONF_HYSTERESIS,
     CONF_IN_ZONE,
+    CONF_ZONE,
     CONF_LOWER,
     CONF_MAX_ROOM,
     CONF_MIN_VALID_ROOMS,
@@ -255,6 +256,7 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
                     has_windows=bool(windows),
                     window_open=window_open,
                     in_zone=bool(cfg.get(CONF_IN_ZONE, False)),
+                    zone=cfg.get(CONF_ZONE) or None,
                     humidity_pct=humidity,
                     humidity_high=self._humidity_high(subentry.subentry_id, cfg, humidity, now),
                 )

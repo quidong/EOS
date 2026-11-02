@@ -60,6 +60,22 @@ out), `<id>-humidity` (highest), `<id>-window-open` (share), holiday (`<id>-away
 `<id>-away-room-temperature`, `<id>-away-min-temperature`), calibration values, and the end of a manual
 lock of the reduction (`<id>-reduce-lock-until-ts`, so EOS plans NORMAL until then).
 
+## Heating zones (multi-zone EOS)
+
+A room can name its heating zone (`zone`, e.g. `og`, `eg`; the flow normalises it to lower case
+letters, digits and `_`). For every zone the integration provides:
+
+- `sensor.<name>_zone_<zone>_mode`: the zone's mode in the current plan slot
+  (`<device_id>_zone_<zone>_heating_mode`; NORMAL without a fresh plan; a zone missing in the
+  plan follows the heat pump mode), attributes with mean, margins and coldest room;
+- `sensor.<name>_zone_<zone>_room_temperature_mean`, `…_margin_to_lower_limit`,
+  `…_margin_to_upper_limit`: map them in the EOS adapter to `<device_id>-<zone>-room-temperature`,
+  `<device_id>-<zone>-room-min-margin` and `<device_id>-<zone>-room-max-margin`.
+
+The SG Ready target stays the heat pump mode of the plan. The automation that executes the plan
+sets per zone the room setpoints of the zone's mode and opens the valves (forced position) only for
+zones in FORCED; zones on a lower target are left to their room controllers.
+
 ## Execution and safety
 
 - Plan missing, older than the limit or EOS unreachable → NORMAL (SG 2) and a repair issue.

@@ -191,11 +191,14 @@ async def test_entities_follow_the_plan(hass: HomeAssistant, aioclient_mock: Aio
     assert hass.states.get("binary_sensor.eos_hp1_eos_plan_ok").state == "on"
 
 
-async def test_cold_room_blocks_reduction(hass: HomeAssistant, aioclient_mock: AiohttpClientMocker):
-    set_rooms(hass, bath=19.7)
+async def test_cold_room_is_reported_not_overridden(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+):
+    """EOS plans with the room margins; a fresh plan runs as planned (2026-11-02)."""
+    set_rooms(hass, bath=19.2)
     await setup(hass, aioclient_mock, solution(0), rooms=ROOMS)
-    assert hass.states.get("sensor.eos_hp1_sg_ready_target").state == "2"
-    assert "Bath 19.7" in hass.states.get("sensor.eos_hp1_reason").state
+    assert hass.states.get("sensor.eos_hp1_sg_ready_target").state == "1"
+    assert "Bath 19.2 < 19.5" in hass.states.get("sensor.eos_hp1_reason").state
 
 
 async def test_open_window_excludes_the_room(
@@ -214,14 +217,16 @@ async def test_open_window_excludes_the_room(
 
 async def test_restart_stamp_is_no_airing(hass: HomeAssistant, aioclient_mock: AiohttpClientMocker):
     """A closed window whose last_changed is the start time does not count as airing."""
-    set_rooms(hass, bath=19.7)
+    set_rooms(hass, bath=19.2)
     hass.states.async_set("binary_sensor.bath_window", "off")
     rooms = [
         room("Living", "sensor.living"),
         room("Bath", "climate.bath", ["binary_sensor.bath_window"]),
     ]
     await setup(hass, aioclient_mock, solution(0), rooms=rooms)
-    assert hass.states.get("sensor.eos_hp1_sg_ready_target").state == "2"  # bath counts
+    attributes = hass.states.get("sensor.eos_hp1_sg_ready_target").attributes
+    assert attributes["cold_rooms"] == ["Bath 19.2 < 19.5"]  # bath counts
+    assert attributes["room_min_margin_k"] == pytest.approx(-0.3)
 
 
 async def test_stale_plan_and_unreachable_eos(
@@ -273,7 +278,8 @@ async def test_humidity_warning(hass: HomeAssistant, aioclient_mock: AiohttpClie
     ]
     await setup(hass, aioclient_mock, solution(0), rooms=rooms)
     assert hass.states.get("binary_sensor.eos_hp1_humidity_warning").state == "on"
-    assert hass.states.get("sensor.eos_hp1_sg_ready_target").state == "2"
+    assert hass.states.get("sensor.eos_hp1_sg_ready_target").state == "1"  # EOS plans with it
+    assert "humidity warning" in hass.states.get("sensor.eos_hp1_reason").state
     assert float(hass.states.get("sensor.eos_hp1_humidity_maximum").state) == 72.0
 
 
@@ -448,3 +454,30 @@ async def test_comfort_learning_ignores_holiday_and_the_return(
     hass.states.async_set("climate.living_controller", "heat", {"temperature": 22.0})
     await coordinator.async_refresh()
     assert coordinator.data.comfort_events == 0
+
+
+async def test_zone_sensors(hass: HomeAssistant, aioclient_mock: AiohttpClientMocker):
+    """Rooms with a heating zone get the zone's mode, mean and margins (multi-zone EOS)."""
+    set_rooms(hass, living=21.2, bath=19.4)
+    sol = solution(4)
+    for row in sol["solution"]["data"].values():
+        row["hp1_zone_og_heating_mode"] = 4.0
+        row["hp1_zone_eg_heating_mode"] = 0.0
+    rooms = [room("Living", "sensor.living", zone="eg"), room("Bath", "climate.bath", zone="og")]
+    await setup(hass, aioclient_mock, sol, rooms=rooms)
+    assert hass.states.get("sensor.eos_hp1_zone_og_mode").state == "FORCED"
+    assert hass.states.get("sensor.eos_hp1_zone_eg_mode").state == "REDUCED"
+    assert float(hass.states.get("sensor.eos_hp1_zone_og_room_temperature_mean").state) == 19.4
+    margin = float(hass.states.get("sensor.eos_hp1_zone_og_margin_to_lower_limit").state)
+    assert margin == pytest.approx(-0.1)
+    attributes = hass.states.get("sensor.eos_hp1_zone_og_mode").attributes
+    assert attributes["coldest_room"] == "Bath"
+    assert hass.states.get("sensor.eos_hp1_sg_ready_target").state == "4"
+
+
+async def test_room_zone_is_normalised_in_the_flow():
+    from custom_components.eos_control.config_flow import _zone_id
+
+    assert _zone_id(" OG-1 ") == "og_1"
+    assert _zone_id("Erdgeschoss Süd") == "erdgeschoss_sued"
+    assert _zone_id(None) == ""

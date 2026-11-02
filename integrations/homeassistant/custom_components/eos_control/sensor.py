@@ -17,9 +17,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import EosControlConfigEntry
+from .const import CONF_ZONE, SUBENTRY_ROOM
 from .coordinator import ControlData
 from .entity import EosControlEntity
-from .logic import MODE_NAMES
+from .logic import MODE_NAMES, ZoneFigures
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -122,7 +123,81 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     coordinator = entry.runtime_data
-    async_add_entities(EosSensor(coordinator, description) for description in SENSORS)
+    entities: list[SensorEntity] = [EosSensor(coordinator, description) for description in SENSORS]
+    zones = sorted(
+        {
+            str(sub.data.get(CONF_ZONE))
+            for sub in entry.subentries.values()
+            if sub.subentry_type == SUBENTRY_ROOM and sub.data.get(CONF_ZONE)
+        }
+    )
+    for zone in zones:
+        entities.extend(EosZoneSensor(coordinator, zone, d) for d in ZONE_SENSORS)
+    async_add_entities(entities)
+
+
+@dataclass(frozen=True, kw_only=True)
+class EosZoneSensorDescription(SensorEntityDescription):
+    value: Callable[[ZoneFigures], Any]
+
+
+ZONE_SENSORS: tuple[EosZoneSensorDescription, ...] = (
+    EosZoneSensorDescription(
+        key="zone_mode",
+        value=lambda z: MODE_NAMES.get(z.mode) if z.mode is not None else None,
+    ),
+    EosZoneSensorDescription(
+        key="zone_room_mean",
+        value=lambda z: z.room_mean_c,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+    ),
+    EosZoneSensorDescription(
+        key="zone_room_min_margin",
+        value=lambda z: z.room_min_margin_k,
+        native_unit_of_measurement=UnitOfTemperature.KELVIN,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+    ),
+    EosZoneSensorDescription(
+        key="zone_room_max_margin",
+        value=lambda z: z.room_max_margin_k,
+        native_unit_of_measurement=UnitOfTemperature.KELVIN,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+    ),
+)
+
+
+class EosZoneSensor(EosControlEntity, SensorEntity):
+    """One figure of a heating zone (multi-zone EOS)."""
+
+    entity_description: EosZoneSensorDescription
+
+    def __init__(self, coordinator, zone: str, description: EosZoneSensorDescription) -> None:
+        super().__init__(coordinator, f"{description.key}_{zone}")
+        self.entity_description = description
+        self._zone = zone
+        self._attr_translation_key = description.key
+        self._attr_translation_placeholders = {"zone": zone}
+
+    def _figures(self) -> ZoneFigures | None:
+        data = self.coordinator.data
+        return data.decision.zones.get(self._zone) if data is not None else None
+
+    @property
+    def native_value(self) -> Any:
+        figures = self._figures()
+        return self.entity_description.value(figures) if figures is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        figures = self._figures()
+        if figures is None or self.entity_description.key != "zone_mode":
+            return None
+        return figures.as_attributes()
 
 
 class EosSensor(EosControlEntity, SensorEntity):

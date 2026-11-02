@@ -34,6 +34,7 @@ from .const import (
     CONF_HUMIDITY_MAX,
     CONF_HYSTERESIS,
     CONF_IN_ZONE,
+    CONF_ZONE,
     CONF_LOWER,
     CONF_MAX_ROOM,
     CONF_MIN_VALID_ROOMS,
@@ -323,7 +324,18 @@ def _room_data(user_input: dict[str, Any]) -> dict[str, Any]:
         data[CONF_HUMIDITY_ENTITY] = user_input[CONF_HUMIDITY_ENTITY]
     if user_input.get(CONF_SETPOINT_ENTITY):
         data[CONF_SETPOINT_ENTITY] = user_input[CONF_SETPOINT_ENTITY]
+    zone = _zone_id(user_input.get(CONF_ZONE))
+    if zone:
+        data[CONF_ZONE] = zone
     return data
+
+
+def _zone_id(value: Any) -> str:
+    """Zone ID as EOS expects it (lower case letters, digits, _); '' = no zone."""
+    text = str(value or "").strip().lower().replace(" ", "_").replace("-", "_")
+    for umlaut, plain in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss")):
+        text = text.replace(umlaut, plain)
+    return "".join(c for c in text if c in "abcdefghijklmnopqrstuvwxyz0123456789_")
 
 
 def _room_schema(current: dict[str, Any]) -> vol.Schema:
@@ -348,6 +360,7 @@ def _room_schema(current: dict[str, Any]) -> vol.Schema:
             0, 480, 5, "min"
         ),
         vol.Required(CONF_IN_ZONE, default=default(CONF_IN_ZONE)): bool,
+        vol.Optional(CONF_ZONE, default=current.get(CONF_ZONE, "")): str,
         _optional_entity(CONF_SETPOINT_ENTITY, current): _entity(
             ["climate", "number", "input_number"]
         ),

@@ -39,6 +39,8 @@ class PlanSlot:
     standby: Optional[bool] = None
     """Heat pump in standby according to EOS (``<device>_standby``); None = older EOS
     without the column, the standby is then derived from REDUCED without hot water."""
+    zone_modes: dict[str, int] = field(default_factory=dict)
+    """Heating mode per zone (``<device>_zone_<zone>_heating_mode``), multi-zone EOS."""
 
 
 @dataclass
@@ -77,6 +79,8 @@ def parse_plan(solution: dict[str, Any], device_id: str) -> Plan:
     generated = _parse_dt(solution.get("generated_at"))
     rows = (solution.get("solution") or {}).get("data") or {}
     key = f"{device_id}_heating_mode"
+    zone_prefix = f"{device_id}_zone_"
+    zone_suffix = "_heating_mode"
     slots: list[PlanSlot] = []
     for stamp in sorted(rows):
         row = rows[stamp] or {}
@@ -84,6 +88,12 @@ def parse_plan(solution: dict[str, Any], device_id: str) -> Plan:
         if start is None:
             continue
         mode = _number(row.get(key))
+        zone_modes: dict[str, int] = {}
+        for column, value in row.items():
+            if column.startswith(zone_prefix) and column.endswith(zone_suffix):
+                zone_mode = _number(value)
+                if zone_mode is not None:
+                    zone_modes[column[len(zone_prefix) : -len(zone_suffix)]] = int(round(zone_mode))
         slots.append(
             PlanSlot(
                 start=start,
@@ -92,6 +102,7 @@ def parse_plan(solution: dict[str, Any], device_id: str) -> Plan:
                 away=(_number(row.get(f"{device_id}_away")) or 0.0) >= 0.5,
                 zone_setback=(_number(row.get(f"{device_id}_zone_setback")) or 0.0) >= 0.5,
                 standby=_flag(row.get(f"{device_id}_standby")),
+                zone_modes=zone_modes,
             )
         )
     if slots and all(s.heating_mode is None for s in slots):
@@ -118,6 +129,31 @@ class RoomState:
     humidity_high: bool = False
     """Humidity at or above the room's limit for longer than its delay."""
     humidity_pct: Optional[float] = None
+    zone: Optional[str] = None
+    """Heating zone of the room for multi-zone EOS (``zones`` in EOS), None = none."""
+
+
+@dataclass
+class ZoneFigures:
+    """Rooms of one heating zone and the zone's mode in the plan."""
+
+    mode: Optional[int] = None
+    """Zone mode of the current plan slot; None = no fresh plan (controller: NORMAL)."""
+    room_mean_c: Optional[float] = None
+    room_min_margin_k: Optional[float] = None
+    room_max_margin_k: Optional[float] = None
+    coldest_room: Optional[str] = None
+    valid_rooms: int = 0
+
+    def as_attributes(self) -> dict[str, Any]:
+        return {
+            "mode": MODE_NAMES.get(self.mode) if self.mode is not None else None,
+            "room_mean_c": _round(self.room_mean_c),
+            "room_min_margin_k": _round(self.room_min_margin_k),
+            "room_max_margin_k": _round(self.room_max_margin_k),
+            "coldest_room": self.coldest_room,
+            "valid_rooms": self.valid_rooms,
+        }
 
 
 @dataclass
@@ -174,6 +210,7 @@ class Decision:
     humidity_max_pct: Optional[float] = None
     humidity_warning: bool = False
     valid_rooms: int = 0
+    zones: dict[str, ZoneFigures] = field(default_factory=dict)
 
     def as_attributes(self) -> dict[str, Any]:
         return {
@@ -193,6 +230,7 @@ class Decision:
             "humidity_max_pct": _round(self.humidity_max_pct),
             "humidity_warning": self.humidity_warning,
             "valid_rooms": self.valid_rooms,
+            "zones": {name: z.as_attributes() for name, z in sorted(self.zones.items())},
         }
 
 
@@ -242,6 +280,12 @@ def decide(data: ControlInput, settings: Settings) -> Decision:
         notes = _plan_notes(data, settings, decision, sg)
         if notes:
             decision.reason += f" (note: {notes})"
+    # Zone modes of a fresh plan (multi-zone EOS); without a plan every zone is NORMAL.
+    for name, zone in decision.zones.items():
+        if fresh and slot is not None and data.heating_season:
+            zone.mode = slot.zone_modes.get(name, mode)
+        else:
+            zone.mode = NORMAL
 
     # -- Holiday: standby and hot water ----------------------------------
     if data.holiday:
@@ -339,6 +383,7 @@ def _room_figures(data: ControlInput, settings: Settings, decision: Decision) ->
         warmest = max(valid, key=lambda r: r.temperature)  # type: ignore[arg-type,return-value]
         decision.warmest_room = warmest.name
         decision.warmest_temp = warmest.temperature
+    _zone_figures(data, settings, decision)
     windowed = [r for r in data.rooms if r.has_windows]
     decision.window_open_share = (
         sum(1 for r in windowed if r.window_open) / len(windowed) if windowed else None
@@ -346,6 +391,36 @@ def _room_figures(data: ControlInput, settings: Settings, decision: Decision) ->
     humid = [r.humidity_pct for r in data.rooms if r.humidity_pct is not None]
     decision.humidity_max_pct = max(humid) if humid else None
     decision.humidity_warning = any(r.humidity_high for r in data.rooms)
+
+
+def _zone_figures(data: ControlInput, settings: Settings, decision: Decision) -> None:
+    """Mean and margins per heating zone (rooms with a ``zone``)."""
+    zone_active = _zone_active(data)
+    names = sorted({r.zone for r in data.rooms if r.zone})
+    for name in names:
+        figures = ZoneFigures()
+        rooms = [r for r in data.rooms if r.zone == name and r.temperature is not None]
+        figures.valid_rooms = len(rooms)
+        if rooms:
+            figures.room_mean_c = sum(r.temperature for r in rooms) / len(rooms)  # type: ignore[misc]
+            considered = [r for r in rooms if not r.airing]
+            if considered:
+                figures.room_min_margin_k = min(
+                    r.temperature  # type: ignore[operator]
+                    - (
+                        settings.holiday_floor_c
+                        if data.holiday
+                        else _lower_limit(r, data, settings, zone_active)
+                    )
+                    for r in considered
+                )
+                figures.room_max_margin_k = min(
+                    r.upper_c - r.temperature  # type: ignore[operator]
+                    for r in considered
+                )
+                coldest = min(considered, key=lambda r: r.temperature)  # type: ignore[arg-type,return-value]
+                figures.coldest_room = coldest.name
+        decision.zones[name] = figures
 
 
 def _reduction_blocked(data: ControlInput, settings: Settings, decision: Decision) -> str:

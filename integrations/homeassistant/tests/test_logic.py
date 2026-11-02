@@ -267,3 +267,73 @@ def test_holiday_without_reduced_setpoint_uses_the_holiday_floor():
     cold = run([0] * 4, rooms(15.5, 17.0), holiday=True, away=[1] * 4)
     assert cold.sg_target == 1 and "r0 15.5 < 16.0" in cold.reason
     assert not cold.standby  # the frost floor still blocks the holiday standby
+
+
+# ----------------------------------------------------------------------
+# Heating zones (multi-zone EOS)
+# ----------------------------------------------------------------------
+
+
+def zone_solution(og, eg, house):
+    plan = solution(house)
+    for (stamp, row), o, e in zip(sorted(plan["solution"]["data"].items()), og, eg):
+        row["hp1_zone_og_heating_mode"] = float(o)
+        row["hp1_zone_eg_heating_mode"] = float(e)
+    return plan
+
+
+def zone_rooms():
+    rooms_og = [
+        logic.RoomState("Flur OG", 19.3, lower_c=19.5, upper_c=23.5, zone="og"),
+        logic.RoomState("Bad OG", 19.8, lower_c=19.5, upper_c=23.5, zone="og"),
+    ]
+    rooms_eg = [
+        logic.RoomState("Küche", 21.4, lower_c=19.5, upper_c=23.5, zone="eg"),
+        logic.RoomState("Wohnzimmer", 21.0, lower_c=19.5, upper_c=23.5, zone="eg"),
+    ]
+    return rooms_og + rooms_eg + [logic.RoomState("Garage", 15.0, lower_c=5.0, upper_c=30.0)]
+
+
+def test_parse_plan_reads_the_zone_modes():
+    plan = logic.parse_plan(zone_solution([4, 4, 1, 1], [0, 0, 0, 1], [4, 4, 1, 1]), "hp1")
+    assert plan.current(NOW).zone_modes == {"og": 4, "eg": 0}
+    assert logic.parse_plan(solution([1, 1]), "hp1").current(NOW).zone_modes == {}
+
+
+def test_zone_figures_and_modes():
+    data = logic.ControlInput(
+        now=NOW,
+        plan=logic.parse_plan(zone_solution([4] * 4, [0] * 4, [4] * 4), "hp1"),
+        rooms=zone_rooms(),
+    )
+    d = logic.decide(data, logic.Settings())
+    assert set(d.zones) == {"og", "eg"}  # rooms without a zone are no zone
+    og, eg = d.zones["og"], d.zones["eg"]
+    assert og.mode == logic.FORCED and eg.mode == logic.REDUCED
+    assert og.room_mean_c == pytest.approx(19.55)
+    assert og.room_min_margin_k == pytest.approx(-0.2) and og.coldest_room == "Flur OG"
+    assert eg.room_max_margin_k == pytest.approx(2.1)
+    assert d.sg_target == 4  # the heat pump mode of the plan
+    assert d.as_attributes()["zones"]["og"]["mode"] == "FORCED"
+
+
+def test_zones_fall_back_to_normal_without_a_plan():
+    stale = logic.ControlInput(
+        now=NOW,
+        plan=logic.parse_plan(
+            zone_solution([4] * 4, [0] * 4, [4] * 4, ) | {"generated_at": (NOW - timedelta(hours=2)).isoformat()},
+            "hp1",
+        ),
+        rooms=zone_rooms(),
+    )
+    d = logic.decide(stale, logic.Settings())
+    assert d.sg_target == 2
+    assert {z.mode for z in d.zones.values()} == {logic.NORMAL}
+
+
+def test_a_zone_missing_in_the_plan_follows_the_house_mode():
+    data = logic.ControlInput(
+        now=NOW, plan=logic.parse_plan(solution([3] * 4), "hp1"), rooms=zone_rooms()
+    )
+    d = logic.decide(data, logic.Settings())
+    assert d.zones["og"].mode == logic.PREHEAT
