@@ -60,30 +60,20 @@ out), `<id>-humidity` (highest), `<id>-window-open` (share), holiday (`<id>-away
 `<id>-away-room-temperature`, `<id>-away-min-temperature`), calibration values, and the end of a manual
 lock of the reduction (`<id>-reduce-lock-until-ts`, so EOS plans NORMAL until then).
 
-## Heating zones (multi-zone EOS)
-
-A room can name its heating zone (`zone`, e.g. `og`, `eg`; the flow normalises it to lower case
-letters, digits and `_`). For every zone the integration provides:
-
-- `sensor.<name>_zone_<zone>_mode`: the zone's mode in the current plan slot
-  (`<device_id>_zone_<zone>_heating_mode`; NORMAL without a fresh plan; a zone missing in the
-  plan follows the heat pump mode), attributes with mean, margins and coldest room;
-- `sensor.<name>_zone_<zone>_room_temperature_mean`, `…_margin_to_lower_limit`,
-  `…_margin_to_upper_limit`: map them in the EOS adapter to `<device_id>-<zone>-room-temperature`,
-  `<device_id>-<zone>-room-min-margin` and `<device_id>-<zone>-room-max-margin`.
-
-The SG Ready target stays the heat pump mode of the plan. The automation that executes the plan
-sets per zone the room setpoints of the zone's mode and opens the valves (forced position) only for
-zones in FORCED; zones on a lower target are left to their room controllers.
-
 ## Execution and safety
 
-- Plan missing, older than the limit or EOS unreachable → NORMAL (SG 2) and a repair issue.
+- Plan missing, older than the limit or EOS unreachable → NORMAL (SG 2) and a repair issue. While
+  EOS does not answer for a short time (it is busy optimising), the last plan stays valid until it is
+  older than the limit.
+- Settle time (default 10 s): a changed result (SG target, standby, hot water charge, setpoint
+  restore) is accepted only after it stayed the same for this time; until then the previous one
+  stays in force and the new one is shown as `pending`. The integration re-evaluates by itself
+  when the time is up.
 - A fresh plan is executed as planned: EOS receives the room margins, humidity and lock and plans
   with them. A room below its lower limit or above the upper limit while the plan runs is only
   reported (reason "note: …", attribute `cold_rooms`). Only too few room values and the manual
-  reduction lock still keep NORMAL instead of REDUCED. (Up to 2026-11 the controller overrode the
-  plan here, which made the plan and the executed mode disagree.)
+  reduction lock still keep NORMAL instead of REDUCED (0.7.0; before, the controller overrode the
+  plan here, which made the plan and the executed mode disagree).
 - Switching limit per day, minimum holding time, maximum reduction duration.
 - Manual change at the unit → pause and notification event.
 - Watchdogs for timed contacts (hot water push, SG contact 2); time logic in the actuator stays
@@ -94,6 +84,20 @@ zones in FORCED; zones on a lower target are left to their room controllers.
   (normal must stay above reduced) and restores them before a planned charge and at the return.
 - All timestamps and counters are restored after a Home Assistant restart; restart time stamps of
   window sensors do not count as airing.
+
+## Heating zones (multi-zone EOS, 0.7.0)
+
+A room can name its heating zone (`zone`, e.g. `og`, `eg`; normalised to lower case letters,
+digits and `_`). The integration then
+
+- sends per zone `<heat pump>-<zone>-room-temperature`, `-room-min-margin` and `-room-max-margin`
+  to EOS (computed from the zone's rooms like the house figures);
+- shows per zone on the heat pump device: the zone's mode in the current plan slot
+  (`<heat pump>_zone_<zone>_heating_mode`; NORMAL without a fresh plan, a zone missing in the plan
+  follows the heat pump mode), the zone's mean and its two margins.
+
+The SG Ready target stays the heat pump mode of the plan. Room setpoints and forced valve
+positions per zone are switched by the automation that executes the plan, from the zone modes.
 
 ## Entities
 
@@ -112,6 +116,91 @@ the interventions + 0.3 K, in 0.5 K steps, at most 2 K above the current limit).
 automatically; adopt a suggestion in the room's settings. Events are kept for 90 days, locally in
 Home Assistant's storage; a button resets them. Interventions while away are ignored.
 
+## Structure
+
+One entry per EOS instance (URL, poll interval). Everything else is a subentry, read from the EOS
+configuration (`/v1/config/devices`) instead of typed ids:
+
+| Device in Home Assistant | Source | Entities |
+| --- | --- | --- |
+| EOS | the entry | plan, forecast, planned house load per hour, history, history hours |
+| Heat pump (one per entry) | "Add a device from EOS" | SG Ready target, reason, EOS mode, standby/hot water targets, room aggregates, comfort suggestions, planned heat pump energy, room and hot water temperature |
+| Battery | "Add a device from EOS" | operation mode (EOS `BatteryOperationMode`, with next change), mode factor, planned state of charge, charge power target (factor × `max_charge_power_w` while charging from the grid), charging from the grid, discharging allowed, battery export, plan |
+| Electric vehicle / wallbox | "Add a device from EOS" | operation mode, mode factor, planned state of charge, charge power target, charging, plan |
+| Home appliance | "Add a device from EOS" | running as planned, next start, plan |
+| Room | "Add room" | room temperature, margin to the lower limit valid now (holiday: holiday floor), airing, humidity high, comfort suggestion |
+
+The setup offers all devices of EOS at once (the first heat pump and all batteries, EVs and
+appliances preselected); more can be added later. The rules and context entities (options) belong
+to the heat pump; rooms feed its decision.
+
+Device targets are targets: switching the inverter, wallbox or appliance stays with Home Assistant
+automations, as for the heat pump. The settle time applies to a changed mode, too. Without a valid
+plan (EOS unreachable longer than the plan age limit) the device entities are unavailable, so an
+automation can fall back to a safe default.
+
+Migration from 0.4 (entry = one heat pump): the heat pump becomes a device subentry, the entry is
+renamed "EOS". All entity ids stay as they were.
+
+## Data flow between Home Assistant and EOS
+
+| Direction | How |
+| --- | --- |
+| HA → EOS | The integration sends the measurements itself (`PUT /v1/measurement/data`, every 5 min by default): the heat pump values it computes (room mean, margins, humidity, share of open windows, holiday, return time, reduced setpoint, holiday floor, lock of the reduction) and every other EOS measurement key mapped to an entity — per device in the device's settings ("Configure"), energy meters and keys of devices not added in the options of EOS. The mapping of EOS's own Home Assistant adapter is offered as suggestion. EOS then needs no access to Home Assistant. |
+| EOS → HA | The integration reads the plan (`/optimization/solution`, `/energy-management/plan`) and publishes targets, charts, the active instructions per resource as `sensor.eos_<resource>` (operation mode in lower case, attribute `operation_mode_factor`, next change), the plan columns as entities `sensor.eos_<column>` (value of the current slot, unavailable without a valid plan; option "plan columns as entities") and a calendar. A `sensor.eos_<column>` already published by EOS's adapter is not taken over (no `_2`); switch the adapter's `solution_entity_ids` and `device_instruction_entity_ids` off and restart Home Assistant. |
+
+### Repairs
+
+Settings → System → Repairs shows: EOS unreachable for more than 30 minutes, plan older than the plan
+age limit while EOS answers, an added device missing in the EOS configuration, measurements not
+accepted by EOS for more than 30 minutes.
+
+### Long-term statistics of the plan
+
+For every completed hour the integration writes the planned values (last plan for each slot) as
+external statistics: `eos_control:plan_house_load`, `plan_grid_import`, `plan_grid_export` (kWh per
+hour) and for the heat pump `plan_<id>_heat_pump_energy`, `plan_<id>_room_temperature`,
+`plan_<id>_dhw_temperature`. A statistics graph shows them next to the meters (stat type mean).
+
+### Actions
+
+| Action | Effect |
+| --- | --- |
+| `eos_control.lock_reduction` (`until` or `duration`) / `clear_reduction_lock` | no reduction until then (combined with the lock entity: the later one counts) |
+| `eos_control.set_holiday` (`return_at`, optional `start`) / `end_holiday` | holiday without helper entities (or-combined with the holiday entity) |
+| `eos_control.request_run` (`device`, `finish_by`, optional `duration`) / `cancel_run` | a home appliance run: EOS gets `<id>-requested`, `-deadline`, `-duration` and plans the cheapest start |
+
+State set by actions is stored and survives restarts; with several EOS entries name the entry.
+
+### Calendar
+
+`calendar.eos_plan`: raised heating, preheating, forced heating, standby, hot water charges (heat pump
+or rod), appliance runs, charging from the grid and battery export.
+
+## Charts
+
+The integration publishes what EOS planned and forecast, so dashboards need no REST or template
+sensors of their own:
+
+| Sensor | State | Attributes |
+| --- | --- | --- |
+| Plan | time the plan was made | `data`: slot rows (`t`, `load_wh`, `import_wh`, `export_wh`, `costs_amt`, `revenue_amt`, `heat_pump_wh`, `rod_wh`, `heating_mode`, `dhw_mode`, `standby`, `room_c`, `slab_c`, `dhw_c`, `<battery>_soc_pct`); `hourly`: energies per hour in kWh (`load_kwh`, `heat_pump_kwh`, …); `slot_minutes` |
+| Forecast | time of the plan | `data`: slot rows (`pv_wh`, `load_wh`, `price_amt_kwh`, `feed_in_amt_kwh`, `outdoor_c`); `hourly`: PV and load in kWh, prices as mean |
+| Planned house load / heat pump energy (hour) | kWh planned for the current hour | – (long-term statistics: plan vs. meter per hour) |
+| Planned room / hot water temperature | value of the current slot | – (long-term statistics) |
+| History | time of the summary | `kpi` (MAE and bias per series and lead time), `plan` (last run, saving against the self-consumption baseline), `days` (net grid costs per day and algorithm), `ab` |
+| History hours | time of the query | `data`: forecast/plan and actual value per hour |
+
+Passed slots keep the values of the last plan that contained them (24 hours in `data`, 48 hours
+stored, restored after a restart), so a chart shows plan and actual side by side for the last day
+and keeps showing the rest of the last plan while EOS is unreachable. The series attributes are not
+written to the recorder. The history sensors need the history endpoints of the RL29 fork
+(`/v1/energy-management/history/...`); an EOS without them is asked once, the sensors then stay
+unavailable.
+
+`dashboard/eos-charts.yaml` is an example view with these charts (needs the custom card
+`apexcharts-card` from HACS). The integration does not create dashboards itself.
+
 ## Privacy
 
 No personal data leaves Home Assistant except the measurements above, and only to the configured
@@ -120,12 +209,14 @@ redact the EOS URL.
 
 ## Migration from automations
 
-1. Shadow mode: the integration computes targets and reasons but writes nothing; compare with the
-   existing automations for a few days.
-2. Switch over: turn the integration on, disable the old automations (keep them).
-3. Remove the old automations and helpers after a trial period.
+1. Let the integration compute targets and reasons next to the existing automations and compare
+   them for a few days (the integration itself writes nothing).
+2. Switch over: let the automations switch from the integration's targets (SG Ready, standby,
+   hot water), keep a safe fallback (normal operation) for when the integration has no value.
+3. Remove the old decision logic and its helpers. Version 0.6 removed the built-in shadow
+   comparison; its options and entities are dropped on setup.
 
 ## Tests
 
 pytest with `pytest-homeassistant-custom-component`: config flow, mapping validation, every safety
-rule, restart restore, holiday sequence (standby, hot water setpoints, return), shadow mode.
+rule, restart restore, holiday sequence (standby, hot water setpoints, return).

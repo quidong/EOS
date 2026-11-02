@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 DOMAIN = "eos_control"
-PLATFORMS = ["sensor", "binary_sensor"]
+PLATFORMS = ["sensor", "binary_sensor", "calendar"]
 
 SUBENTRY_ROOM = "room"
+SUBENTRY_DEVICE = "device"
 
 # Entry data
 CONF_URL = "url"
@@ -21,10 +22,8 @@ CONF_HEATING_SEASON_STATES = "heating_season_states"
 CONF_SG_ACTUAL_ENTITY = "sg_actual_entity"
 CONF_ZONE_ALLOWED_ENTITY = "zone_allowed_entity"
 CONF_REDUCTION_LOCK_ENTITY = "reduction_lock_entity"
-# Options: shadow comparison (all optional)
-CONF_SG_REFERENCE_ENTITY = "sg_reference_entity"
-CONF_STANDBY_REFERENCE_ENTITY = "standby_reference_entity"
-CONF_STANDBY_REFERENCE_STATE = "standby_reference_state"
+# Options of the removed shadow comparison (before 0.6), dropped on setup
+OBSOLETE_OPTIONS = ("sg_reference_entity", "standby_reference_entity", "standby_reference_state")
 
 # Options: rules
 CONF_SG_REDUCED = "sg_reduced"
@@ -40,6 +39,15 @@ CONF_AIRING_RUN_ON = "airing_run_on_min"
 CONF_HOLIDAY_FLOOR = "holiday_floor_c"
 CONF_HOLIDAY_RESTART = "holiday_restart_hours"
 CONF_HOLIDAY_DHW_LEAD = "holiday_dhw_lead_hours"
+CONF_SETTLE = "settle_seconds"
+CONF_SEND_MEASUREMENTS = "send_measurements"
+CONF_MEASUREMENT_INTERVAL = "measurement_interval_min"
+CONF_PLAN_ENTITIES = "plan_entities"
+CONF_MEASUREMENTS = "measurements"
+
+# Device subentry (battery, electric vehicle, home appliance from EOS)
+CONF_EOS_DEVICE = "eos_device_id"
+CONF_KIND = "kind"
 
 # Room subentry
 CONF_NAME = "name"
@@ -57,7 +65,6 @@ CONF_SETPOINT_ENTITY = "setpoint_entity"
 DEFAULTS = {
     CONF_SCAN_INTERVAL: 60,
     CONF_HEATING_SEASON_STATES: "on, heat, heating",
-    CONF_STANDBY_REFERENCE_STATE: "standby",
     CONF_SG_REDUCED: 1,
     CONF_SG_NORMAL: 2,
     CONF_SG_RAISED: 3,
@@ -71,6 +78,10 @@ DEFAULTS = {
     CONF_HOLIDAY_FLOOR: 16.0,
     CONF_HOLIDAY_RESTART: 1.0,
     CONF_HOLIDAY_DHW_LEAD: 3.0,
+    CONF_SETTLE: 10,
+    CONF_SEND_MEASUREMENTS: True,
+    CONF_MEASUREMENT_INTERVAL: 5,
+    CONF_PLAN_ENTITIES: True,
     CONF_LOWER: 19.5,
     CONF_UPPER: 23.5,
     CONF_HUMIDITY_MAX: 65.0,
@@ -78,6 +89,5 @@ DEFAULTS = {
     CONF_IN_ZONE: False,
 }
 
-# Consecutive polls with a different result before the shadow comparison counts a mismatch
-MISMATCH_CONFIRM_POLLS = 2
-MISMATCH_LOG_SIZE = 30
+# Repairs: EOS unreachable / measurements not accepted for longer than this
+ISSUE_AFTER_MIN = 30

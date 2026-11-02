@@ -1,0 +1,72 @@
+lock_reduction:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: eos_control
+    until:
+      example: "2026-11-02 22:00:00"
+      selector:
+        datetime:
+    duration:
+      example: "02:00:00"
+      selector:
+        duration:
+
+clear_reduction_lock:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: eos_control
+
+set_holiday:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: eos_control
+    start:
+      selector:
+        datetime:
+    return_at:
+      required: true
+      selector:
+        datetime:
+
+end_holiday:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: eos_control
+
+request_run:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: eos_control
+    device:
+      required: true
+      example: dishwasher
+      selector:
+        text:
+    finish_by:
+      required: true
+      selector:
+        datetime:
+    duration:
+      selector:
+        duration:
+
+cancel_run:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: eos_control
+    device:
+      required: true
+      selector:
+        text:

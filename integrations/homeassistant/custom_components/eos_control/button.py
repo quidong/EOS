@@ -1,4 +1,4 @@
-"""Buttons to reset the shadow comparison and the comfort learning."""
+"""Button to reset the comfort learning."""
 
 from __future__ import annotations
 
@@ -16,19 +16,13 @@ async def async_setup_entry(
     entry: EosControlConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    async_add_entities(
-        [
-            ResetShadowButton(entry.runtime_data, "reset_shadow"),
-            ResetComfortButton(entry.runtime_data, "reset_comfort"),
-        ]
-    )
-
-
-class ResetShadowButton(EosControlEntity, ButtonEntity):
-    _attr_entity_category = EntityCategory.CONFIG
-
-    async def async_press(self) -> None:
-        await self.coordinator.async_reset_shadow()
+    coordinator = entry.runtime_data
+    for subentry in coordinator.device_subentries("heat_pump")[:1]:
+        # the comfort learning belongs to the heat pump
+        async_add_entities(
+            [ResetComfortButton(coordinator, "reset_comfort")],
+            config_subentry_id=subentry.subentry_id,
+        )
 
 
 class ResetComfortButton(EosControlEntity, ButtonEntity):

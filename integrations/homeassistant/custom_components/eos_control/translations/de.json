@@ -5,16 +5,32 @@
         "title": "EOS",
         "data": {
           "url": "EOS-URL",
-          "device_id": "Geräte-ID der Wärmepumpe in EOS",
           "scan_interval": "Abfrageintervall"
+        }
+      },
+      "reconfigure": {
+        "title": "EOS-Verbindung",
+        "data": {
+          "url": "EOS-URL",
+          "scan_interval": "Abfrageintervall"
+        }
+      },
+      "devices": {
+        "title": "Geräte aus EOS",
+        "data": {
+          "devices": "Geräte (weitere später über „Gerät aus EOS hinzufügen“)"
         }
       }
     },
     "error": {
-      "cannot_connect": "EOS antwortet unter dieser URL nicht."
+      "cannot_connect": "EOS antwortet unter dieser URL nicht.",
+      "cannot_read_devices": "Die Geräteliste von EOS (/v1/config/devices) konnte nicht gelesen werden.",
+      "one_heat_pump": "Pro EOS-Eintrag nur eine Wärmepumpe."
     },
     "abort": {
-      "already_configured": "Diese Wärmepumpe ist bereits eingerichtet."
+      "already_configured": "Diese EOS-Instanz ist bereits eingerichtet.",
+      "cannot_read_devices": "Die Geräteliste von EOS (/v1/config/devices) konnte nicht gelesen werden.",
+      "reconfigure_successful": "Gespeichert."
     }
   },
   "options": {
@@ -28,9 +44,7 @@
           "heating_season_entity": "Betriebsart / Heizsaison",
           "sg_actual_entity": "Aktueller SG-Ready-Zustand",
           "zone_allowed_entity": "Zonen-Absenkung erlaubt",
-          "reduction_lock_entity": "Absenkung gesperrt bis",
-          "sg_reference_entity": "Schattenvergleich: SG-Soll der bestehenden Steuerung",
-          "standby_reference_entity": "Schattenvergleich: Betriebsart der Wärmepumpe"
+          "reduction_lock_entity": "Absenkung gesperrt bis"
         }
       },
       "rules": {
@@ -50,8 +64,16 @@
           "holiday_restart_hours": "Wiederanlauf vor der Rückkehr",
           "holiday_dhw_lead_hours": "WW-Sollwerte vor einer Ladung zurückstellen",
           "heating_season_states": "Zustände für Heizen (kommagetrennt)",
-          "standby_reference_state": "Zustand für Standby"
+          "settle_seconds": "Neue Entscheidung erst übernehmen nach",
+          "send_measurements": "Messwerte an EOS senden",
+          "measurement_interval_min": "Messwerte senden alle",
+          "plan_entities": "Plan-Spalten als Entitäten (sensor.eos_…)"
         }
+      },
+      "measurements": {
+        "title": "Messwerte für EOS",
+        "description": "Entitäten für die EOS-Messwerte, die zu keinem eingebundenen Gerät gehören (Zähler u. a.). Leer = nicht senden.",
+        "data": {}
       }
     }
   },
@@ -98,6 +120,31 @@
       "abort": {
         "reconfigure_successful": "Raum aktualisiert."
       }
+    },
+    "device": {
+      "entry_type": "EOS-Gerät",
+      "initiate_flow": {
+        "user": "Gerät aus EOS hinzufügen"
+      },
+      "step": {
+        "user": {
+          "title": "Gerät aus der EOS-Konfiguration (Wärmepumpe, Akku, E-Auto/Wallbox, Haushaltsgerät)",
+          "data": {
+            "eos_device_id": "Gerät"
+          }
+        },
+        "reconfigure": {
+          "title": "Messwerte des Geräts",
+          "description": "Entitäten für die EOS-Messwerte dieses Geräts. Werte, die die Integration selbst berechnet (Räume, Urlaub, Sperre), fehlen hier.",
+          "data": {}
+        }
+      },
+      "abort": {
+        "cannot_read_devices": "Die Geräteliste von EOS (/v1/config/devices) konnte nicht gelesen werden.",
+        "no_devices": "EOS hat keine weiteren Geräte, die sich hinzufügen lassen.",
+        "device_not_found": "Das Gerät ist nicht mehr in der EOS-Konfiguration.",
+        "reconfigure_successful": "Gespeichert."
+      }
     }
   },
   "entity": {
@@ -126,11 +173,74 @@
       "humidity_max": {
         "name": "Luftfeuchte Maximum"
       },
-      "shadow_agreement": {
-        "name": "Schattenvergleich Übereinstimmung"
-      },
       "comfort_suggestions": {
         "name": "Komfort-Vorschläge"
+      },
+      "plan": {
+        "name": "Plan"
+      },
+      "forecast": {
+        "name": "Prognose"
+      },
+      "planned_load_hour": {
+        "name": "Geplante Hauslast (Stunde)"
+      },
+      "planned_heat_pump_hour": {
+        "name": "Geplante WP-Energie (Stunde)"
+      },
+      "planned_room_temperature": {
+        "name": "Geplante Raumtemperatur"
+      },
+      "planned_dhw_temperature": {
+        "name": "Geplante Warmwassertemperatur"
+      },
+      "history": {
+        "name": "Historie"
+      },
+      "history_hours": {
+        "name": "Historie Stunden"
+      },
+      "operation_mode": {
+        "name": "Betriebsmodus",
+        "state": {
+          "idle": "Ruhe",
+          "self_consumption": "Eigenverbrauch",
+          "non_export": "Ohne Einspeisung (PV-Laden)",
+          "peak_shaving": "Lastspitzen abdecken",
+          "grid_support_export": "Netzeinspeisung aus dem Akku",
+          "grid_support_import": "Laden aus dem Netz",
+          "frequency_regulation": "Frequenzregelung",
+          "ramp_rate_control": "Rampenbegrenzung",
+          "reserve_backup": "Reserve halten",
+          "outage_supply": "Notstrom",
+          "forced_charge": "Zwangsladen",
+          "forced_discharge": "Zwangsentladen",
+          "fault": "Störung"
+        }
+      },
+      "mode_factor": {
+        "name": "Modus-Faktor"
+      },
+      "planned_soc": {
+        "name": "Geplanter Ladestand"
+      },
+      "charge_power_target": {
+        "name": "Ladeleistung-Soll"
+      },
+      "next_start": {
+        "name": "Nächster Start"
+      },
+      "device_plan": {
+        "name": "Plan"
+      },
+      "room_temperature": {
+        "name": "Raumtemperatur"
+      },
+      "room_margin": {
+        "name": "Abstand zur Untergrenze"
+      },
+      "room_comfort_suggestion": {
+        "name": "Komfort-Vorschlag"
       },
       "zone_mode": {
         "name": "Zone {zone} Modus"
@@ -160,15 +270,164 @@
       },
       "eos_plan_ok": {
         "name": "EOS-Plan OK"
+      },
+      "grid_charge": {
+        "name": "Laden aus dem Netz"
+      },
+      "discharge_allowed": {
+        "name": "Entladen erlaubt"
+      },
+      "grid_export": {
+        "name": "Einspeisen aus dem Akku"
+      },
+      "running_planned": {
+        "name": "Läuft laut Plan"
+      },
+      "airing": {
+        "name": "Lüften"
+      },
+      "humidity_high": {
+        "name": "Feuchte zu hoch"
       }
     },
     "button": {
-      "reset_shadow": {
-        "name": "Schattenvergleich zurücksetzen"
-      },
       "reset_comfort": {
         "name": "Komfort-Lernen zurücksetzen"
       }
+    },
+    "calendar": {
+      "plan_calendar": {
+        "name": "Plan"
+      }
+    }
+  },
+  "issues": {
+    "eos_unreachable": {
+      "title": "EOS nicht erreichbar",
+      "description": "EOS antwortet seit mehr als {minutes} Minuten nicht unter {url}. Die Integration nutzt den letzten Plan, solange er gültig ist, und fällt danach auf NORMAL zurück."
+    },
+    "plan_stale": {
+      "title": "EOS-Plan veraltet",
+      "description": "EOS ist erreichbar, aber der Plan ist älter als {minutes} Minuten. Läuft die Optimierung in EOS?"
+    },
+    "device_missing": {
+      "title": "EOS-Gerät {device} fehlt",
+      "description": "Das Gerät {device} ist nicht mehr in der EOS-Konfiguration. Gerät in EOS wieder anlegen oder in der Integration entfernen."
+    },
+    "measurements_failed": {
+      "title": "Messwerte erreichen EOS nicht",
+      "description": "Seit mehr als {minutes} Minuten nimmt EOS die Messwerte nicht an: {error}."
+    }
+  },
+  "services": {
+    "lock_reduction": {
+      "name": "Absenkung sperren",
+      "description": "Keine Absenkung bis zu einer Uhrzeit oder für eine Dauer (EOS plant bis dahin NORMAL).",
+      "fields": {
+        "config_entry_id": {
+          "name": "EOS-Eintrag",
+          "description": "Nur nötig bei mehreren EOS-Instanzen."
+        },
+        "until": {
+          "name": "Bis",
+          "description": "Ende der Sperre."
+        },
+        "duration": {
+          "name": "Dauer",
+          "description": "Sperre ab jetzt für diese Dauer."
+        }
+      }
+    },
+    "clear_reduction_lock": {
+      "name": "Absenk-Sperre aufheben",
+      "description": "Hebt die per Aktion gesetzte Sperre auf.",
+      "fields": {
+        "config_entry_id": {
+          "name": "EOS-Eintrag",
+          "description": "Nur nötig bei mehreren EOS-Instanzen."
+        }
+      }
+    },
+    "set_holiday": {
+      "name": "Urlaub setzen",
+      "description": "Urlaub von/bis: EOS plant mit Abwesenheit und heizt zur Rückkehr wieder auf.",
+      "fields": {
+        "config_entry_id": {
+          "name": "EOS-Eintrag",
+          "description": "Nur nötig bei mehreren EOS-Instanzen."
+        },
+        "start": {
+          "name": "Beginn",
+          "description": "Leer = ab jetzt."
+        },
+        "return_at": {
+          "name": "Rückkehr",
+          "description": "Zeitpunkt der Rückkehr."
+        }
+      }
+    },
+    "end_holiday": {
+      "name": "Urlaub beenden",
+      "description": "Beendet den per Aktion gesetzten Urlaub.",
+      "fields": {
+        "config_entry_id": {
+          "name": "EOS-Eintrag",
+          "description": "Nur nötig bei mehreren EOS-Instanzen."
+        }
+      }
+    },
+    "request_run": {
+      "name": "Gerätelauf anfordern",
+      "description": "Ein Haushaltsgerät soll bis zu einer Uhrzeit fertig sein; EOS plant den günstigsten Start.",
+      "fields": {
+        "config_entry_id": {
+          "name": "EOS-Eintrag",
+          "description": "Nur nötig bei mehreren EOS-Instanzen."
+        },
+        "device": {
+          "name": "Gerät",
+          "description": "EOS-Geräte-ID des Haushaltsgeräts."
+        },
+        "finish_by": {
+          "name": "Fertig bis",
+          "description": "Spätestes Ende."
+        },
+        "duration": {
+          "name": "Dauer",
+          "description": "Programmdauer (leer = Wert aus EOS)."
+        }
+      }
+    },
+    "cancel_run": {
+      "name": "Gerätelauf abbrechen",
+      "description": "Nimmt die Anforderung zurück.",
+      "fields": {
+        "config_entry_id": {
+          "name": "EOS-Eintrag",
+          "description": "Nur nötig bei mehreren EOS-Instanzen."
+        },
+        "device": {
+          "name": "Gerät",
+          "description": "EOS-Geräte-ID des Haushaltsgeräts."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "entry_ambiguous": {
+      "message": "Mehrere EOS-Einträge: bitte den Eintrag angeben."
+    },
+    "entry_not_found": {
+      "message": "Kein geladener EOS-Eintrag gefunden."
+    },
+    "return_before_start": {
+      "message": "Die Rückkehr muss nach dem Beginn liegen."
+    },
+    "unknown_appliance": {
+      "message": "{device} ist kein Haushaltsgerät in EOS."
+    },
+    "finish_in_the_past": {
+      "message": "„Fertig bis“ liegt in der Vergangenheit."
     }
   }
 }

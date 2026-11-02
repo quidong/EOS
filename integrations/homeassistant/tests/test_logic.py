@@ -108,7 +108,6 @@ def test_a_fresh_plan_is_executed_even_with_a_room_below_its_limit():
     assert d.sg_target == 1
     assert "note: below limit: r1 19.4 < 19.5" in d.reason
     assert d.cold_rooms == ["r1 19.4 < 19.5"]
-    # no hysteresis note above the limit itself
     assert "note" not in run([0] * 4, rooms(21.0, 19.8, 21.2)).reason
 
 
@@ -270,12 +269,87 @@ def test_holiday_without_reduced_setpoint_uses_the_holiday_floor():
 
 
 # ----------------------------------------------------------------------
+# Settle: a changed decision is accepted only after it stayed the same
+# ----------------------------------------------------------------------
+
+
+def _decision(sg, standby=False, reason=None, standby_reason=""):
+    return logic.Decision(
+        sg_target=sg,
+        reason=reason or f"SG {sg}",
+        standby=standby,
+        standby_reason=standby_reason,
+    )
+
+
+def test_settle_accepts_the_first_decision_at_once():
+    settle = logic.Settle(seconds=10)
+    decision, wait = settle.apply(_decision(1), NOW)
+    assert decision.sg_target == 1 and wait is None and decision.pending is None
+
+
+def test_settle_holds_a_change_for_the_settle_time():
+    settle = logic.Settle(seconds=10)
+    settle.apply(_decision(2), NOW)
+    held, wait = settle.apply(_decision(1, reason="REDUCED -> SG 1"), NOW)
+    assert held.sg_target == 2 and held.reason == "SG 2"
+    assert held.pending == "REDUCED -> SG 1 (in 10 s)"
+    assert wait == pytest.approx(10)
+    held, wait = settle.apply(_decision(1), NOW + timedelta(seconds=6))
+    assert held.sg_target == 2 and wait == pytest.approx(4)
+    accepted, wait = settle.apply(_decision(1), NOW + timedelta(seconds=10))
+    assert accepted.sg_target == 1 and accepted.pending is None and wait is None
+
+
+def test_settle_restarts_when_the_change_flips_back_or_changes():
+    settle = logic.Settle(seconds=10)
+    settle.apply(_decision(2), NOW)
+    settle.apply(_decision(1), NOW)
+    # back to the accepted value: nothing pending any more
+    back, wait = settle.apply(_decision(2), NOW + timedelta(seconds=5))
+    assert back.sg_target == 2 and back.pending is None and wait is None
+    settle.apply(_decision(1), NOW + timedelta(seconds=8))
+    # another change restarts the time
+    held, wait = settle.apply(_decision(3), NOW + timedelta(seconds=15))
+    assert held.sg_target == 2 and wait == pytest.approx(10)
+    accepted, _ = settle.apply(_decision(3), NOW + timedelta(seconds=25))
+    assert accepted.sg_target == 3
+
+
+def test_settle_holds_standby_and_names_its_reason():
+    settle = logic.Settle(seconds=10)
+    settle.apply(_decision(2, standby=True, standby_reason="standby: EOS plans standby"), NOW)
+    held, _ = settle.apply(
+        _decision(2, standby=False, standby_reason="no standby: EOS plans NORMAL"), NOW
+    )
+    assert held.standby is True
+    assert held.standby_reason == "standby: EOS plans standby"
+    assert held.pending == "no standby: EOS plans NORMAL (in 10 s)"
+
+
+def test_settle_keeps_current_measurements_while_holding():
+    settle = logic.Settle(seconds=10)
+    settle.apply(_decision(2), NOW)
+    new = _decision(1)
+    new.room_mean_c = 20.4
+    held, _ = settle.apply(new, NOW)
+    assert held.sg_target == 2 and held.room_mean_c == 20.4
+
+
+def test_settle_zero_accepts_every_change():
+    settle = logic.Settle(seconds=0)
+    settle.apply(_decision(2), NOW)
+    decision, wait = settle.apply(_decision(1), NOW)
+    assert decision.sg_target == 1 and wait is None
+
+
+# ----------------------------------------------------------------------
 # Heating zones (multi-zone EOS)
 # ----------------------------------------------------------------------
 
 
-def zone_solution(og, eg, house):
-    plan = solution(house)
+def zone_solution(og, eg, house, generated=NOW - timedelta(minutes=5)):
+    plan = solution(house, generated=generated)
     for (stamp, row), o, e in zip(sorted(plan["solution"]["data"].items()), og, eg):
         row["hp1_zone_og_heating_mode"] = float(o)
         row["hp1_zone_eg_heating_mode"] = float(e)
@@ -283,15 +357,13 @@ def zone_solution(og, eg, house):
 
 
 def zone_rooms():
-    rooms_og = [
+    return [
         logic.RoomState("Flur OG", 19.3, lower_c=19.5, upper_c=23.5, zone="og"),
         logic.RoomState("Bad OG", 19.8, lower_c=19.5, upper_c=23.5, zone="og"),
-    ]
-    rooms_eg = [
         logic.RoomState("Küche", 21.4, lower_c=19.5, upper_c=23.5, zone="eg"),
         logic.RoomState("Wohnzimmer", 21.0, lower_c=19.5, upper_c=23.5, zone="eg"),
+        logic.RoomState("Garage", 15.0, lower_c=5.0, upper_c=30.0),
     ]
-    return rooms_og + rooms_eg + [logic.RoomState("Garage", 15.0, lower_c=5.0, upper_c=30.0)]
 
 
 def test_parse_plan_reads_the_zone_modes():
@@ -313,7 +385,7 @@ def test_zone_figures_and_modes():
     assert og.room_mean_c == pytest.approx(19.55)
     assert og.room_min_margin_k == pytest.approx(-0.2) and og.coldest_room == "Flur OG"
     assert eg.room_max_margin_k == pytest.approx(2.1)
-    assert d.sg_target == 4  # the heat pump mode of the plan
+    assert d.sg_target == 4
     assert d.as_attributes()["zones"]["og"]["mode"] == "FORCED"
 
 
@@ -321,8 +393,7 @@ def test_zones_fall_back_to_normal_without_a_plan():
     stale = logic.ControlInput(
         now=NOW,
         plan=logic.parse_plan(
-            zone_solution([4] * 4, [0] * 4, [4] * 4, ) | {"generated_at": (NOW - timedelta(hours=2)).isoformat()},
-            "hp1",
+            zone_solution([4] * 4, [0] * 4, [4] * 4, generated=NOW - timedelta(hours=2)), "hp1"
         ),
         rooms=zone_rooms(),
     )
@@ -335,5 +406,25 @@ def test_a_zone_missing_in_the_plan_follows_the_house_mode():
     data = logic.ControlInput(
         now=NOW, plan=logic.parse_plan(solution([3] * 4), "hp1"), rooms=zone_rooms()
     )
-    d = logic.decide(data, logic.Settings())
-    assert d.zones["og"].mode == logic.PREHEAT
+    assert logic.decide(data, logic.Settings()).zones["og"].mode == logic.PREHEAT
+
+
+def test_zone_measurements_for_eos():
+    from importlib import util
+
+    path = LOGIC.parent / "measurements.py"
+    spec = util.spec_from_file_location("eos_control_measurements", path)
+    measurements = util.module_from_spec(spec)
+    spec.loader.exec_module(measurements)
+    data = logic.ControlInput(
+        now=NOW,
+        plan=logic.parse_plan(zone_solution([1] * 4, [1] * 4, [1] * 4), "hp1"),
+        rooms=zone_rooms(),
+    )
+    zones = logic.decide(data, logic.Settings()).zones
+    values = measurements.zone_values("hp1", zones)
+    assert values["hp1-og-room-temperature"] == pytest.approx(19.55)
+    assert values["hp1-og-room-min-margin"] == pytest.approx(-0.2)
+    assert values["hp1-eg-room-max-margin"] == pytest.approx(2.1)
+    keys = measurements.computed_keys("hp1", ["og"])
+    assert "hp1-og-room-temperature" in keys and "hp1-room-temperature" in keys
