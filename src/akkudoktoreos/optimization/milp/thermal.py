@@ -518,4 +518,4 @@ def project_modes(
         heating_genes.append(best[1])
         dhw_genes.append(best[2])
         state = best[3]
-    return heating_genes + dhw_genes
+    return plan.expand_zone_genes(heating_genes + dhw_genes)

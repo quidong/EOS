@@ -452,6 +452,11 @@ config path from ``self.device_id`` without needing an external index.
                            ]
                        }
                    },
+                   "zones": {
+                       "enabled": false,
+                       "zones": [],
+                       "couplings": []
+                   },
                    "ventilation": {
                        "enabled": false,
                        "loss_w_per_k": 1000.0,
@@ -980,6 +985,11 @@ config path from ``self.device_id`` without needing an external index.
                                }
                            ]
                        }
+                   },
+                   "zones": {
+                       "enabled": false,
+                       "zones": [],
+                       "couplings": []
                    },
                    "ventilation": {
                        "enabled": false,

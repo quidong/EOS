@@ -222,6 +222,49 @@ day recommend nothing else (before, the afternoon runs marked the current slot a
 on which at least `recommend_skip_aired_share` (default 0.7) of the windows were already open in the
 window (`recommend_start_hour` … `recommend_end_hour`) gets no recommendation; `None` turns that off.
 
+## Zones (multi-zone heating)
+
+Houses with floors that react differently (a heavy wet screed upstairs, a light dry screed downstairs)
+can be planned per zone (`zones.enabled`, at least two `zones`):
+
+- every zone has its own two-node model: `building` or, without it, the house model × `share`;
+- `couplings` exchange heat between the rooms of two zones (ceiling, stairs) [W/K];
+- the optimizer picks a mode per zone and hour. REDUCED to PREHEAT set the zone's room target (the
+  room controllers regulate and close the valves on their own), FORCED opens all valves of the zone;
+- the zones share the heating circuit: one flow temperature and one heat pump. The heat pump mode is
+  derived per slot: FORCED if any zone is forced, the strongest raise otherwise, REDUCED only when all
+  zones are reduced. Space heat is distributed by the zones' demands; if the heat pump cannot deliver
+  the sum, every zone gets the same share. Hot water, standby, §14a and cooling use the house model;
+- comfort is judged per zone, weighted by `weight` (default `share`);
+- `setback_windows` / `setback_room_c` per zone replace the single `zone_setback`
+  (`<device_id>-setback-room-temperature` overrides the temperature);
+- measurements per zone: `<device_id>-<zone_id>-room-temperature` and, with `room_limits`,
+  `<device_id>-<zone_id>-room-min-margin` / `-room-max-margin`; a missing zone uses the house mean;
+- solution columns per zone: `<device_id>_zone_<zone_id>_heating_mode` and
+  `<device_id>_zone_<zone_id>_room_temperature_c`; `<device_id>_heating_mode` stays the heat pump mode.
+
+```yaml
+devices:
+  heat_pumps:
+    hp1:
+      zones:
+        enabled: true
+        zones:
+          - zone_id: og          # wet screed, set back at night
+            share: 0.4
+            building: {slab_capacity_wh_per_k: 2500, room_capacity_wh_per_k: 4000,
+                       loss_w_per_k: 80, slab_room_w_per_k: 600, emitter_w_per_k: 400}
+            setback_windows: {windows: [{start_time: "22:00", duration: "8 hours"}]}
+          - zone_id: eg          # dry screed, ground floor and basement
+            share: 0.6
+        couplings:
+          - {zone_a: og, zone_b: eg, w_per_k: 150}
+```
+
+The MILP solves the house as one zone and its projection gives every zone the same mode; the
+GENETIC polish then separates the zones. Calibration still fits the house model (per-zone
+calibration is planned).
+
 ## Plan stability
 
 EOS replans every few minutes. Three rules keep the running mode from flipping with every run:

@@ -1240,6 +1240,147 @@ class HeatPumpCalibrationSettings(SettingsBaseModel):
         )
 
 
+class HeatPumpZoneSettings(SettingsBaseModel):
+    """One heating zone (eos-plus fork), e.g. one floor with its own screed.
+
+    The zone gets its own two-node model: either ``building`` or, without it, the
+    house model scaled by ``share``. EOS chooses a mode per zone; REDUCED to
+    PREHEAT set the zone's room target (its room controllers regulate and close the
+    valves), FORCED opens all valves of the zone. The controller reports the zone's
+    mean room temperature as ``<device_id>-<zone_id>-room-temperature`` and, with
+    ``room_limits``, its margins ``<device_id>-<zone_id>-room-min-margin`` /
+    ``-room-max-margin``.
+    """
+
+    zone_id: str = Field(
+        pattern=r"^[a-z0-9_]+$",
+        json_schema_extra={
+            "description": "ID of the zone (lower case, digits, _).",
+            "examples": ["og"],
+        },
+    )
+    share: float = Field(
+        default=1.0,
+        gt=0,
+        le=1,
+        json_schema_extra={
+            "description": (
+                "Share of the house (e.g. heated floor area / total); scales the house "
+                "model when no own 'building' is given and weights the comfort cost."
+            ),
+            "examples": [0.4],
+        },
+    )
+    weight: Optional[float] = Field(
+        default=None,
+        gt=0,
+        json_schema_extra={
+            "description": "Weight in the comfort cost; None = share.",
+            "examples": [None],
+        },
+    )
+    building: Optional[HeatPumpBuildingSettings] = Field(
+        default=None,
+        json_schema_extra={
+            "description": "Own two-node model of the zone; None = house model x share."
+        },
+    )
+    setback_windows: Optional[ValueTimeWindowSequence] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "When the zone only needs its setback temperature (local time); the "
+                "optimizer may then reduce it without a comfort cost. None = never."
+            )
+        },
+    )
+    setback_room_c: float = Field(
+        default=19.0,
+        json_schema_extra={
+            "description": (
+                "Zone temperature while set back [degC]; overridden by the measurement "
+                "'<device_id>-setback-room-temperature'."
+            ),
+            "examples": [19.0],
+        },
+    )
+    setback_min_offset_k: float = Field(
+        default=0.5,
+        ge=0,
+        json_schema_extra={
+            "description": "The zone may fall this far below its setback temperature [K]."
+        },
+    )
+
+    def to_parameters(self, house: "HeatPumpBuildingSettings") -> BuildingParameters:
+        """Two-node parameters of the zone."""
+        if self.building is not None:
+            return self.building.to_parameters()
+        p = house.to_parameters()
+        f = self.share
+        return BuildingParameters(
+            slab_capacity_wh_per_k=p.slab_capacity_wh_per_k * f,
+            room_capacity_wh_per_k=p.room_capacity_wh_per_k * f,
+            loss_w_per_k=p.loss_w_per_k * f,
+            slab_room_w_per_k=p.slab_room_w_per_k * f,
+            emitter_w_per_k=p.emitter_w_per_k * f,
+            solar_aperture_m2=p.solar_aperture_m2 * f,
+            internal_gains_w=p.internal_gains_w * f,
+        )
+
+    def setback_at(self, dt: DateTime) -> bool:
+        return self.setback_windows is not None and self.setback_windows.contains(dt)
+
+
+class HeatPumpZoneCouplingSettings(SettingsBaseModel):
+    """Heat exchange between the rooms of two zones (ceiling, stairs)."""
+
+    zone_a: str = Field(json_schema_extra={"description": "First zone.", "examples": ["og"]})
+    zone_b: str = Field(json_schema_extra={"description": "Second zone.", "examples": ["eg"]})
+    w_per_k: float = Field(
+        default=100.0,
+        ge=0,
+        json_schema_extra={"description": "Heat transfer coefficient [W/K].", "examples": [150.0]},
+    )
+
+
+class HeatPumpZonesSettings(SettingsBaseModel):
+    """Multi-zone space heating (eos-plus fork); disabled = one zone as before.
+
+    With zones the old single ``zone_setback`` is not used: give the zone its
+    ``setback_windows`` instead.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        json_schema_extra={"description": "Plan the heating per zone."},
+    )
+    zones: list[HeatPumpZoneSettings] = Field(
+        default_factory=list,
+        json_schema_extra={"description": "The zones on the heating circuit (at least two)."},
+    )
+    couplings: list[HeatPumpZoneCouplingSettings] = Field(
+        default_factory=list,
+        json_schema_extra={"description": "Heat exchange between zones."},
+    )
+
+    @model_validator(mode="after")
+    def validate_zones(self) -> "HeatPumpZonesSettings":
+        ids = [z.zone_id for z in self.zones]
+        if len(set(ids)) != len(ids):
+            raise ValueError("Zone IDs must be unique.")
+        if self.enabled and len(ids) < 2:
+            raise ValueError("Multi-zone heating needs at least two zones.")
+        for c in self.couplings:
+            if c.zone_a not in ids or c.zone_b not in ids or c.zone_a == c.zone_b:
+                raise ValueError(f"Coupling {c.zone_a}-{c.zone_b} refers to unknown zones.")
+        return self
+
+    @property
+    def active(self) -> bool:
+        return self.enabled and len(self.zones) >= 2
+
+
 class HeatPumpCommonSettings(DevicesBaseSettings):
     """Heat pump with building, hot water tank and heating rod (RL29 fork)."""
 
@@ -1252,6 +1393,7 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
     calibration: HeatPumpCalibrationSettings = Field(default_factory=HeatPumpCalibrationSettings)
     away: HeatPumpAwaySettings = Field(default_factory=HeatPumpAwaySettings)
     zone_setback: HeatPumpZoneSetbackSettings = Field(default_factory=HeatPumpZoneSetbackSettings)
+    zones: HeatPumpZonesSettings = Field(default_factory=HeatPumpZonesSettings)
     ventilation: HeatPumpVentilationSettings = Field(default_factory=HeatPumpVentilationSettings)
     room_limits: HeatPumpRoomLimitsSettings = Field(default_factory=HeatPumpRoomLimitsSettings)
     humidity: HeatPumpHumiditySettings = Field(default_factory=HeatPumpHumiditySettings)
@@ -1330,9 +1472,23 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
             keys.append(self.measurement_key_humidity)
         if self.weather_warning.enabled:
             keys += [self.measurement_key_warning_start, self.measurement_key_warning_end]
+        if self.zones.active:
+            for zone in self.zones.zones:
+                keys.append(self.zone_measurement_key(zone.zone_id, "room-temperature"))
+                if self.room_limits.enabled:
+                    keys += [
+                        self.zone_measurement_key(zone.zone_id, "room-min-margin"),
+                        self.zone_measurement_key(zone.zone_id, "room-max-margin"),
+                    ]
+            if self.measurement_key_setback_room_temperature not in keys:
+                keys.append(self.measurement_key_setback_room_temperature)
         if self.calibration.enabled:
             keys += [k for k in self.calibration_measurement_keys.values() if k not in keys]
         return keys
+
+    def zone_measurement_key(self, zone_id: str, name: str) -> str:
+        """Measurement key of a zone, e.g. ``wbb12-og-room-temperature``."""
+        return f"{self.device_id}-{zone_id}-{name}"
 
     # Calibration measurements (RL29 fork): sample field -> measurement key.
     @computed_field  # type: ignore[prop-decorator]

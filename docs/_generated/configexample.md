@@ -472,6 +472,11 @@
                            ]
                        }
                    },
+                   "zones": {
+                       "enabled": false,
+                       "zones": [],
+                       "couplings": []
+                   },
                    "ventilation": {
                        "enabled": false,
                        "loss_w_per_k": 1000.0,

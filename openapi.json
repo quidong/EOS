@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2611021993980281"
+    "version": "v0.3.0.dev2611022282672682"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -10406,6 +10406,51 @@
             "title": "Active Heating Mode",
             "description": "RL29 fork: heating mode in effect now (from the previous plan); a plan that starts with another mode pays the mode change penalty. None = unknown."
           },
+          "zone_room_c": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zone Room C",
+            "description": "Fork: measured mean room temperature per zone [degC]."
+          },
+          "zone_min_margin_k": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zone Min Margin K",
+            "description": "Fork: smallest margin of a room above its lower limit per zone [K]."
+          },
+          "zone_max_margin_k": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zone Max Margin K",
+            "description": "Fork: smallest margin of a room below its upper limit per zone [K]."
+          },
           "active_dhw_mode": {
             "anyOf": [
               {
@@ -12090,6 +12135,9 @@
           "zone_setback": {
             "$ref": "#/components/schemas/HeatPumpZoneSetbackSettings-Input"
           },
+          "zones": {
+            "$ref": "#/components/schemas/HeatPumpZonesSettings-Input"
+          },
           "ventilation": {
             "$ref": "#/components/schemas/HeatPumpVentilationSettings"
           },
@@ -12169,6 +12217,9 @@
           },
           "zone_setback": {
             "$ref": "#/components/schemas/HeatPumpZoneSetbackSettings-Output"
+          },
+          "zones": {
+            "$ref": "#/components/schemas/HeatPumpZonesSettings-Output"
           },
           "ventilation": {
             "$ref": "#/components/schemas/HeatPumpVentilationSettings"
@@ -13107,6 +13158,43 @@
         "title": "HeatPumpWeatherWarningSettings",
         "description": "Heat reserve before a weather warning (fork).\n\nA storm, ice or frost warning can mean a power cut. The controller reports the\nwarned period as ``<device_id>-warning-start-ts`` and ``<device_id>-warning-end-ts``\n(Unix times, 0 = no warning; e.g. from the DWD warnings in Home Assistant).\nFor the slots in this period the comfort minimum rises by ``raise_room_k`` (at most\nto the comfort maximum) and the hot water minimum to ``dhw_min_c``, so EOS charges\nthe building and the tank beforehand, in the cheapest hours before the warning.\nWhile away with hot water off only the room part applies."
       },
+      "HeatPumpZoneCouplingSettings": {
+        "properties": {
+          "zone_a": {
+            "type": "string",
+            "title": "Zone A",
+            "description": "First zone.",
+            "examples": [
+              "og"
+            ]
+          },
+          "zone_b": {
+            "type": "string",
+            "title": "Zone B",
+            "description": "Second zone.",
+            "examples": [
+              "eg"
+            ]
+          },
+          "w_per_k": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "W Per K",
+            "description": "Heat transfer coefficient [W/K].",
+            "default": 100.0,
+            "examples": [
+              150.0
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "zone_a",
+          "zone_b"
+        ],
+        "title": "HeatPumpZoneCouplingSettings",
+        "description": "Heat exchange between the rooms of two zones (ceiling, stairs)."
+      },
       "HeatPumpZoneSetbackSettings-Input": {
         "properties": {
           "enabled": {
@@ -13194,6 +13282,232 @@
         "type": "object",
         "title": "HeatPumpZoneSetbackSettings",
         "description": "Setback of one zone of the building (RL29 fork), e.g. the bedrooms upstairs.\n\nEOS models the building as one zone; the measured room temperature is the\nmean of all rooms. While the zone is set back, its rooms only need the setback\ntemperature (``<device_id>-setback-room-temperature``, e.g. the reduced\nsetpoint of the heating circuit, fallback ``room_c``). The comfort minimum and\nthe NORMAL setpoint of the whole house drop by the zone's ``share`` of the\ndifference, so EOS neither plans to heat the zone up against the controller\nnor counts the cooler zone as a comfort violation. The solution column\n``<device_id>_zone_setback`` (1 = set back) tells the controller when to lower\nthe zone's room setpoints."
+      },
+      "HeatPumpZoneSettings-Input": {
+        "properties": {
+          "zone_id": {
+            "type": "string",
+            "pattern": "^[a-z0-9_]+$",
+            "title": "Zone Id",
+            "description": "ID of the zone (lower case, digits, _).",
+            "examples": [
+              "og"
+            ]
+          },
+          "share": {
+            "type": "number",
+            "maximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Share",
+            "description": "Share of the house (e.g. heated floor area / total); scales the house model when no own 'building' is given and weights the comfort cost.",
+            "default": 1.0,
+            "examples": [
+              0.4
+            ]
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight",
+            "description": "Weight in the comfort cost; None = share.",
+            "examples": [
+              null
+            ]
+          },
+          "building": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HeatPumpBuildingSettings"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Own two-node model of the zone; None = house model x share."
+          },
+          "setback_windows": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ValueTimeWindowSequence-Input"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the zone only needs its setback temperature (local time); the optimizer may then reduce it without a comfort cost. None = never."
+          },
+          "setback_room_c": {
+            "type": "number",
+            "title": "Setback Room C",
+            "description": "Zone temperature while set back [degC]; overridden by the measurement '<device_id>-setback-room-temperature'.",
+            "default": 19.0,
+            "examples": [
+              19.0
+            ]
+          },
+          "setback_min_offset_k": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Setback Min Offset K",
+            "description": "The zone may fall this far below its setback temperature [K].",
+            "default": 0.5
+          }
+        },
+        "type": "object",
+        "required": [
+          "zone_id"
+        ],
+        "title": "HeatPumpZoneSettings",
+        "description": "One heating zone (eos-plus fork), e.g. one floor with its own screed.\n\nThe zone gets its own two-node model: either ``building`` or, without it, the\nhouse model scaled by ``share``. EOS chooses a mode per zone; REDUCED to\nPREHEAT set the zone's room target (its room controllers regulate and close the\nvalves), FORCED opens all valves of the zone. The controller reports the zone's\nmean room temperature as ``<device_id>-<zone_id>-room-temperature`` and, with\n``room_limits``, its margins ``<device_id>-<zone_id>-room-min-margin`` /\n``-room-max-margin``."
+      },
+      "HeatPumpZoneSettings-Output": {
+        "properties": {
+          "zone_id": {
+            "type": "string",
+            "pattern": "^[a-z0-9_]+$",
+            "title": "Zone Id",
+            "description": "ID of the zone (lower case, digits, _).",
+            "examples": [
+              "og"
+            ]
+          },
+          "share": {
+            "type": "number",
+            "maximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Share",
+            "description": "Share of the house (e.g. heated floor area / total); scales the house model when no own 'building' is given and weights the comfort cost.",
+            "default": 1.0,
+            "examples": [
+              0.4
+            ]
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight",
+            "description": "Weight in the comfort cost; None = share.",
+            "examples": [
+              null
+            ]
+          },
+          "building": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HeatPumpBuildingSettings"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Own two-node model of the zone; None = house model x share."
+          },
+          "setback_windows": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ValueTimeWindowSequence-Output"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the zone only needs its setback temperature (local time); the optimizer may then reduce it without a comfort cost. None = never."
+          },
+          "setback_room_c": {
+            "type": "number",
+            "title": "Setback Room C",
+            "description": "Zone temperature while set back [degC]; overridden by the measurement '<device_id>-setback-room-temperature'.",
+            "default": 19.0,
+            "examples": [
+              19.0
+            ]
+          },
+          "setback_min_offset_k": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Setback Min Offset K",
+            "description": "The zone may fall this far below its setback temperature [K].",
+            "default": 0.5
+          }
+        },
+        "type": "object",
+        "required": [
+          "zone_id"
+        ],
+        "title": "HeatPumpZoneSettings",
+        "description": "One heating zone (eos-plus fork), e.g. one floor with its own screed.\n\nThe zone gets its own two-node model: either ``building`` or, without it, the\nhouse model scaled by ``share``. EOS chooses a mode per zone; REDUCED to\nPREHEAT set the zone's room target (its room controllers regulate and close the\nvalves), FORCED opens all valves of the zone. The controller reports the zone's\nmean room temperature as ``<device_id>-<zone_id>-room-temperature`` and, with\n``room_limits``, its margins ``<device_id>-<zone_id>-room-min-margin`` /\n``-room-max-margin``."
+      },
+      "HeatPumpZonesSettings-Input": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Plan the heating per zone.",
+            "default": false
+          },
+          "zones": {
+            "items": {
+              "$ref": "#/components/schemas/HeatPumpZoneSettings-Input"
+            },
+            "type": "array",
+            "title": "Zones",
+            "description": "The zones on the heating circuit (at least two)."
+          },
+          "couplings": {
+            "items": {
+              "$ref": "#/components/schemas/HeatPumpZoneCouplingSettings"
+            },
+            "type": "array",
+            "title": "Couplings",
+            "description": "Heat exchange between zones."
+          }
+        },
+        "type": "object",
+        "title": "HeatPumpZonesSettings",
+        "description": "Multi-zone space heating (eos-plus fork); disabled = one zone as before.\n\nWith zones the old single ``zone_setback`` is not used: give the zone its\n``setback_windows`` instead."
+      },
+      "HeatPumpZonesSettings-Output": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Plan the heating per zone.",
+            "default": false
+          },
+          "zones": {
+            "items": {
+              "$ref": "#/components/schemas/HeatPumpZoneSettings-Output"
+            },
+            "type": "array",
+            "title": "Zones",
+            "description": "The zones on the heating circuit (at least two)."
+          },
+          "couplings": {
+            "items": {
+              "$ref": "#/components/schemas/HeatPumpZoneCouplingSettings"
+            },
+            "type": "array",
+            "title": "Couplings",
+            "description": "Heat exchange between zones."
+          }
+        },
+        "type": "object",
+        "title": "HeatPumpZonesSettings",
+        "description": "Multi-zone space heating (eos-plus fork); disabled = one zone as before.\n\nWith zones the old single ``zone_setback`` is not used: give the zone its\n``setback_windows`` instead."
       },
       "HistoryAccuracyPair": {
         "properties": {

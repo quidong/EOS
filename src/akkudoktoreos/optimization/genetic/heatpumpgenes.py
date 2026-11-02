@@ -46,6 +46,7 @@ from akkudoktoreos.devices.thermal.heatpump import (
     HeatingMode,
     HeatPumpSystem,
     SlotInputs,
+    SlotResult,
     ThermalState,
 )
 from akkudoktoreos.optimization.genetic.geneticabc import GeneticParametersBaseModel
@@ -238,6 +239,22 @@ class GeneticHeatPumpParameters(GeneticParametersBaseModel):
             )
         },
     )
+    zone_room_c: Optional[dict[str, float]] = Field(
+        default=None,
+        json_schema_extra={"description": "Fork: measured mean room temperature per zone [degC]."},
+    )
+    zone_min_margin_k: Optional[dict[str, float]] = Field(
+        default=None,
+        json_schema_extra={
+            "description": "Fork: smallest margin of a room above its lower limit per zone [K]."
+        },
+    )
+    zone_max_margin_k: Optional[dict[str, float]] = Field(
+        default=None,
+        json_schema_extra={
+            "description": "Fork: smallest margin of a room below its upper limit per zone [K]."
+        },
+    )
     active_dhw_mode: Optional[int] = Field(
         default=None,
         json_schema_extra={
@@ -345,6 +362,13 @@ class HeatPumpRunPlan:
     """RL29 fork: heating mode in effect now; changing it at the start counts as a change."""
     active_dhw_mode: Optional[int] = None
     """RL29 fork: hot water mode in effect now; changing it at the start counts as a change."""
+    zone_model: Optional[Any] = None
+    """Multi-zone heating (fork, ``MultiZoneHeatPump``); None = one zone as before."""
+    zone_ids: tuple[str, ...] = ()
+    zone_inputs: tuple[tuple[SlotInputs, ...], ...] = ()
+    """Comfort inputs per slot and zone."""
+    zone_initial: Optional[Any] = None
+    """Initial ``MultiZoneState``."""
     _cache: dict[tuple[int, ...], HeatPumpOutcome] = field(default_factory=dict, repr=False)
 
     CACHE_SIZE = 20000
@@ -376,14 +400,26 @@ class HeatPumpRunPlan:
         return range(first, max(first, last))
 
     @property
+    def n_zones(self) -> int:
+        """Heating gene blocks: one per zone (one without zones)."""
+        return len(self.zone_ids) if self.zone_model is not None else 1
+
+    @property
     def n_genes(self) -> int:
-        return 2 * self.n_periods
+        return (self.n_zones + 1) * self.n_periods
 
     def upper_bounds(self) -> list[int]:
         """Highest gene value per gene."""
-        return [len(self.heating_modes) - 1] * self.n_periods + [
+        return [len(self.heating_modes) - 1] * (self.n_periods * self.n_zones) + [
             len(self.dhw_options) - 1
         ] * self.n_periods
+
+    def expand_zone_genes(self, genes: Sequence[int]) -> list[int]:
+        """Single-zone genes (heating + hot water) -> every zone gets the heating mode."""
+        n = self.n_periods
+        if self.n_zones == 1 or len(genes) != 2 * n:
+            return list(genes)
+        return list(genes[:n]) * self.n_zones + list(genes[n:])
 
     # --- option lookup -------------------------------------------------
 
@@ -440,7 +476,8 @@ class HeatPumpRunPlan:
                 dhw_genes.append(self.dhw_index(entry[0], entry[1]))
             else:
                 dhw_genes.append(self.dhw_index(int(entry)))
-        return [self.heating_index(mode) for mode in heating] + dhw_genes
+        heating_genes = [self.heating_index(mode) for mode in heating]
+        return heating_genes * self.n_zones + dhw_genes
 
     def default_genes(self) -> list[int]:
         """Status quo: NORMAL heating, hot water left to the heat pump controller."""
@@ -448,11 +485,29 @@ class HeatPumpRunPlan:
         return self.genes_for_modes([HeatingMode.NORMAL] * n, [DhwMode.HOLD] * n)
 
     def modes(self, genes: Sequence[int]) -> tuple[list[HeatingMode], list[DhwOption]]:
-        """Heating mode and hot water option per period."""
+        """Heating mode (of the heat pump) and hot water option per period.
+
+        With zones the heat pump mode follows from the zone modes
+        (``aggregate_heating_mode``).
+        """
         n = self.n_periods
-        heating = [HeatingMode(self.heating_modes[int(g)]) for g in genes[:n]]
-        dhw = [self.dhw_options[int(g)] for g in genes[n : 2 * n]]
+        dhw = [self.dhw_options[int(g)] for g in genes[self.n_zones * n : (self.n_zones + 1) * n]]
+        if self.n_zones == 1:
+            heating = [HeatingMode(self.heating_modes[int(g)]) for g in genes[:n]]
+            return heating, dhw
+        from akkudoktoreos.devices.thermal.zones import aggregate_heating_mode
+
+        zones = self.zone_modes(genes)
+        heating = [aggregate_heating_mode([z[p] for z in zones]) for p in range(n)]
         return heating, dhw
+
+    def zone_modes(self, genes: Sequence[int]) -> list[list[HeatingMode]]:
+        """Heating mode per zone and period (one entry without zones)."""
+        n = self.n_periods
+        return [
+            [HeatingMode(self.heating_modes[int(g)]) for g in genes[z * n : (z + 1) * n]]
+            for z in range(self.n_zones)
+        ]
 
     # ------------------------------------------------------------------
     # Simulation
@@ -478,6 +533,9 @@ class HeatPumpRunPlan:
         system = self.system
         step = system.step
         state = self.initial.copy()
+        zone_model = self.zone_model if self.zone_initial is not None else None
+        zone_heating = self.zone_modes(genes) if zone_model is not None else []
+        zstate = self.zone_initial.copy() if self.zone_initial is not None else None
         electric: list[float] = []
         comfort_kh = 0.0
         overheat_kh = 0.0
@@ -514,10 +572,41 @@ class HeatPumpRunPlan:
                 "standby",
             ):
                 rows[name] = []
+            if zone_model is not None:
+                for zone_id in self.zone_ids:
+                    for name in ("heating_mode", "room_c", "slab_c", "heat_wh"):
+                        rows[f"zone_{zone_id}_{name}"] = []
         for slot, inputs in enumerate(self.inputs):
             period = self.period_of(slot)
             option = dhw[period]
-            result = step(state, inputs, heating[period], option.mode, option.rod_target_c)
+            zres = None
+            if zone_model is not None:
+                zres = zone_model.step(
+                    zstate,
+                    inputs,
+                    [modes[period] for modes in zone_heating],
+                    option.mode,
+                    option.rod_target_c,
+                    self.zone_inputs[slot],
+                )
+                zstate = zres.state
+                result = SlotResult(
+                    state=zres.state.shared,
+                    hp_electric_wh=zres.hp_electric_wh,
+                    rod_electric_wh=zres.rod_electric_wh,
+                    heat_space_wh=zres.heat_space_wh,
+                    heat_dhw_hp_wh=zres.heat_dhw_wh,
+                    heat_dhw_rod_wh=0.0,
+                    cop_space=zres.cop_space,
+                    cop_dhw=0.0,
+                    flow_c=zres.flow_c,
+                    forced_space_wh=zres.forced_space_wh,
+                    comfort_violation_kh=zres.comfort_violation_kh,
+                    overheat_kh=zres.overheat_kh,
+                    dhw_violation_kh=zres.dhw_violation_kh,
+                )
+            else:
+                result = step(state, inputs, heating[period], option.mode, option.rod_target_c)
             state = result.state
             energy = result.hp_electric_wh + result.rod_electric_wh
             electric.append(energy)
@@ -570,14 +659,26 @@ class HeatPumpRunPlan:
                 rows["ventilate"].append(1.0 if slot < len(vent) and vent[slot] else 0.0)
                 rows["ventilation_w_per_k"].append(float(inputs.ventilation_w_per_k))
                 rows["standby"].append(1.0 if state.standby else 0.0)
+                if zres is not None:
+                    for z, zone_id in enumerate(self.zone_ids):
+                        zone_mode = zone_heating[z][period]
+                        if self.zone_inputs[slot][z].reduce_locked and (
+                            zone_mode == HeatingMode.REDUCED
+                        ):
+                            zone_mode = HeatingMode.NORMAL
+                        rows[f"zone_{zone_id}_heating_mode"].append(zone_mode.name)
+                        rows[f"zone_{zone_id}_room_c"].append(zres.state.rooms[z])
+                        rows[f"zone_{zone_id}_slab_c"].append(zres.state.slabs[z])
+                        rows[f"zone_{zone_id}_heat_wh"].append(zres.zone_heat_wh[z])
 
         # Mode changes between consecutive gene periods and,
         # RL29 fork, against the mode in effect now: a replan every 15 minutes must
         # not flip the current mode for a negligible saving.
         n = self.n_periods
-        changes = sum(1 for i in range(1, n) if heating[i] != heating[i - 1]) + sum(
-            1 for i in range(1, n) if dhw[i] != dhw[i - 1]
-        )
+        changes = sum(1 for i in range(1, n) if dhw[i] != dhw[i - 1])
+        for modes in zone_heating or [heating]:
+            # with zones every zone change counts (room setpoints, forced valves)
+            changes += sum(1 for i in range(1, n) if modes[i] != modes[i - 1])
         if self.active_heating_mode is not None and int(heating[0]) != self.active_heating_mode:
             changes += 1
         if self.active_dhw_mode is not None and int(dhw[0].mode) != self.active_dhw_mode:
@@ -586,12 +687,26 @@ class HeatPumpRunPlan:
         # Value of the heat stored (or used up) compared to the start. Room heat
         # above the comfort maximum has no value: the room controllers do not use it.
         room_cap = system.comfort_band(self.inputs[-1])[2] if self.inputs else state.room_c
-        building_start = system.building.stored_heat_wh(
-            self.initial.slab_c, min(self.initial.room_c, room_cap), 0.0
-        )
-        building_end = system.building.stored_heat_wh(
-            state.slab_c, min(state.room_c, room_cap), 0.0
-        )
+        building_start: float
+        building_end: float
+        if zone_model is not None and zstate is not None and self.zone_initial is not None:
+            models = zone_model.zone_models
+            zone_initial = self.zone_initial
+            building_start = sum(
+                m.stored_heat_wh(s0, min(r0, room_cap), 0.0)
+                for m, s0, r0 in zip(models, zone_initial.slabs, zone_initial.rooms)
+            )
+            building_end = sum(
+                m.stored_heat_wh(s1, min(r1, room_cap), 0.0)
+                for m, s1, r1 in zip(models, zstate.slabs, zstate.rooms)
+            )
+        else:
+            building_start = system.building.stored_heat_wh(
+                self.initial.slab_c, min(self.initial.room_c, room_cap), 0.0
+            )
+            building_end = system.building.stored_heat_wh(
+                state.slab_c, min(state.room_c, room_cap), 0.0
+            )
         # Tank heat up to the heat pump setpoint displaces a heat pump charge;
         # heat above it (heating rod) counts with its own, discounted value.
         setpoint = system.dhw.setpoint_c
@@ -733,7 +848,7 @@ class HeatPumpRunPlan:
         for heat, water in (status_quo, pv_led, price_led, combined):
             heat, water = list(heat), list(water)
             self._place_legionella(heat, water, surplus, price)
-            genes = heat + water
+            genes = heat * self.n_zones + water
             unique.setdefault(tuple(genes), genes)
         return list(unique.values())
 
@@ -770,11 +885,16 @@ class HeatPumpRunPlan:
     def mutate(self, genes: list[int], rng: random.Random | Any = random) -> bool:
         """Change a single period or a block of periods in one dimension."""
         n = self.n_periods
-        dimension = rng.randrange(2)
-        upper = (len(self.heating_modes) if dimension == 0 else len(self.dhw_options)) - 1
+        blocks = self.n_zones + 1  # heating per zone, then hot water
+
+        def upper_of(block: int) -> int:
+            return (len(self.heating_modes) if block < blocks - 1 else len(self.dhw_options)) - 1
+
+        dimension = rng.randrange(blocks)
+        upper = upper_of(dimension)
         if upper <= 0:
-            dimension = 1 - dimension
-            upper = (len(self.heating_modes) if dimension == 0 else len(self.dhw_options)) - 1
+            dimension = blocks - 1 if dimension < blocks - 1 else 0
+            upper = upper_of(dimension)
             if upper <= 0:
                 return False
         offset = dimension * n
@@ -810,7 +930,7 @@ class HeatPumpRunPlan:
             return list(genes)
         n = self.n_periods
         shifted: list[int] = []
-        for block in (genes[:n], genes[n : 2 * n]):
+        for block in (genes[b * n : (b + 1) * n] for b in range(self.n_zones + 1)):
             kept = list(block[elapsed_periods:])
             shifted.extend(kept + [block[-1]] * (n - len(kept)))
         return shifted
@@ -1138,6 +1258,11 @@ def build_run_plan(
         first.standby_possible and not first.reduce_locked and room > first.comfort_min_c + 0.3
     )
     initial = ThermalState(slab_c=slab, room_c=room, dhw_c=dhw, standby=standby0)
+    zone_model, zone_inputs, zone_initial = _build_zones(
+        parameters, system, slot_starts, slot_hours, inputs, away_slots, initial
+    )
+    if zone_model is not None and zone_initial is not None:
+        initial = zone_initial.shared.copy()
 
     # Allowed modes; one rod option per configured target, only with a rod.
     opt = settings.optimization
@@ -1239,6 +1364,10 @@ def build_run_plan(
         period_offset=period_offset,
         active_heating_mode=parameters.active_heating_mode,
         active_dhw_mode=parameters.active_dhw_mode,
+        zone_model=zone_model,
+        zone_ids=tuple(z.zone_id for z in settings.zones.zones) if zone_model is not None else (),
+        zone_inputs=zone_inputs,
+        zone_initial=zone_initial,
         heating_modes=heating_modes,
         dhw_options=dhw_options,
         comfort_penalty=opt.comfort_penalty_amt_per_kh,
@@ -1258,6 +1387,101 @@ def build_run_plan(
         zone_setback_slots=tuple(zone_slots),
         ventilate_slots=tuple(vent_slots),
     )
+
+
+def _build_zones(
+    parameters: GeneticHeatPumpParameters,
+    system: HeatPumpSystem,
+    slot_starts: list[Any],
+    slot_hours: float,
+    inputs: list[SlotInputs],
+    away_slots: int,
+    initial: ThermalState,
+) -> tuple[Optional[Any], tuple[tuple[SlotInputs, ...], ...], Optional[Any]]:
+    """Multi-zone model, comfort per slot and zone and the initial zone state (fork).
+
+    Every zone starts from the house inputs. In its ``setback_windows`` (not while
+    away, not in the cooling season) the zone only needs its setback temperature.
+    With ``room_limits`` the zone's own margins raise its comfort minimum for
+    ``horizon_hours``, as the house margins do without zones.
+    """
+    import dataclasses
+
+    from akkudoktoreos.devices.thermal.zones import (
+        MultiZoneHeatPump,
+        ZoneCoupling,
+        ZoneParameters,
+    )
+
+    settings = parameters.settings
+    zones_cfg = settings.zones
+    if not zones_cfg.active:
+        return None, (), None
+    ids = [z.zone_id for z in zones_cfg.zones]
+    zones = [
+        ZoneParameters(
+            zone_id=z.zone_id,
+            building=z.to_parameters(settings.building),
+            weight=z.weight if z.weight is not None else z.share,
+        )
+        for z in zones_cfg.zones
+    ]
+    couplings = [
+        ZoneCoupling(ids.index(c.zone_a), ids.index(c.zone_b), c.w_per_k)
+        for c in zones_cfg.couplings
+    ]
+    model = MultiZoneHeatPump(system, zones, couplings)
+
+    setback_c = parameters.setback_room_c
+    limits = settings.room_limits
+    margin_slots = (
+        min(len(inputs), max(1, math.ceil(limits.horizon_hours / slot_hours)))
+        if limits.enabled
+        else 0
+    )
+    if away_slots > 0:
+        margin_slots = min(margin_slots, away_slots)
+    measured = parameters.zone_room_c or {}
+    rooms = [float(measured.get(zone_id, initial.room_c)) for zone_id in ids]
+    per_slot: list[tuple[SlotInputs, ...]] = []
+    for i, (start, slot_input) in enumerate(zip(slot_starts, inputs)):
+        row: list[SlotInputs] = []
+        for z, cfg in enumerate(zones_cfg.zones):
+            zi = dataclasses.replace(slot_input)
+            if i >= away_slots and not zi.cooling_season and cfg.setback_at(start):
+                zone_c = setback_c if setback_c is not None else cfg.setback_room_c
+                if zi.setpoint_c is not None and zone_c < zi.setpoint_c:
+                    zi.setpoint_c = zone_c
+                    zi.raised_c = zone_c
+                    if zi.comfort_max_c is not None:
+                        zi.comfort_max_c = max(zone_c, zi.comfort_max_c)
+                zi.comfort_min_c = min(zi.comfort_min_c, zone_c - cfg.setback_min_offset_k)
+            elif i < margin_slots and not zi.cooling_season and zi.setpoint_c is not None:
+                low = (parameters.zone_min_margin_k or {}).get(cfg.zone_id)
+                if low is not None:
+                    floor = min(
+                        rooms[z] - low, zi.comfort_min_c + limits.max_raise_k, zi.setpoint_c
+                    )
+                    if floor > zi.comfort_min_c:
+                        zi.comfort_min_c = floor
+                high = (parameters.zone_max_margin_k or {}).get(cfg.zone_id)
+                if high is not None:
+                    ceiling = max(rooms[z] + high, zi.setpoint_c)
+                    if zi.comfort_max_c is not None and ceiling < zi.comfort_max_c:
+                        zi.comfort_max_c = ceiling
+            row.append(zi)
+        per_slot.append(tuple(row))
+    first = inputs[0]
+    zone_state = model.initial_state(rooms, dhw_c=initial.dhw_c, outdoor_c=first.outdoor_c)
+    zone_state.shared.standby = initial.standby
+    logger.info(
+        "Heat pump {}: {} zones ({}), rooms {}.",
+        parameters.device_id,
+        len(zones),
+        ", ".join(ids),
+        ", ".join(f"{r:.1f}" for r in rooms),
+    )
+    return model, tuple(per_slot), zone_state
 
 
 def _apply_zone_setback_and_ventilation(
@@ -1283,7 +1507,7 @@ def _apply_zone_setback_and_ventilation(
     n = len(inputs)
     zone = settings.zone_setback
     zone_slots = [False] * n
-    if zone.enabled:
+    if zone.enabled and not settings.zones.active:
         zone_c = parameters.setback_room_c if parameters.setback_room_c is not None else zone.room_c
         for i, (start, slot_input) in enumerate(zip(slot_starts, inputs)):
             if i < away_slots or slot_input.cooling_season or not zone.active_at(start):
@@ -1384,7 +1608,7 @@ def _apply_room_limits_and_humidity(
     settings = parameters.settings
     room_now = parameters.initial_room_c
     limits = settings.room_limits
-    if limits.enabled and room_now is not None:
+    if limits.enabled and room_now is not None and not settings.zones.active:
         count = min(len(inputs), max(1, math.ceil(limits.horizon_hours / slot_hours)))
         if away_slots > 0:
             count = min(count, away_slots)

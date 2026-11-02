@@ -988,6 +988,21 @@ class GeneticSolution(ConfigMixin, GeneticParametersBaseModel):
                 if len(values) < n_points:
                     values += [values[-1] if values else 0] * (n_points - len(values))
                 solution[f"{device_id}_{column}"] = [convert(v) for v in values]
+            # Multi-zone heating (eos-plus fork): mode and room temperature per zone.
+            for key in sorted(schedule):
+                for suffix, column, convert in (
+                    ("_heating_mode", "heating_mode", _mode_value),
+                    ("_room_c", "room_temperature_c", float),
+                ):
+                    if not (key.startswith("zone_") and key.endswith(suffix)):
+                        continue
+                    values = list(schedule.get(key) or [])[:n_points]
+                    if not values:
+                        continue
+                    if len(values) < n_points:
+                        values += [values[-1]] * (n_points - len(values))
+                    zone_id = key[len("zone_") : -len(suffix)]
+                    solution[f"{device_id}_zone_{zone_id}_{column}"] = [convert(v) for v in values]
             # Plan-vs-actual and calibration figures, constant over the horizon;
             # None (unknown) until enough data exists.
             for column, value in (schedule.get("kpis") or {}).items():

@@ -931,6 +931,35 @@ class ConfigOptimizationRequest(
                     min_margin = value
                 else:
                     max_margin = value
+        # Multi-zone heating (fork): mean room and margins per zone, all optional.
+        zone_room: Optional[dict[str, float]] = None
+        zone_min: Optional[dict[str, float]] = None
+        zone_max: Optional[dict[str, float]] = None
+        if device.zones.active:
+            zone_room, zone_min, zone_max = {}, {}, {}
+            for zone in device.zones.zones:
+                value = await self._latest_measurement(
+                    device.zone_measurement_key(zone.zone_id, "room-temperature"),
+                    observation_time,
+                    max_age,
+                )
+                if value is not None and math.isfinite(value) and -30.0 <= value <= 60.0:
+                    zone_room[zone.zone_id] = value
+                if not device.room_limits.enabled:
+                    continue
+                for name, target in (("room-min-margin", zone_min), ("room-max-margin", zone_max)):
+                    value = await self._latest_measurement(
+                        device.zone_measurement_key(zone.zone_id, name), observation_time, max_age
+                    )
+                    if value is not None and math.isfinite(value) and -15.0 <= value <= 15.0:
+                        target[zone.zone_id] = value
+            missing = [z.zone_id for z in device.zones.zones if z.zone_id not in zone_room]
+            if missing:
+                logger.warning(
+                    "Heat pump {}: no room temperature for zone(s) {}; using the house mean.",
+                    device.device_id,
+                    ", ".join(missing),
+                )
         humidity: Optional[float] = None
         if device.humidity.enabled:
             value = await self._latest_measurement(
@@ -988,6 +1017,9 @@ class ConfigOptimizationRequest(
             reduce_locked_until=lock_until,
             room_min_margin_k=min_margin,
             room_max_margin_k=max_margin,
+            zone_room_c=zone_room or None,
+            zone_min_margin_k=zone_min or None,
+            zone_max_margin_k=zone_max or None,
             humidity_pct=humidity,
             setback_room_c=setback_room,
             window_open_share=window_share,
