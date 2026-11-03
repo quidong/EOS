@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import pytest
 
+import pendulum
+
+from akkudoktoreos.devices.settings.heatpumpsettings import HeatPumpCommonSettings
 from akkudoktoreos.devices.thermal.building import BuildingParameters
 from akkudoktoreos.devices.thermal.cop import WBB12_RATING_POINTS, CopModel
 from akkudoktoreos.devices.thermal.dhw import DhwTankParameters
@@ -23,8 +26,60 @@ from akkudoktoreos.devices.thermal.zones import (
     ZoneCoupling,
     ZoneParameters,
 )
+from akkudoktoreos.optimization.genetic.heatpumpgenes import (
+    GeneticHeatPumpParameters,
+    build_run_plan,
+    plan_result,
+)
 
-from tests.rl29.test_heatpump_zones_plan import device, plan_result, zone_plan
+MONDAY = pendulum.datetime(2026, 11, 2, 0, 0, tz="Europe/Berlin")
+ZONES = {
+    "enabled": True,
+    "zones": [
+        {
+            "zone_id": "og",
+            "share": 0.33,
+            "building": {
+                "slab_capacity_wh_per_k": 2200,
+                "room_capacity_wh_per_k": 3300,
+                "loss_w_per_k": 60,
+                "slab_room_w_per_k": 500,
+                "emitter_w_per_k": 330,
+            },
+        },
+        {
+            "zone_id": "eg",
+            "share": 0.67,
+            "building": {
+                "slab_capacity_wh_per_k": 1300,
+                "room_capacity_wh_per_k": 6700,
+                "loss_w_per_k": 120,
+                "slab_room_w_per_k": 1000,
+                "emitter_w_per_k": 670,
+            },
+        },
+    ],
+    "couplings": [{"zone_a": "og", "zone_b": "eg", "w_per_k": 100}],
+}
+
+
+def device(**settings) -> HeatPumpCommonSettings:
+    settings.setdefault("optimization", {"heating_modes": [0, 1, 2, 3, 4]})
+    return HeatPumpCommonSettings.model_validate({"device_id": "hp1", "zones": ZONES, **settings})
+
+
+def zone_plan(settings=None, hours=24, **kwargs):
+    params = GeneticHeatPumpParameters(
+        device_id="hp1",
+        settings=settings or device(),
+        initial_room_c=20.6,
+        initial_dhw_c=45.0,
+        **kwargs,
+    )
+    start = MONDAY.add(hours=12)
+    starts = [start.add(hours=i) for i in range(hours)]
+    return build_run_plan(params, starts, 1.0, [2.0] * hours, [0.0] * hours, [0.0003] * hours)
+
 
 HOUSE = BuildingParameters(
     slab_capacity_wh_per_k=3500,
