@@ -401,6 +401,17 @@ class HeatPumpComfortSettings(SettingsBaseModel):
     raised_offset_k: float = Field(
         default=1.0, ge=0, json_schema_extra={"description": "Raised operation above setpoint [K]."}
     )
+    fixed_room_setpoints: bool = Field(
+        default=False,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: the room controllers keep their setpoint (nothing changes it per "
+                "mode). RAISED then only raises the flow temperature, and with zones a single "
+                "zone cannot be reduced on its own (REDUCED needs SG Ready 'reduced' for all "
+                "zones). PREHEAT/FORCED act through forced valve positions."
+            )
+        },
+    )
 
     def minimum_at(self, dt: DateTime) -> float:
         for window in self.min_c.windows:
@@ -1680,7 +1691,10 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
                 max_dhw_c=unit.max_dhw_c,
                 forced_overshoot_k=unit.forced_overshoot_k,
             ),
-            comfort=ComfortParameters(raised_offset_k=self.comfort.raised_offset_k),
+            comfort=ComfortParameters(
+                raised_offset_k=self.comfort.raised_offset_k,
+                fixed_room_setpoints=self.comfort.fixed_room_setpoints,
+            ),
             dhw=DhwControlParameters(
                 setpoint_c=dhw_setpoint_c if dhw_setpoint_c is not None else dhw.setpoint_c,
                 hysteresis_k=dhw.hysteresis_k,

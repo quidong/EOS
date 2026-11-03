@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2611022282672682"
+    "version": "v0.3.0.dev2611031830045886"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -12059,6 +12059,12 @@
             "title": "Raised Offset K",
             "description": "Raised operation above setpoint [K].",
             "default": 1.0
+          },
+          "fixed_room_setpoints": {
+            "type": "boolean",
+            "title": "Fixed Room Setpoints",
+            "description": "RL29 fork: the room controllers keep their setpoint (nothing changes it per mode). RAISED then only raises the flow temperature, and with zones a single zone cannot be reduced on its own (REDUCED needs SG Ready 'reduced' for all zones). PREHEAT/FORCED act through forced valve positions.",
+            "default": false
           }
         },
         "type": "object",
@@ -12089,6 +12095,12 @@
             "title": "Raised Offset K",
             "description": "Raised operation above setpoint [K].",
             "default": 1.0
+          },
+          "fixed_room_setpoints": {
+            "type": "boolean",
+            "title": "Fixed Room Setpoints",
+            "description": "RL29 fork: the room controllers keep their setpoint (nothing changes it per mode). RAISED then only raises the flow temperature, and with zones a single zone cannot be reduced on its own (REDUCED needs SG Ready 'reduced' for all zones). PREHEAT/FORCED act through forced valve positions.",
+            "default": false
           }
         },
         "type": "object",

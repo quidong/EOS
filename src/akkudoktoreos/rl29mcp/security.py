@@ -41,6 +41,8 @@ DEFAULT_WRITE_PATHS = (
     "devices/heat_pumps/*/optimization",
     "devices/heat_pumps/*/dhw",
     "devices/heat_pumps/*/away",
+    "devices/heat_pumps/*/zones",
+    "devices/heat_pumps/*/zone_setback",
     "devices/batteries/*/min_soc_percentage",
     "devices/batteries/*/max_soc_percentage",
 )

@@ -58,7 +58,7 @@ Guards:
 - **Read-only by default**; writing needs `EOS_MCP_ALLOW_WRITE=true`.
 - **Allow-list** `EOS_MCP_WRITE_PATHS` (default: `ems`, `optimization`, `load/provider`, `load/loadml`,
   `pvforecast/ensemble`, `elecprice/ml`, `database/history/{enabled,actuals,accuracy,min_store_interval_minutes}`,
-  `devices/heat_pumps/*/{comfort,optimization,dhw,away}`, `devices/batteries/*/{min,max}_soc_percentage`).
+  `devices/heat_pumps/*/{comfort,optimization,dhw,away,zones,zone_setback}`, `devices/batteries/*/{min,max}_soc_percentage`).
   Never: `adapter`, `server`, `general`, `logging`, `cache`, `measurement` and anything that is a secret.
 - **Limits**: `EOS_MCP_MAX_WRITES_PER_MINUTE` (10), values ≤ 64 KB, paths `a/b/c` only.
 - **Audit**: every change is logged with old and new value and the reason (`MCP audit: …`); changes are

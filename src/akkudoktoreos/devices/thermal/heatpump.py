@@ -14,7 +14,8 @@ Space heating (``HeatingMode``):
 - ``NORMAL``: room target = setpoint of the slot; the heat pump covers what the
   building needs, like its own heating curve with room thermostats.
 - ``RAISED``: room target = setpoint + ``raised_offset_k`` (SG Ready "increased
-  operation"), at most the comfort maximum.
+  operation"), at most the comfort maximum. With fixed room setpoints
+  (``ComfortParameters.fixed_room_setpoints``) the target stays at the setpoint.
 - ``PREHEAT``: room target = comfort maximum with all valves forced open;
   charges the screed for later hours.
 - ``FORCED``: SG Ready "forced on" (state 4): the heat pump runs at full
@@ -156,6 +157,13 @@ class ComfortParameters:
 
     raised_offset_k: float = 1.0
     """Room target above the setpoint in RAISED mode [K]."""
+
+    fixed_room_setpoints: bool = False
+    """RL29 fork: the room controllers keep their setpoint; nothing changes it per mode.
+    RAISED then only raises the flow temperature (room target = setpoint), and in the
+    multi-zone model a single zone cannot be reduced on its own: REDUCED needs SG Ready
+    "reduced" for the whole circuit, so a REDUCED zone runs NORMAL unless every zone is
+    reduced. PREHEAT and FORCED act through forced valve positions and are unchanged."""
 
 
 @dataclass(frozen=True)
@@ -360,6 +368,8 @@ class HeatPumpSystem:
         if mode == HeatingMode.NORMAL:
             return setpoint
         if mode == HeatingMode.RAISED:
+            if self.comfort.fixed_room_setpoints:
+                return setpoint  # the controllers stop at their own setpoint
             if inputs.raised_c is not None:
                 return min(max(inputs.raised_c, setpoint), high)
             return min(setpoint + self.comfort.raised_offset_k, high)

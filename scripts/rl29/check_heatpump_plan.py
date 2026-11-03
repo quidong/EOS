@@ -23,6 +23,15 @@ Rules (thresholds from the heat pump configuration, overridable):
   matching the HA limit input_number.eos_wp_max_absenkdauer); holiday slots do
   not count (HA does not limit the reduction while away)
 - WARN  hot water HEAT_PUMP in more than 4 hours of the horizon
+- per heating zone (``zones.enabled``; solution columns
+  ``<device>_zone_<zone>_heating_mode`` / ``_room_temperature_c``):
+  FAIL  planned zone temperature below the zone minimum - 1 K (the zone
+  minimum is min(comfort minimum, ``setback_room_c`` of the zone if it has
+  set-back windows)) or above comfort max + forced overshoot + 0.5 K;
+  FAIL  PREHEAT/FORCED of the zone for more than ``--max-active-h`` hours;
+  WARN  planned zone temperature below the comfort minimum at the start of
+  the plan (the zone is already too cold and the plan does not heat it in
+  the first hour)
 
 All durations are in hours; the slot length is taken from the plan timestamps
 (EOS plans hourly or, since the MILP update, in 15 min steps).
@@ -164,6 +173,71 @@ def away_floor(
     return min(float(floor), room) if floor is not None else room
 
 
+def zone_ids(config: dict[str, Any], device: str) -> list[str]:
+    """Heating zones of the device ([] without an active multi-zone model)."""
+    zones = config.get("devices", {}).get("heat_pumps", {}).get(device, {}).get("zones") or {}
+    if not zones.get("enabled"):
+        return []
+    return [str(z["zone_id"]) for z in zones.get("zones") or [] if z.get("zone_id")]
+
+
+def zone_floor(config: dict[str, Any], device: str, zone_id: str, low: float) -> float:
+    """Lowest temperature EOS may plan for a zone: set-back zones may drop to setback_room_c."""
+    zones = config.get("devices", {}).get("heat_pumps", {}).get(device, {}).get("zones") or {}
+    for zone in zones.get("zones") or []:
+        if zone.get("zone_id") == zone_id and (zone.get("setback_windows") or {}).get("windows"):
+            return min(low, float(zone.get("setback_room_c", low)))
+    return low
+
+
+def check_zones(
+    report: Report,
+    rows: dict[str, Any],
+    upcoming: list[str],
+    config: dict[str, Any],
+    device: str,
+    low: float,
+    high: float,
+    slot_h: float,
+    max_active_h: int,
+    away: list[bool],
+) -> None:
+    """Rules per heating zone (multi-zone model)."""
+    for zone_id in zone_ids(config, device):
+        mode_key = f"{device}_zone_{zone_id}_heating_mode"
+        room_key = f"{device}_zone_{zone_id}_room_temperature_c"
+        if mode_key not in rows[upcoming[0]] or room_key not in rows[upcoming[0]]:
+            report.warnings.append(f"Zone {zone_id}: keine Zonenspalten im Plan")
+            continue
+        modes = [int(round(float(rows[t][mode_key]))) for t in upcoming]
+        rooms = [float(rows[t][room_key]) for t in upcoming]
+        floor = zone_floor(config, device, zone_id, low)
+        report.info.append(
+            f"Zone {zone_id}: Modi {_mode_changes(upcoming, modes)}, "
+            f"Raum {min(rooms):.1f}–{max(rooms):.1f} °C"
+        )
+        if max(rooms) > high + 0.5:
+            report.failures.append(
+                f"Zone {zone_id}: geplant {max(rooms):.1f} °C > {high + 0.5:.1f} °C"
+            )
+        cold = [r for r, a in zip(rooms, away) if not a and r < floor - 1.0]
+        if cold:
+            report.failures.append(
+                f"Zone {zone_id}: geplant {min(cold):.1f} °C < {floor - 1.0:.1f} °C"
+            )
+        strong = _runs([m in STRONG for m in modes]) * slot_h
+        if strong > max_active_h:
+            report.failures.append(
+                f"Zone {zone_id}: {_h(strong)} h am Stück Vorheizen/Forciert (> {max_active_h} h)"
+            )
+        first_hour = max(1, round(1.0 / slot_h))
+        if not away[0] and rooms[0] < floor and not any(m >= 1 for m in modes[:first_hour]):
+            report.warnings.append(
+                f"Zone {zone_id}: startet mit {rooms[0]:.1f} °C unter {floor:.1f} °C "
+                "und wird in der ersten Stunde nicht geheizt"
+            )
+
+
 def check(
     solution: dict[str, Any],
     config: dict[str, Any],
@@ -273,6 +347,7 @@ def check(
     dhw_h = sum(1 for d in dhw if d == 1) * slot_h
     if dhw_h > 4:
         report.warnings.append(f"Warmwasser-Ladung in {_h(dhw_h)} Stunden geplant")
+    check_zones(report, rows, upcoming, config, device, low, high, slot_h, max_active_h, away)
     return report
 
 

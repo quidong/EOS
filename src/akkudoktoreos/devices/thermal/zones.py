@@ -18,7 +18,11 @@ Control, per slot:
 
 - Every zone has its own mode (``HeatingMode``). REDUCED, NORMAL, RAISED and
   PREHEAT set the room target of the zone; the room controllers of the zone
-  regulate towards it and close the valves once the target is reached.
+  regulate towards it and close the valves once the target is reached. With
+  fixed room setpoints (``ComfortParameters.fixed_room_setpoints``) nothing
+  changes the controllers' setpoint: RAISED keeps the setpoint, and REDUCED is
+  only possible for all zones together (SG Ready "reduced"); a single REDUCED
+  zone runs NORMAL. ``MultiZoneResult.zone_modes`` reports what each zone ran.
   FORCED opens all valves of the zone (forced position) and takes what the
   heat pump can deliver.
 - The zones share one heating circuit, hence one flow temperature and one heat
@@ -196,6 +200,8 @@ class MultiZoneResult:
     dhw_violation_kh: float
     zone_comfort_violation_kh: list[float] = field(default_factory=list)
     zone_overheat_kh: list[float] = field(default_factory=list)
+    zone_modes: list[HeatingMode] = field(default_factory=list)
+    """Mode each zone actually runs (after reduction lock and fixed room setpoints)."""
 
     @property
     def electric_wh(self) -> float:
@@ -325,6 +331,12 @@ class MultiZoneHeatPump:
         for i, mode in enumerate(modes):
             if per_zone[i].reduce_locked and mode == HeatingMode.REDUCED:
                 modes[i] = HeatingMode.NORMAL
+        if system.comfort.fixed_room_setpoints and aggregate_heating_mode(modes) != (
+            HeatingMode.REDUCED
+        ):
+            # Fixed room setpoints: a zone is only reduced through SG Ready "reduced"
+            # for the whole circuit; otherwise its controllers keep their setpoint.
+            modes = [HeatingMode.NORMAL if m == HeatingMode.REDUCED else m for m in modes]
         agg_mode = aggregate_heating_mode(modes)
 
         # Hot water, standby, §14a and cooling from the aggregate system.
@@ -443,4 +455,5 @@ class MultiZoneHeatPump:
             dhw_violation_kh=agg.dhw_violation_kh,
             zone_comfort_violation_kh=comfort,
             zone_overheat_kh=overheat,
+            zone_modes=modes,
         )

@@ -37,6 +37,11 @@ DEVICE_COLUMNS: dict[str, str] = {
     "slab_temperature_c": "slab_c",
     "dhw_temperature_c": "dhw_c",
 }
+# Heating zones (multi-zone EOS): "<id>_zone_<zone>_<column>" -> "zone_<zone>_<key>"
+ZONE_COLUMNS: dict[str, str] = {
+    "heating_mode": "mode",
+    "room_temperature_c": "room_c",
+}
 # State of charge of batteries / electric vehicles ("<id>_soc_factor" -> "<id>_soc_pct")
 SOC_SUFFIX = "_soc_factor"
 # EOS prediction columns -> row keys
@@ -88,7 +93,23 @@ def _frame(solution: Mapping[str, Any], part: str) -> Mapping[str, Any]:
     return data if isinstance(data, Mapping) else {}
 
 
-def _rows(frame: Mapping[str, Any], columns: Mapping[str, str], soc: bool = False) -> list[dict]:
+def _zone_key(column: str, zone_prefix: str) -> Optional[str]:
+    """Row key of a zone column (``<id>_zone_og_room_temperature_c`` -> ``zone_og_room_c``)."""
+    if not zone_prefix or not column.startswith(zone_prefix):
+        return None
+    rest = column[len(zone_prefix) :]
+    for suffix, key in ZONE_COLUMNS.items():
+        if rest.endswith("_" + suffix) and len(rest) > len(suffix) + 1:
+            return f"zone_{rest[: -len(suffix) - 1]}_{key}"
+    return None
+
+
+def _rows(
+    frame: Mapping[str, Any],
+    columns: Mapping[str, str],
+    soc: bool = False,
+    zone_prefix: str = "",
+) -> list[dict]:
     rows = []
     for stamp, values in frame.items():
         start = parse_time(stamp)
@@ -105,16 +126,22 @@ def _rows(frame: Mapping[str, Any], columns: Mapping[str, str], soc: bool = Fals
                 if column.endswith(SOC_SUFFIX) and value is not None:
                     key = f"{column[: -len(SOC_SUFFIX)]}_soc_pct"
                     row[key] = _round(key, value * 100.0)
+        if zone_prefix:
+            for column, raw in values.items():
+                zone_key = _zone_key(column, zone_prefix)
+                value = _number(raw)
+                if zone_key is not None and value is not None:
+                    row[zone_key] = _round(zone_key, value)
         rows.append(row)
     rows.sort(key=lambda r: parse_time(r["t"]) or datetime.min)
     return rows
 
 
 def plan_rows(solution: Mapping[str, Any], device_id: str) -> list[dict]:
-    """Slot rows of the plan: house values plus the heat pump ``device_id``."""
+    """Slot rows of the plan: house values plus the heat pump ``device_id`` and its zones."""
     columns = dict(PLAN_COLUMNS)
     columns.update({f"{device_id}_{column}": key for column, key in DEVICE_COLUMNS.items()})
-    return _rows(_frame(solution, "solution"), columns, soc=True)
+    return _rows(_frame(solution, "solution"), columns, soc=True, zone_prefix=f"{device_id}_zone_")
 
 
 def forecast_rows(solution: Mapping[str, Any]) -> list[dict]:

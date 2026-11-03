@@ -96,8 +96,12 @@ digits and `_`). The integration then
   (`<heat pump>_zone_<zone>_heating_mode`; NORMAL without a fresh plan, a zone missing in the plan
   follows the heat pump mode), the zone's mean and its two margins.
 
-The SG Ready target stays the heat pump mode of the plan. Room setpoints and forced valve
-positions per zone are switched by the automation that executes the plan, from the zone modes.
+The SG Ready target stays the heat pump mode of the plan. Forced valve positions per zone are
+switched by the automation that executes the plan, from the zone modes. A house whose room
+setpoints must never change sets `comfort.fixed_room_setpoints` in EOS: the zone modes then show
+what the zone actually runs (a single zone is never REDUCED, RAISED keeps the setpoint), and the
+automation only forces the valves of zones in PREHEAT/FORCED. The plan sensor carries the zones
+for charts (`zone_<zone>_mode`, `zone_<zone>_room_c`, 0.7.1).
 
 ## Entities
 
@@ -184,7 +188,7 @@ sensors of their own:
 
 | Sensor | State | Attributes |
 | --- | --- | --- |
-| Plan | time the plan was made | `data`: slot rows (`t`, `load_wh`, `import_wh`, `export_wh`, `costs_amt`, `revenue_amt`, `heat_pump_wh`, `rod_wh`, `heating_mode`, `dhw_mode`, `standby`, `room_c`, `slab_c`, `dhw_c`, `<battery>_soc_pct`); `hourly`: energies per hour in kWh (`load_kwh`, `heat_pump_kwh`, …); `slot_minutes` |
+| Plan | time the plan was made | `data`: slot rows (`t`, `load_wh`, `import_wh`, `export_wh`, `costs_amt`, `revenue_amt`, `heat_pump_wh`, `rod_wh`, `heating_mode`, `dhw_mode`, `standby`, `room_c`, `slab_c`, `dhw_c`, `<battery>_soc_pct`, with heating zones `zone_<zone>_mode` and `zone_<zone>_room_c`); `hourly`: energies per hour in kWh (`load_kwh`, `heat_pump_kwh`, …); `slot_minutes` |
 | Forecast | time of the plan | `data`: slot rows (`pv_wh`, `load_wh`, `price_amt_kwh`, `feed_in_amt_kwh`, `outdoor_c`); `hourly`: PV and load in kWh, prices as mean |
 | Planned house load / heat pump energy (hour) | kWh planned for the current hour | – (long-term statistics: plan vs. meter per hour) |
 | Planned room / hot water temperature | value of the current slot | – (long-term statistics) |

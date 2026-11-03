@@ -306,7 +306,8 @@
                                }
                            ]
                        },
-                       "raised_offset_k": 1.0
+                       "raised_offset_k": 1.0,
+                       "fixed_room_setpoints": false
                    },
                    "optimization": {
                        "heating_modes": [

@@ -261,6 +261,23 @@ devices:
           - {zone_a: og, zone_b: eg, w_per_k: 150}
 ```
 
+### Fixed room setpoints
+
+`comfort.fixed_room_setpoints: true` describes a controller that never changes the room
+controllers' setpoints: EOS acts only through SG Ready and forced valve positions. The model then
+follows what such a house can actually do:
+
+- RAISED keeps the room target at the setpoint (SG Ready 3 only raises the flow temperature; the
+  controllers still close at their setpoint);
+- a single zone cannot be reduced on its own. REDUCED needs SG Ready "reduced" for the whole circuit,
+  so a REDUCED zone runs NORMAL unless every zone is reduced;
+- PREHEAT and FORCED act through forced valve positions per zone and are unchanged. This is how one
+  zone is heated harder than another to even out the floors;
+- the solution columns `<device_id>_zone_<zone_id>_heating_mode` report the mode the zone actually
+  runs, so a controller can force exactly the zones shown as PREHEAT/FORCED.
+
+The single `zone_setback` lowers room setpoints and does not fit this mode.
+
 The MILP solves the house as one zone and its projection gives every zone the same mode; the
 GENETIC polish then separates the zones. Calibration still fits the house model (per-zone
 calibration is planned).

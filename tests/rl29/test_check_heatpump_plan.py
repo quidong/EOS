@@ -371,3 +371,91 @@ def test_holiday_hours_in_quarters():
 def test_mode_overview_lists_changes_only():
     times = [(START + i * Q).isoformat() for i in range(6)]
     assert script._mode_changes(times, [1, 1, 3, 3, 1, 1]) == "10:00:1 10:30:3 11:00:1"
+
+
+# ----------------------------------------------------------------------
+# Heating zones
+# ----------------------------------------------------------------------
+
+ZONE_CONFIG = json.loads(json.dumps(CONFIG))
+ZONE_CONFIG["devices"]["heat_pumps"]["wbb12"]["zones"] = {
+    "enabled": True,
+    "zones": [
+        {
+            "zone_id": "og",
+            "setback_windows": {"windows": [{"start_time": "22:00", "duration": "2 hours"}]},
+            "setback_room_c": 19.0,
+        },
+        {"zone_id": "eg"},
+    ],
+}
+
+
+def zone_solution(
+    og_modes: list[int],
+    og_rooms: list[float],
+    eg_modes: list[int] | None = None,
+    eg_rooms: list[float] | None = None,
+) -> dict[str, Any]:
+    n = len(og_modes)
+    sol = solution([max(m, e) for m, e in zip(og_modes, eg_modes or [1] * n)])
+    for i, t in enumerate(sorted(sol["solution"]["data"])):
+        row = sol["solution"]["data"][t]
+        row["wbb12_zone_og_heating_mode"] = float(og_modes[i])
+        row["wbb12_zone_og_room_temperature_c"] = og_rooms[i]
+        row["wbb12_zone_eg_heating_mode"] = float((eg_modes or [1] * n)[i])
+        row["wbb12_zone_eg_room_temperature_c"] = (eg_rooms or [21.0] * n)[i]
+    return sol
+
+
+def run_zones(sol: dict[str, Any], **kwargs: Any):
+    return script.check(sol, ZONE_CONFIG, "wbb12", NOW, **kwargs)
+
+
+def test_zone_ids_only_with_active_zones():
+    assert script.zone_ids(ZONE_CONFIG, "wbb12") == ["og", "eg"]
+    assert script.zone_ids(CONFIG, "wbb12") == []
+
+
+def test_set_back_zone_may_drop_to_its_set_back_temperature():
+    assert script.zone_floor(ZONE_CONFIG, "wbb12", "og", 19.5) == pytest.approx(19.0)
+    assert script.zone_floor(ZONE_CONFIG, "wbb12", "eg", 19.5) == pytest.approx(19.5)
+
+
+def test_plausible_zone_plan_lists_every_zone():
+    report = run_zones(zone_solution([1] * 24, [20.5] * 24))
+    assert report.exit_code == 0
+    assert any(line.startswith("Zone og: Modi") for line in report.info)
+    assert any(line.startswith("Zone eg: Modi") for line in report.info)
+
+
+def test_cold_zone_fails_even_if_the_house_mean_is_fine():
+    report = run_zones(zone_solution([1] * 24, [17.5] * 24))
+    assert report.exit_code == 2
+    assert any("Zone og: geplant 17.5" in m for m in report.failures)
+
+
+def test_hot_zone_fails():
+    report = run_zones(zone_solution([1] * 24, [21.0] * 23 + [23.8]))
+    assert any("Zone og: geplant 23.8" in m for m in report.failures)
+
+
+def test_long_forced_zone_fails():
+    report = run_zones(zone_solution([4] * 8 + [1] * 16, [21.0] * 24), max_active_h=6)
+    assert any("Zone og: 8 h am Stück" in m for m in report.failures)
+
+
+def test_cold_zone_left_reduced_warns():
+    report = run_zones(zone_solution([0] * 2 + [3] * 3 + [1] * 19, [18.9] + [20.0] * 23))
+    assert report.exit_code == 1
+    assert any("Zone og: startet mit 18.9" in m for m in report.warnings)
+
+
+def test_cold_zone_that_is_heated_does_not_warn():
+    report = run_zones(zone_solution([3] * 3 + [1] * 21, [18.9] + [20.0] * 23))
+    assert not any("startet mit" in m for m in report.warnings)
+
+
+def test_missing_zone_columns_warn():
+    report = run_zones(solution([1] * 24))
+    assert any("keine Zonenspalten" in m for m in report.warnings)

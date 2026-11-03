@@ -286,7 +286,8 @@ config path from ``self.device_id`` without needing an external index.
                                }
                            ]
                        },
-                       "raised_offset_k": 1.0
+                       "raised_offset_k": 1.0,
+                       "fixed_room_setpoints": false
                    },
                    "optimization": {
                        "heating_modes": [
@@ -820,7 +821,8 @@ config path from ``self.device_id`` without needing an external index.
                                }
                            ]
                        },
-                       "raised_offset_k": 1.0
+                       "raised_offset_k": 1.0,
+                       "fixed_room_setpoints": false
                    },
                    "optimization": {
                        "heating_modes": [

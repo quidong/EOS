@@ -181,3 +181,31 @@ def test_hour_energy_uses_the_local_hour():
     ]
     assert charts.hour_energy_kwh(utc_rows, NOW, TZ, "load_wh") == 0.1
     assert charts.hour_energy_kwh(utc_rows, NOW, TZ, "heat_pump_wh") is None
+
+
+def test_plan_rows_carry_the_heating_zones():
+    sol = solution(
+        NOW.replace(minute=0),
+        n=2,
+        hp1_zone_og_heating_mode=3.0,
+        hp1_zone_og_room_temperature_c=19.456,
+        hp1_zone_eg_heating_mode=1.0,
+        hp1_zone_eg_room_temperature_c=20.7,
+        hp1_zone_eg_slab_temperature_c=24.0,  # not a chart column
+        hp2_zone_og_heating_mode=4.0,  # another device
+    )
+    first = charts.plan_rows(sol, "hp1")[0]
+    assert first["zone_og_mode"] == 3.0
+    assert first["zone_og_room_c"] == 19.46
+    assert first["zone_eg_mode"] == 1.0
+    assert first["zone_eg_room_c"] == 20.7
+    assert "zone_eg_slab_c" not in first
+    assert not any(key.startswith("hp2") for key in first)
+
+
+def test_zone_key():
+    assert charts._zone_key("hp1_zone_og_room_temperature_c", "hp1_zone_") == "zone_og_room_c"
+    assert charts._zone_key("hp1_zone_ug_eg_heating_mode", "hp1_zone_") == "zone_ug_eg_mode"
+    assert charts._zone_key("hp1_zone_heating_mode", "hp1_zone_") is None
+    assert charts._zone_key("hp1_zone_setback", "hp1_zone_") is None
+    assert charts._zone_key("hp1_room_temperature_c", "hp1_zone_") is None

@@ -661,11 +661,9 @@ class HeatPumpRunPlan:
                 rows["standby"].append(1.0 if state.standby else 0.0)
                 if zres is not None:
                     for z, zone_id in enumerate(self.zone_ids):
-                        zone_mode = zone_heating[z][period]
-                        if self.zone_inputs[slot][z].reduce_locked and (
-                            zone_mode == HeatingMode.REDUCED
-                        ):
-                            zone_mode = HeatingMode.NORMAL
+                        zone_mode = (
+                            zres.zone_modes[z] if zres.zone_modes else zone_heating[z][period]
+                        )
                         rows[f"zone_{zone_id}_heating_mode"].append(zone_mode.name)
                         rows[f"zone_{zone_id}_room_c"].append(zres.state.rooms[z])
                         rows[f"zone_{zone_id}_slab_c"].append(zres.state.slabs[z])

@@ -233,3 +233,12 @@ def test_rounding_keeps_small_values():
     assert _round(0.000287345) == 0.000287345
     assert _round(123.4567891) == 123.457
     assert _round(5) == 5
+
+
+def test_default_allow_list_covers_the_heating_zones():
+    from akkudoktoreos.rl29mcp.security import DEFAULT_WRITE_PATHS
+
+    assert write_allowed("devices/heat_pumps/wbb12/zones", DEFAULT_WRITE_PATHS)
+    assert write_allowed("devices/heat_pumps/wbb12/zones/zones", DEFAULT_WRITE_PATHS)
+    assert write_allowed("devices/heat_pumps/wbb12/zone_setback/enabled", DEFAULT_WRITE_PATHS)
+    assert not write_allowed("devices/heat_pumps/wbb12/building", DEFAULT_WRITE_PATHS)
