@@ -724,6 +724,14 @@ async def fastapi_logging_get_log(
             tail=tail,
         )
         return JSONResponse(content=logs)
+    except FileNotFoundError as e:
+        # RL29 fork: no log file yet (file logging off) is a 404 with a hint, not a 500.
+        raise EOSProblem(
+            status=404,
+            title="Log file not found",
+            detail=f"{log_path} does not exist; file logging needs logging/file_level (e.g. INFO).",
+            cause=e,
+        ) from e
     except ValueError as e:
         raise EOSProblem(
             status=400,

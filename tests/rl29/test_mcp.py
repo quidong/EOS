@@ -34,6 +34,31 @@ class FakeEos:
         }
         self.saved = 0
         self.requests: list[tuple[str, str]] = []
+        self.log_missing = False
+        self.log_params: dict[str, str] = {}
+        self.log_entries: list[dict[str, Any]] = [
+            {
+                "time": "2026-11-04T22:00:00+01:00",
+                "level": {"name": "INFO", "no": 20},
+                "message": "Heat pump wbb12: {'extra_cost_amt': 1.2}",
+                "name": "akkudoktoreos.optimization.genetic.genetic",
+                "function": "optimize",
+                "line": 4737,
+                "exception": None,
+            },
+            {
+                "text": "raw",
+                "record": {
+                    "time": {"repr": "2026-11-04 22:01:00+01:00"},
+                    "level": {"name": "ERROR"},
+                    "message": "HA call failed: Authorization: Bearer abcdef123 " + "y" * 5000,
+                    "name": "akkudoktoreos.adapter",
+                    "function": "call",
+                    "line": 7,
+                    "exception": {"type": "HTTPError", "value": "token=secret123"},
+                },
+            },
+        ]
 
     def _node(self, path: str) -> Any:
         node: Any = self.config
@@ -77,6 +102,11 @@ class FakeEos:
                     },
                 },
             )
+        if path == "/v1/logging/log":
+            self.log_params = dict(request.url.params)
+            if self.log_missing:
+                return httpx.Response(404, json={"title": "Log file not found"})
+            return httpx.Response(200, json=self.log_entries)
         return httpx.Response(404, json={"detail": "not found"})
 
 
@@ -219,7 +249,7 @@ def test_http_endpoint_requires_token_and_lists_tools(allow_write):
         assert response.status_code == 200, response.text
         tools = _result(_rpc(client, "tools/list", {}))["result"]["tools"]
         names = {tool["name"] for tool in tools}
-        assert {"eos_status", "eos_plan", "eos_config_get", "eos_kpis"} <= names
+        assert {"eos_status", "eos_plan", "eos_config_get", "eos_kpis", "eos_logs"} <= names
         assert ("eos_config_set" in names) is allow_write
         call = _result(
             _rpc(client, "tools/call", {"name": "eos_config_get", "arguments": {"path": "adapter"}})
@@ -242,3 +272,57 @@ def test_default_allow_list_covers_the_heating_zones():
     assert write_allowed("devices/heat_pumps/wbb12/zones/zones", DEFAULT_WRITE_PATHS)
     assert write_allowed("devices/heat_pumps/wbb12/zone_setback/enabled", DEFAULT_WRITE_PATHS)
     assert not write_allowed("devices/heat_pumps/wbb12/building", DEFAULT_WRITE_PATHS)
+
+
+@pytest.mark.asyncio
+async def test_logs_are_compact_masked_and_filtered():
+    tools, fake = make_tools(allow_write=False)
+    result = await tools.logs(limit=10, level="info", contains="Heat pump", minutes=60)
+    assert fake.log_params["tail"] == "true"
+    assert fake.log_params["level"] == "INFO"
+    assert fake.log_params["contains"] == "Heat pump"
+    assert "from_time" in fake.log_params
+    assert result["count"] == 2
+    first, second = result["entries"]
+    assert first["where"].endswith("optimize:4737")
+    assert second["level"] == "ERROR" and second["time"].startswith("2026-11-04 22:01")
+    assert "abcdef123" not in second["message"] and "Bearer ***" in second["message"]
+    assert "more]" in second["message"]
+    assert "secret123" not in second["exception"]
+
+
+@pytest.mark.asyncio
+async def test_logs_limits_and_validation():
+    tools, fake = make_tools(allow_write=False)
+    await tools.logs(limit=100000)
+    assert fake.log_params["limit"] == "500"
+    with pytest.raises(SecurityError):
+        await tools.logs(level="LOUD")
+    with pytest.raises(SecurityError):
+        await tools.logs(contains="x" * 201)
+
+
+@pytest.mark.asyncio
+async def test_logs_without_log_file_explain_how_to_enable():
+    tools, fake = make_tools(allow_write=False)
+    fake.log_missing = True
+    result = await tools.logs()
+    assert result["count"] == 0
+    assert "logging/file_level" in result["error"]
+
+
+def test_only_the_log_file_level_is_writable_below_logging():
+    from akkudoktoreos.rl29mcp.security import DEFAULT_WRITE_PATHS
+
+    assert write_allowed("logging/file_level", DEFAULT_WRITE_PATHS)
+    for path in ("logging", "logging/console_level", "logging/api_level", "logging/file_path"):
+        assert not write_allowed(path, DEFAULT_WRITE_PATHS)
+    # an explicit allow-list entry for the whole section does not open it either
+    assert not write_allowed("logging/console_level", ("logging",))
+
+
+def test_log_masking():
+    from akkudoktoreos.rl29mcp.server import mask_log_text
+
+    text = mask_log_text("url postgresql://eos:pw@db/eos api_key=abc password: 'x1' Bearer t0k")
+    assert "pw@" not in text and "abc" not in text and "x1" not in text and "t0k" not in text

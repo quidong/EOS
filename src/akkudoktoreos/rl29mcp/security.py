@@ -7,7 +7,7 @@ Everything here is pure and tested on its own:
 - ``BearerAuth``: ASGI middleware, every request needs ``Authorization: Bearer <token>``
   (constant-time comparison); only ``GET /health`` is open (no content).
 - ``write_allowed``: configuration writes only below allow-listed paths, never secrets,
-  never the adapter/server/general sections.
+  never the adapter/server/general sections; of logging only ``logging/file_level``.
 - ``RateLimiter``: at most ``max_writes_per_minute`` writes.
 """
 
@@ -45,11 +45,16 @@ DEFAULT_WRITE_PATHS = (
     "devices/heat_pumps/*/zone_setback",
     "devices/batteries/*/min_soc_percentage",
     "devices/batteries/*/max_soc_percentage",
+    "logging/file_level",
 )
 """Configuration sections the MCP may change (``*`` = any one segment)."""
 
 FORBIDDEN_ROOTS = ("adapter", "server", "general", "logging", "cache", "measurement")
 """Never writable, whatever the allow-list says: connections, credentials, location."""
+
+FORBIDDEN_ROOT_EXCEPTIONS = ("logging/file_level",)
+"""Single leaves below a forbidden root that may still be allow-listed: the level of
+the log file (``eos_logs`` reads it); console and API logging stay untouchable."""
 
 _PATH = re.compile(r"^[A-Za-z0-9_\-]+(/[A-Za-z0-9_\-]+)*$")
 _KEY = re.compile(r"^[A-Za-z0-9_\-]{1,100}$")
@@ -125,7 +130,7 @@ def write_allowed(path: str, patterns: tuple[str, ...]) -> bool:
     if not path or path_is_secret(path):
         return False
     parts = path.split("/")
-    if parts[0] in FORBIDDEN_ROOTS:
+    if parts[0] in FORBIDDEN_ROOTS and path not in FORBIDDEN_ROOT_EXCEPTIONS:
         return False
     for pattern in patterns:
         pattern_parts = pattern.strip("/").split("/")

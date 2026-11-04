@@ -47,6 +47,7 @@ reads the model reports from the data volume (read-only). Run it as an extra ser
 | `eos_kpis`, `eos_hours` | read | forecast/plan accuracy, realised costs (needs the history database) |
 | `eos_reports` | read | reports of base load ML, price ML, PV ensemble |
 | `eos_config_get` | read | configuration (whole or a subtree), secrets masked |
+| `eos_logs` | read | latest EOS log entries (level, text, last N minutes), secrets masked; see Logs |
 | `eos_config_set` | write | change one value (allow-listed sections only, reason required) |
 | `eos_config_undo`, `eos_config_save` | write | undo the last change, persist the configuration |
 
@@ -58,11 +59,22 @@ Guards:
 - **Read-only by default**; writing needs `EOS_MCP_ALLOW_WRITE=true`.
 - **Allow-list** `EOS_MCP_WRITE_PATHS` (default: `ems`, `optimization`, `load/provider`, `load/loadml`,
   `pvforecast/ensemble`, `elecprice/ml`, `database/history/{enabled,actuals,accuracy,min_store_interval_minutes}`,
-  `devices/heat_pumps/*/{comfort,optimization,dhw,away,zones,zone_setback}`, `devices/batteries/*/{min,max}_soc_percentage`).
-  Never: `adapter`, `server`, `general`, `logging`, `cache`, `measurement` and anything that is a secret.
+  `devices/heat_pumps/*/{comfort,optimization,dhw,away,zones,zone_setback}`, `devices/batteries/*/{min,max}_soc_percentage`,
+  `logging/file_level`).
+  Never: `adapter`, `server`, `general`, `logging` (except the single leaf `logging/file_level`), `cache`,
+  `measurement` and anything that is a secret.
 - **Limits**: `EOS_MCP_MAX_WRITES_PER_MINUTE` (10), values ≤ 64 KB, paths `a/b/c` only.
 - **Audit**: every change is logged with old and new value and the reason (`MCP audit: …`); changes are
   effective at once and persistent only after `eos_config_save`.
+
+### Logs
+
+EOS writes its log file (`<data_output_path>/eos.log`, JSON lines, rotated at 100 MB, kept 3 days) only
+when `logging/file_level` is set, e.g. `eos_config_set logging/file_level INFO` and `eos_config_save`.
+`eos_logs` reads it through `GET /v1/logging/log`; `contains="Heat pump wbb12"` returns the summary of the
+latest heat pump plan (extra cost, comfort violation, stored-heat credit, mode changes). Fork fixes of the
+endpoint: the Loguru records are flattened so the level/text/time filters work, `tail` returns the last
+matching entries (not just matches among the last lines), and a missing file is a 404 with a hint.
 
 ### Clients
 

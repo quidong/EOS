@@ -7,7 +7,7 @@ import re
 import sys
 from pathlib import Path
 from types import FrameType
-from typing import Any, List, Optional, cast
+from typing import Any, Iterator, List, Optional, cast
 
 import pendulum
 from loguru import logger
@@ -142,6 +142,60 @@ def logging_track_config(config_eos: Any, path: str, old_value: Any, value: Any)
     )
 
 
+def normalize_log_entry(log: dict) -> dict:
+    """One log line as ``{"time", "level", "message", ...}``.
+
+    RL29 fork: Loguru's ``serialize=True`` writes ``{"text": ..., "record": {...}}``;
+    time, level and message are inside ``record``. The filters of ``read_file_log``
+    and its callers expect them at the top level, so serialized records are
+    flattened. Entries that already have the flat shape pass unchanged.
+    """
+    record = log.get("record")
+    if not isinstance(record, dict):
+        return log
+    time = record.get("time")
+    if isinstance(time, dict):
+        time = time.get("repr")
+    if isinstance(time, str) and len(time) > 10 and time[10] == " ":
+        time = time[:10] + "T" + time[11:]  # ISO 8601, parseable by pendulum
+    level = record.get("level")
+    if isinstance(level, dict):
+        level = {"name": level.get("name"), "no": level.get("no")}
+    else:
+        level = {"name": level, "no": None}
+    exception = record.get("exception")
+    return {
+        "time": time,
+        "level": level,
+        "message": record.get("message", ""),
+        "name": record.get("name"),
+        "function": record.get("function"),
+        "line": record.get("line"),
+        "exception": exception,
+        "text": log.get("text"),
+    }
+
+
+def _lines_reversed(log_path: Path, chunk_size: int = 64 * 1024) -> Iterator[str]:
+    """Lines of a file from the last to the first, read in chunks."""
+    with log_path.open("rb") as f:
+        f.seek(0, 2)
+        pointer = f.tell()
+        rest = b""
+        while pointer > 0:
+            step = min(chunk_size, pointer)
+            pointer -= step
+            f.seek(pointer)
+            block = f.read(step) + rest
+            parts = block.split(b"\n")
+            rest = parts[0]
+            for part in reversed(parts[1:]):
+                if part.strip():
+                    yield part.decode("utf-8", errors="ignore")
+        if rest.strip():
+            yield rest.decode("utf-8", errors="ignore")
+
+
 def read_file_log(
     log_path: Path,
     limit: int = 100,
@@ -151,6 +205,7 @@ def read_file_log(
     from_time: Optional[str] = None,
     to_time: Optional[str] = None,
     tail: bool = False,
+    max_scan_lines: int = 500_000,
 ) -> List[dict]:
     """Read and filter structured log entries from a JSON-formatted log file.
 
@@ -162,7 +217,9 @@ def read_file_log(
         regex (Optional[str], optional): Filter logs whose message matches this regular expression. Defaults to None.
         from_time (Optional[str], optional): ISO 8601 datetime string to filter logs not earlier than this time. Defaults to None.
         to_time (Optional[str], optional): ISO 8601 datetime string to filter logs not later than this time. Defaults to None.
-        tail (bool, optional): If True, read the last lines of the file (like `tail -n`). Defaults to False.
+        tail (bool, optional): If True, return the last `limit` matching entries (like `tail -n`
+            after a filter), oldest first. Defaults to False.
+        max_scan_lines (int, optional): In tail mode, stop after this many lines. Defaults to 500000.
 
     Returns:
         List[dict]: A list of filtered log entries as dictionaries.
@@ -201,45 +258,45 @@ def read_file_log(
                 return False
         return True
 
-    matched_logs = []
-    lines: list[str] = []
-
-    if tail:
-        with log_path.open("rb") as f:
-            f.seek(0, 2)
-            end = f.tell()
-            buffer = bytearray()
-            pointer = end
-
-            while pointer > 0 and len(lines) < limit * 5:
-                pointer -= 1
-                f.seek(pointer)
-                byte = f.read(1)
-                if byte == b"\n":
-                    if buffer:
-                        line = buffer[::-1].decode("utf-8", errors="ignore")
-                        lines.append(line)
-                        buffer.clear()
-                else:
-                    buffer.append(byte[0])
-            if buffer:
-                line = buffer[::-1].decode("utf-8", errors="ignore")
-                lines.append(line)
-        lines = lines[::-1]
-    else:
-        with log_path.open("r", encoding="utf-8", newline=None) as f_txt:
-            lines = f_txt.readlines()
-
-    for line in lines:
+    def parse(line: str) -> Optional[dict]:
         if not line.strip():
-            continue
+            return None
         try:
             log = json.loads(line)
         except json.JSONDecodeError:
-            continue
-        if matches_filters(log):
-            matched_logs.append(log)
-            if len(matched_logs) >= limit:
+            return None
+        return normalize_log_entry(log) if isinstance(log, dict) else None
+
+    matched_logs: list[dict] = []
+    if tail:
+        # RL29 fork: walk back from the end until `limit` entries match (the
+        # upstream version filtered only the last 5 * limit lines, so a filter
+        # for a rare message found nothing). Older than `from_time` ends the walk.
+        for scanned, line in enumerate(_lines_reversed(log_path)):
+            if scanned >= max_scan_lines:
                 break
+            log = parse(line)
+            if log is None:
+                continue
+            if from_dt is not None:
+                try:
+                    if cast(pendulum.DateTime, pendulum.parse(log["time"])) < from_dt:
+                        break
+                except Exception:  # noqa: S110 - unparseable time: let the filter decide
+                    pass
+            if matches_filters(log):
+                matched_logs.append(log)
+                if len(matched_logs) >= limit:
+                    break
+        matched_logs.reverse()
+        return matched_logs
+
+    with log_path.open("r", encoding="utf-8", newline=None) as f_txt:
+        for line in f_txt:
+            log = parse(line)
+            if log is not None and matches_filters(log):
+                matched_logs.append(log)
+                if len(matched_logs) >= limit:
+                    break
 
     return matched_logs

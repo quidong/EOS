@@ -38,6 +38,14 @@ from akkudoktoreos.server.rest.secrets import (
 REPORTS = ("load_ml.json", "price_ml.json", "pv_ensemble.json")
 DEFAULT_PLAN_EXCLUDE = re.compile(r"_kpi_|_ts$|^date_time$")
 MAX_HOURS = 168
+MAX_LOG_ENTRIES = 500
+MAX_LOG_MESSAGE = 4000
+LOG_LEVELS = ("TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL")
+_LOG_SECRETS = re.compile(
+    r"(?i)(bearer\s+|(?:token|api[_-]?key|apikey|password|passwd|secret)[\"']?\s*[=:]\s*[\"']?)"
+    r"[^\s\"',;&}]+"
+)
+_URL_CREDENTIALS = re.compile(r"(?i)(\b[a-z][a-z0-9+.-]*://[^\s/:@]+:)[^\s/@]+@")
 
 
 class EosError(RuntimeError):
@@ -180,6 +188,44 @@ class EosTools:
                 result[name] = {"error": str(exc)}
         return result
 
+    async def logs(
+        self,
+        limit: int = 50,
+        level: Optional[str] = None,
+        contains: Optional[str] = None,
+        minutes: Optional[int] = None,
+    ) -> dict[str, Any]:
+        limit = max(1, min(int(limit), MAX_LOG_ENTRIES))
+        params: dict[str, Any] = {"limit": limit, "tail": "true"}
+        if level:
+            name = str(level).strip().upper()
+            if name not in LOG_LEVELS:
+                raise SecurityError(f"Unknown log level '{level}' ({', '.join(LOG_LEVELS)}).")
+            params["level"] = name
+        if contains:
+            text = str(contains)
+            if len(text) > 200:
+                raise SecurityError("Search text too long (max 200 characters).")
+            params["contains"] = text
+        if minutes:
+            since = datetime.now(timezone.utc) - timedelta(
+                minutes=max(1, min(int(minutes), 7 * 24 * 60))
+            )
+            params["from_time"] = since.isoformat()
+        try:
+            entries = await self.eos.get("/v1/logging/log", params)
+        except EosError as exc:
+            if "EOS 404" in str(exc):
+                return {
+                    "entries": [],
+                    "count": 0,
+                    "error": "EOS writes no log file. Enable it with "
+                    "eos_config_set logging/file_level INFO and eos_config_save.",
+                }
+            raise
+        result = [_log_entry(e) for e in entries or [] if isinstance(e, dict)]
+        return {"count": len(result), "entries": result}
+
     # ---- write ------------------------------------------------------------------
 
     def _require_write(self, path: str = "") -> str:
@@ -243,6 +289,39 @@ class EosTools:
         return {"saved": True}
 
 
+def mask_log_text(text: str) -> str:
+    """Log text with tokens, keys, passwords and URL credentials replaced by ``***``."""
+    text = _URL_CREDENTIALS.sub(r"\1***@", text)
+    return _LOG_SECRETS.sub(r"\1***", text)
+
+
+def _log_entry(entry: dict) -> dict[str, Any]:
+    """Compact, masked view of one EOS log entry (flat or Loguru-serialized)."""
+    raw = entry.get("record")
+    record: dict[str, Any] = raw if isinstance(raw, dict) else entry
+    time = record.get("time")
+    if isinstance(time, dict):
+        time = time.get("repr")
+    level = record.get("level")
+    if isinstance(level, dict):
+        level = level.get("name")
+    message = mask_log_text(str(record.get("message") or ""))
+    if len(message) > MAX_LOG_MESSAGE:
+        message = message[:MAX_LOG_MESSAGE] + f" ... [{len(message) - MAX_LOG_MESSAGE} more]"
+    result: dict[str, Any] = {"time": time, "level": level, "message": message}
+    where = ":".join(
+        str(part)
+        for part in (record.get("name"), record.get("function"), record.get("line"))
+        if part
+    )
+    if where:
+        result["where"] = where
+    exception = record.get("exception")
+    if exception:
+        result["exception"] = mask_log_text(json.dumps(exception, default=str))[:MAX_LOG_MESSAGE]
+    return result
+
+
 def _round(value: Any) -> Any:
     """Six significant digits: compact, and prices per Wh (0.000287) keep their value."""
     if isinstance(value, float):
@@ -251,7 +330,9 @@ def _round(value: Any) -> Any:
 
 
 INSTRUCTIONS = """EOS (Akkudoktor-EOS, RL29 fork) plans battery, heat pump and appliances of the house.
-Read tools: eos_status, eos_plan, eos_forecast, eos_kpis, eos_hours, eos_reports, eos_config_get.
+Read tools: eos_status, eos_plan, eos_forecast, eos_kpis, eos_hours, eos_reports, eos_config_get, eos_logs.
+eos_logs: last log entries of EOS (needs logging/file_level), e.g. contains="Heat pump wbb12" for the
+cost breakdown of the latest heat pump plan.
 Write tools (if enabled): eos_config_set (path + value + reason), eos_config_undo, eos_config_save.
 Changes act on the running EOS at once but are only persistent after eos_config_save.
 Configuration paths use slashes, e.g. optimization/algorithm or ems/interval. Secrets are never shown."""
@@ -315,6 +396,21 @@ def build_server(settings: McpSettings, eos: Optional[EosClient] = None) -> tupl
     async def eos_reports() -> dict[str, Any]:
         """Reports of the learning models: base load ML, price ML, PV ensemble."""
         return await tools.reports()
+
+    @server.tool()
+    async def eos_logs(
+        limit: int = 50,
+        level: Optional[str] = None,
+        contains: Optional[str] = None,
+        minutes: Optional[int] = None,
+    ) -> dict[str, Any]:
+        """Latest EOS log entries, oldest first (max 500); secrets masked.
+
+        `level`: exact level (INFO, WARNING, ERROR, ...); `contains`: text in the message,
+        e.g. "Heat pump wbb12" (plan summary: costs, comfort, stored-heat credit);
+        `minutes`: only the last N minutes. Needs file logging (logging/file_level).
+        """
+        return await tools.logs(limit, level, contains, minutes)
 
     @server.tool()
     async def eos_config_get(path: str = "") -> Any:
