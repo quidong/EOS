@@ -103,18 +103,29 @@ for row in sim[::8]:
     print("  ", row)
 
 best = []
-for loss, emit, sr, slab in itertools.product(
-    (60, 75, 90, 110, 130), (150, 200, 250, 330), (250, 350, 500), (2200, 3300)
-):
-    b = BuildingParameters(slab, 3300, loss, sr, emit)
+for loss, emit, sr in itertools.product((130, 160, 200, 250), (60, 80, 100, 130, 150), (100, 150, 250)):
+    b = BuildingParameters(3300, 3300, loss, sr, emit)
     r1, r2, _ = simulate(b, cur_eg)
-    best.append((r1, r2, loss, emit, sr, slab))
+    best.append((r1, r2, loss, emit, sr))
 best.sort()
-print("best og (rmse og, rmse eg, loss, emitter, slab_room, slab_cap):")
-for row in best[:8]:
+print("best og (rmse og, rmse eg, loss, emitter, slab_room):")
+for row in best[:6]:
     print("  ", tuple(round(x, 3) if isinstance(x, float) else x for x in row))
-b = BuildingParameters(best[0][5], 3300, best[0][2], best[0][4], best[0][3])
-_, _, sim = simulate(b, cur_eg)
-print("best og trace (time, sim og, meas og, sim eg, meas eg):")
+og_b = BuildingParameters(3300, 3300, best[0][2], best[0][4], best[0][3])
+best_eg = []
+for loss, emit, sr in itertools.product((60, 80, 100, 120), (500, 670, 900, 1200), (1000, 1500)):
+    b = BuildingParameters(1300, 6700, loss, sr, emit)
+    r1, r2, _ = simulate(og_b, b)
+    best_eg.append((r1 + r2, r1, r2, loss, emit, sr))
+best_eg.sort()
+print("best eg with best og (sum, rmse og, rmse eg, loss, emitter, slab_room):")
+for row in best_eg[:6]:
+    print("  ", tuple(round(x, 3) if isinstance(x, float) else x for x in row))
+eg_b = BuildingParameters(1300, 6700, best_eg[0][3], best_eg[0][5], best_eg[0][4])
+for c in (0.0, 100.0, 200.0):
+    r1, r2, sim = simulate(og_b, eg_b, coupling=c)
+    print(f"coupling {c}: og {r1:.2f} eg {r2:.2f}")
+r1, r2, sim = simulate(og_b, eg_b)
+print("best trace (time, sim og, meas og, sim eg, meas eg):")
 for row in sim[::8]:
     print("  ", row)
