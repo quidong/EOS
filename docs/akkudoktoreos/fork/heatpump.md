@@ -302,6 +302,21 @@ The controller's measurements must be younger than `optimization.genetic.measure
 set it above the controller's sending interval (example: 900 s for a 5 minute interval), otherwise
 runs start from model defaults (room setpoint, tank setpoint − hysteresis/2) and the plan jumps.
 
+### Minimum hold time
+
+`optimization.min_hold_minutes` (example: 55; 0 = off, GENETIC only) is the shortest time between two
+changes of the executed level. The level of a mode is `optimization.sg_ready_of_mode` (default SG Ready:
+REDUCED 1, NORMAL 2, RAISED 3, PREHEAT 3, FORCED 4, COOL 2), so RAISED ↔ PREHEAT or which zone is forced
+change freely. The plan's modes per gene period are applied slot by slot: a change to another level waits
+until the hold has passed since the last change, the modes in effect stay meanwhile; a return to the level
+of NORMAL is always allowed and starts a new hold. The plan rows (`heating_mode`, `zone_<z>_heating_mode`)
+show the executed modes, and the simulation (costs, comfort) uses them, so the optimizer plans with the hold.
+
+At the start of a plan the hold counts from the last change the controller reports: measurements
+`<id>-sg-ready-actual` (level switched now) and `<id>-sg-ready-changed-ts` (Unix time of the last switch).
+Without them the previous plan's mode is the current level and the hold starts with the first change in
+the plan. The plausibility check (`scripts/rl29/check_heatpump_plan.py`) warns if a plan violates the hold.
+
 ## Room limits and humidity
 
 EOS models the mean of all rooms. Two optional inputs let the controller pass on what it knows

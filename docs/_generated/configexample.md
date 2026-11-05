@@ -327,6 +327,15 @@
                        "legionella_penalty_amt": 2.0,
                        "mode_change_penalty_amt": 0.002,
                        "stored_heat_price_quantile": 0.25,
+                       "min_hold_minutes": 0.0,
+                       "sg_ready_of_mode": {
+                           "REDUCED": 1,
+                           "NORMAL": 2,
+                           "RAISED": 3,
+                           "PREHEAT": 3,
+                           "FORCED": 4,
+                           "COOL": 2
+                       },
                        "load_forecast_includes_heat_pump": false
                    },
                    "cooling": {

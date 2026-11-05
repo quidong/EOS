@@ -747,6 +747,33 @@ class ConfigOptimizationRequest(
             logger.debug("Heat pump {}: no active mode from the previous plan: {}", device_id, exc)
             return None, None
 
+    @staticmethod
+    def _active_zone_modes(
+        device_id: str, observation_time: DateTime, zone_ids: list[str]
+    ) -> Optional[dict[str, int]]:
+        """Heating mode per zone the previous plan set for now (RL29 fork); None if unknown."""
+        from akkudoktoreos.devices.thermal.heatpump import HeatingMode
+
+        try:
+            previous = get_ems().genetic_solution()
+            schedule = (getattr(previous, "heat_pumps", None) or {}).get(device_id) or {}
+            start = schedule.get("start_datetime")
+            seconds = int(schedule.get("slot_seconds") or 0)
+            if start is None or seconds <= 0:
+                return None
+            index = int((observation_time.timestamp() - to_datetime(start).timestamp()) // seconds)
+            result: dict[str, int] = {}
+            for zone_id in zone_ids:
+                rows = list(schedule.get(f"zone_{zone_id}_heating_mode") or [])
+                if index < 0 or index >= len(rows):
+                    return None
+                value = rows[index]
+                result[zone_id] = int(HeatingMode[value]) if isinstance(value, str) else int(value)
+            return result
+        except Exception as exc:  # optional, never cancel the run
+            logger.debug("Heat pump {}: no zone modes from the previous plan: {}", device_id, exc)
+            return None
+
     async def _heat_pump_state(
         self, device: Any, observation_time: DateTime
     ) -> GeneticHeatPumpParameters:
@@ -1010,6 +1037,35 @@ class ConfigOptimizationRequest(
         active_heating, active_dhw = self._active_heat_pump_modes(
             device.device_id, observation_time
         )
+        # Minimum hold time (fork): executed level and its last change from the controller.
+        sg_actual: Optional[int] = None
+        sg_changed: Optional[DateTime] = None
+        active_zones: Optional[dict[str, int]] = None
+        if device.optimization.min_hold_minutes > 0:
+            value = await self._latest_measurement(
+                device.measurement_key_sg_ready_actual, observation_time, 3600
+            )
+            if value is not None and math.isfinite(value) and 0 <= value <= 9:
+                sg_actual = int(round(value))
+            value = await self._latest_measurement(
+                device.measurement_key_sg_ready_changed, observation_time, 7 * 24 * 3600
+            )
+            if (
+                value is not None
+                and math.isfinite(value)
+                and 0 < value <= observation_time.timestamp() + 60
+            ):
+                sg_changed = to_datetime(value, in_timezone=self.config.general.timezone)
+            if device.zones.active:
+                active_zones = self._active_zone_modes(
+                    device.device_id, observation_time, [z.zone_id for z in device.zones.zones]
+                )
+            logger.info(
+                "Heat pump {}: executed level {} since {}.",
+                device.device_id,
+                sg_actual,
+                sg_changed.isoformat() if sg_changed is not None else "unknown",
+            )
         return GeneticHeatPumpParameters(
             device_id=device.device_id,
             warning_start=warning_start,
@@ -1041,4 +1097,7 @@ class ConfigOptimizationRequest(
             hours_since_legionella=hours_since,
             active_heating_mode=active_heating,
             active_dhw_mode=active_dhw,
+            active_zone_modes=active_zones,
+            sg_ready_actual=sg_actual,
+            sg_ready_changed_at=sg_changed,
         )

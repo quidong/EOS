@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2611031830045886"
+    "version": "v0.3.0.dev2611051876109823"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -10462,6 +10462,46 @@
             ],
             "title": "Active Dhw Mode",
             "description": "RL29 fork: hot water mode in effect now (from the previous plan); see active_heating_mode. None = unknown."
+          },
+          "active_zone_modes": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Zone Modes",
+            "description": "RL29 fork: heating mode per zone the previous plan set for now; the hold of ``min_hold_minutes`` keeps these. None = unknown."
+          },
+          "sg_ready_actual": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sg Ready Actual",
+            "description": "RL29 fork: executed level (SG Ready state) the controller reports now; None = unknown (the previous plan's mode is assumed)."
+          },
+          "sg_ready_changed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sg Ready Changed At",
+            "description": "RL29 fork: time of the last change of the executed level; None = unknown (no hold at the start of the plan)."
           }
         },
         "additionalProperties": false,
@@ -12346,6 +12386,18 @@
             "description": "Unix time until which the controller does not reduce, 0 = no lock (fork).",
             "readOnly": true
           },
+          "measurement_key_sg_ready_actual": {
+            "type": "string",
+            "title": "Measurement Key Sg Ready Actual",
+            "description": "Executed level (SG Ready state) the controller runs now (fork).",
+            "readOnly": true
+          },
+          "measurement_key_sg_ready_changed": {
+            "type": "string",
+            "title": "Measurement Key Sg Ready Changed",
+            "description": "Unix time of the last change of the executed level (fork).",
+            "readOnly": true
+          },
           "measurement_key_setback_room_temperature": {
             "type": "string",
             "title": "Measurement Key Setback Room Temperature",
@@ -12410,6 +12462,8 @@
           "measurement_key_away_room_temperature",
           "measurement_key_away_min_temperature",
           "measurement_key_reduce_lock_until",
+          "measurement_key_sg_ready_actual",
+          "measurement_key_sg_ready_changed",
           "measurement_key_setback_room_temperature",
           "measurement_key_window_open",
           "measurement_key_dewpoint",
@@ -12864,6 +12918,36 @@
             "examples": [
               0.25,
               1.0
+            ]
+          },
+          "min_hold_minutes": {
+            "type": "number",
+            "maximum": 720.0,
+            "minimum": 0.0,
+            "title": "Min Hold Minutes",
+            "description": "RL29 fork: minimum time between two changes of the executed heating level (``sg_ready_of_mode``, e.g. the SG Ready state) [min]. After a change the plan keeps the level until the time has passed; a return to NORMAL is always allowed and starts a new hold. At the start of a plan the hold counts from the last change the controller reports (``<id>-sg-ready-actual``, ``<id>-sg-ready-changed-ts``). 0 = off. Genetic optimizer only.",
+            "default": 0.0,
+            "examples": [
+              0,
+              55
+            ]
+          },
+          "sg_ready_of_mode": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Sg Ready Of Mode",
+            "description": "RL29 fork: executed level (SG Ready state) per heating mode, as the controller maps the modes. Modes with the same level count as one level for ``min_hold_minutes``; missing modes take the default.",
+            "examples": [
+              {
+                "COOL": 2,
+                "FORCED": 4,
+                "NORMAL": 2,
+                "PREHEAT": 3,
+                "RAISED": 3,
+                "REDUCED": 1
+              }
             ]
           },
           "load_forecast_includes_heat_pump": {

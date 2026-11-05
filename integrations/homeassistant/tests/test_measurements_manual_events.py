@@ -45,6 +45,18 @@ def test_state_values():
     assert sv("hp-other", "2026-11-01T01:00:00+01:00") is None  # times only for *-ts
 
 
+def test_input_datetime_timestamp_attribute():
+    """An input_datetime has no zone in its state; its timestamp attribute is used."""
+    sv = measurements.state_value
+    stamp = datetime(2026, 11, 5, 17, 18, 59, tzinfo=TZ).timestamp()
+    assert sv("wbb12-sg-ready-changed-ts", "2026-11-05 17:18:59", {"timestamp": stamp}) == stamp
+    assert sv("wbb12-sg-ready-changed-ts", "2026-11-05 17:18:59") is None  # naive, no attribute
+    # numbers and other keys are unaffected by the attribute
+    assert sv("wbb12-sg-ready-actual", "3.0", {"timestamp": stamp}) == 3.0
+    assert sv("wbb12-x", "2026-11-05 17:18:59", {"timestamp": stamp}) is None
+    assert sv("wbb12-sg-ready-changed-ts", "x", {"timestamp": True}) is None
+
+
 def test_keys():
     keys = ["wbb12-room-temperature", "wbb12.cycles", "waschmaschine-power", "sensor.meter"]
     assert measurements.device_keys(keys, "wbb12") == ["wbb12-room-temperature", "wbb12.cycles"]

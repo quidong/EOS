@@ -52,6 +52,17 @@ from akkudoktoreos.devices.thermal.heatpump import (
 )
 from akkudoktoreos.utils.datetimeutil import DateTime
 
+DEFAULT_SG_READY_OF_MODE: dict[str, int] = {
+    "REDUCED": 1,
+    "NORMAL": 2,
+    "RAISED": 3,
+    "PREHEAT": 3,
+    "FORCED": 4,
+    "COOL": 2,
+}
+"""SG Ready state per heating mode as the RL29 Home Assistant integration executes it
+(cooling does not use SG Ready and counts like NORMAL)."""
+
 
 class HeatPumpBuildingSettings(SettingsBaseModel):
     """Two-node building model (screed + room)."""
@@ -612,6 +623,34 @@ class HeatPumpOptimizationSettings(SettingsBaseModel):
             "examples": [0.25, 1.0],
         },
     )
+    min_hold_minutes: float = Field(
+        default=0.0,
+        ge=0,
+        le=720,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: minimum time between two changes of the executed heating level "
+                "(``sg_ready_of_mode``, e.g. the SG Ready state) [min]. After a change the "
+                "plan keeps the level until the time has passed; a return to NORMAL is "
+                "always allowed and starts a new hold. At the start of a plan the hold "
+                "counts from the last change the controller reports "
+                "(``<id>-sg-ready-actual``, ``<id>-sg-ready-changed-ts``). 0 = off. "
+                "Genetic optimizer only."
+            ),
+            "examples": [0, 55],
+        },
+    )
+    sg_ready_of_mode: dict[str, int] = Field(
+        default_factory=lambda: dict(DEFAULT_SG_READY_OF_MODE),
+        json_schema_extra={
+            "description": (
+                "RL29 fork: executed level (SG Ready state) per heating mode, as the "
+                "controller maps the modes. Modes with the same level count as one level "
+                "for ``min_hold_minutes``; missing modes take the default."
+            ),
+            "examples": [dict(DEFAULT_SG_READY_OF_MODE)],
+        },
+    )
     load_forecast_includes_heat_pump: bool = Field(
         default=False,
         json_schema_extra={
@@ -630,6 +669,26 @@ class HeatPumpOptimizationSettings(SettingsBaseModel):
         if any(mode not in (0, 1, 2, 3, 4) for mode in value):
             raise ValueError("Heating modes are 0..4.")
         return sorted(set(value))
+
+    @field_validator("sg_ready_of_mode")
+    @classmethod
+    def validate_sg_ready_of_mode(cls, value: dict[str, int]) -> dict[str, int]:
+        merged = dict(DEFAULT_SG_READY_OF_MODE)
+        for name, level in (value or {}).items():
+            key = str(name).strip().upper()
+            if key not in merged:
+                raise ValueError(f"Unknown heating mode '{name}' (allowed: {', '.join(merged)}).")
+            if not isinstance(level, int) or isinstance(level, bool) or not 0 <= level <= 9:
+                raise ValueError(f"Level of {key} must be an integer 0..9.")
+            merged[key] = level
+        return merged
+
+    def sg_ready_levels(self) -> tuple[int, ...]:
+        """Executed level per heating mode value (index = ``HeatingMode`` value)."""
+        from akkudoktoreos.devices.thermal.heatpump import HeatingMode
+
+        levels = {**DEFAULT_SG_READY_OF_MODE, **self.sg_ready_of_mode}
+        return tuple(levels[mode.name] for mode in sorted(HeatingMode, key=int))
 
     @field_validator("dhw_modes")
     @classmethod
@@ -1473,6 +1532,8 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
             self.measurement_key_away_min_temperature,
             self.measurement_key_reduce_lock_until,
         ]
+        if self.optimization.min_hold_minutes > 0:
+            keys += [self.measurement_key_sg_ready_actual, self.measurement_key_sg_ready_changed]
         if self.zone_setback.enabled:
             keys.append(self.measurement_key_setback_room_temperature)
         if self.ventilation.enabled:
@@ -1554,6 +1615,18 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
     def measurement_key_reduce_lock_until(self) -> str:
         """Unix time until which the controller does not reduce, 0 = no lock (fork)."""
         return f"{self.device_id}-reduce-lock-until-ts"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def measurement_key_sg_ready_actual(self) -> str:
+        """Executed level (SG Ready state) the controller runs now (fork)."""
+        return f"{self.device_id}-sg-ready-actual"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def measurement_key_sg_ready_changed(self) -> str:
+        """Unix time of the last change of the executed level (fork)."""
+        return f"{self.device_id}-sg-ready-changed-ts"
 
     @computed_field  # type: ignore[prop-decorator]
     @property

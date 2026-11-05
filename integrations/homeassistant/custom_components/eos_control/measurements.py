@@ -80,8 +80,14 @@ def emr_keys(measurement_config: Any) -> list[str]:
     return keys
 
 
-def state_value(key: str, state: Optional[str]) -> Optional[float]:
-    """Number for EOS from an entity state; times (``*-ts`` keys) as Unix time."""
+def state_value(
+    key: str, state: Optional[str], attributes: Optional[Mapping[str, Any]] = None
+) -> Optional[float]:
+    """Number for EOS from an entity state; times (``*-ts`` keys) as Unix time.
+
+    A ``*-ts`` key also takes the ``timestamp`` attribute of an ``input_datetime``
+    (its state has no time zone, e.g. ``2026-11-05 17:18:59``).
+    """
     if state is None:
         return None
     text = str(state).strip()
@@ -97,6 +103,9 @@ def state_value(key: str, state: Optional[str]) -> Optional[float]:
     except ValueError:
         pass
     if key.endswith("-ts"):
+        stamp = (attributes or {}).get("timestamp")
+        if isinstance(stamp, (int, float)) and not isinstance(stamp, bool):
+            return float(stamp)
         try:
             parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
         except ValueError:

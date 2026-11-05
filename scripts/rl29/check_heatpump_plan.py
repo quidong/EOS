@@ -23,6 +23,9 @@ Rules (thresholds from the heat pump configuration, overridable):
   matching the HA limit input_number.eos_wp_max_absenkdauer); holiday slots do
   not count (HA does not limit the reduction while away)
 - WARN  hot water HEAT_PUMP in more than 4 hours of the horizon
+- WARN  a change of the executed level (``optimization.sg_ready_of_mode``, SG Ready)
+  to anything but NORMAL less than ``optimization.min_hold_minutes`` after the
+  previous change in the plan (EOS keeps the hold itself; a violation is a bug)
 - per heating zone (``zones.enabled``; solution columns
   ``<device>_zone_<zone>_heating_mode`` / ``_room_temperature_c``):
   FAIL  planned zone temperature below the zone minimum - 1 K (the zone
@@ -238,6 +241,50 @@ def check_zones(
             )
 
 
+DEFAULT_LEVELS = {"REDUCED": 1, "NORMAL": 2, "RAISED": 3, "PREHEAT": 3, "FORCED": 4}
+MODE_NAMES = ("REDUCED", "NORMAL", "RAISED", "PREHEAT", "FORCED")
+
+
+def hold_settings(config: dict[str, Any], device: str) -> tuple[float, dict[int, int]]:
+    """Minimum hold [min] and executed level per heating mode value."""
+    opt = (((config.get("devices") or {}).get("heat_pumps") or {}).get(device) or {}).get(
+        "optimization"
+    ) or {}
+    levels = {**DEFAULT_LEVELS, **{str(k).upper(): v for k, v in (opt.get("sg_ready_of_mode") or {}).items()}}
+    by_value = {i: int(levels.get(name, i)) for i, name in enumerate(MODE_NAMES)}
+    return float(opt.get("min_hold_minutes") or 0.0), by_value
+
+
+def check_hold(
+    report: Report, upcoming: list[str], modes: list[int], config: dict[str, Any], device: str
+) -> None:
+    """Changes of the executed level keep the minimum hold time (RL29 fork)."""
+    hold_min, levels = hold_settings(config, device)
+    if hold_min <= 0:
+        return
+    normal = levels[1]
+    seq = [levels.get(m, 10 + m) for m in modes]
+    last: Optional[datetime] = None
+    violations = []
+    changes = 0
+    for i in range(1, len(seq)):
+        if seq[i] == seq[i - 1]:
+            continue
+        changes += 1
+        at = datetime.fromisoformat(upcoming[i])
+        if last is not None and seq[i] != normal:
+            gap = (at - last).total_seconds() / 60.0
+            if gap < hold_min - 0.5:
+                violations.append(f"{at.strftime('%H:%M')} nach {gap:.0f} min")
+        last = at
+    if violations:
+        report.warnings.append(
+            f"Haltezeit {hold_min:.0f} min verletzt: " + ", ".join(violations[:3])
+        )
+    else:
+        report.info.append(f"Haltezeit {hold_min:.0f} min eingehalten ({changes} Wechsel)")
+
+
 def check(
     solution: dict[str, Any],
     config: dict[str, Any],
@@ -347,6 +394,7 @@ def check(
     dhw_h = sum(1 for d in dhw if d == 1) * slot_h
     if dhw_h > 4:
         report.warnings.append(f"Warmwasser-Ladung in {_h(dhw_h)} Stunden geplant")
+    check_hold(report, upcoming, modes, config, device)
     check_zones(report, rows, upcoming, config, device, low, high, slot_h, max_active_h, away)
     return report
 

@@ -264,6 +264,33 @@ class GeneticHeatPumpParameters(GeneticParametersBaseModel):
             )
         },
     )
+    active_zone_modes: Optional[dict[str, int]] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: heating mode per zone the previous plan set for now; the hold "
+                "of ``min_hold_minutes`` keeps these. None = unknown."
+            )
+        },
+    )
+    sg_ready_actual: Optional[int] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: executed level (SG Ready state) the controller reports now; "
+                "None = unknown (the previous plan's mode is assumed)."
+            )
+        },
+    )
+    sg_ready_changed_at: Optional[DateTime] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: time of the last change of the executed level; None = unknown "
+                "(no hold at the start of the plan)."
+            )
+        },
+    )
 
 
 def _nearest(allowed: Sequence[int], wanted: int) -> int:
@@ -369,6 +396,17 @@ class HeatPumpRunPlan:
     """Comfort inputs per slot and zone."""
     zone_initial: Optional[Any] = None
     """Initial ``MultiZoneState``."""
+    hold_seconds: float = 0.0
+    """RL29 fork: minimum time between two changes of the executed level; 0 = off."""
+    mode_levels: tuple[int, ...] = ()
+    """Executed level (SG Ready state) per heating mode value."""
+    slot_seconds: float = 900.0
+    hold_initial_level: Optional[int] = None
+    """Executed level now; None = unknown (the first planned level is taken as current)."""
+    hold_initial_modes: tuple[int, ...] = ()
+    """Heating mode now per zone (one entry without zones), kept while the hold blocks."""
+    hold_last_change_s: float = -1e12
+    """Last change of the executed level, seconds after the start of slot 0 (negative)."""
     _cache: dict[tuple[int, ...], HeatPumpOutcome] = field(default_factory=dict, repr=False)
 
     CACHE_SIZE = 20000
@@ -510,6 +548,80 @@ class HeatPumpRunPlan:
         ]
 
     # ------------------------------------------------------------------
+    # Minimum hold time (RL29 fork)
+    # ------------------------------------------------------------------
+
+    def level_of(self, mode: int) -> int:
+        """Executed level of a heating mode (its own level 10 + mode if unmapped)."""
+        value = int(mode)
+        return self.mode_levels[value] if 0 <= value < len(self.mode_levels) else 10 + value
+
+    def _mode_for_level(self, level: int, preferred: Optional[int]) -> HeatingMode:
+        """Mode that runs ``level``: the preferred one if it fits, else the mildest."""
+        if preferred is not None and self.level_of(preferred) == level:
+            return HeatingMode(int(preferred))
+        allowed = [m for m in self.heating_modes if self.level_of(m) == level]
+        candidates = allowed or [int(m) for m in HeatingMode if self.level_of(int(m)) == level]
+        if not candidates:
+            return HeatingMode.NORMAL
+        return HeatingMode(min(candidates))
+
+    def held_slot_modes(
+        self, heating: Sequence[HeatingMode], zone_heating: Sequence[Sequence[HeatingMode]]
+    ) -> tuple[list[HeatingMode], list[list[HeatingMode]]]:
+        """Heat pump mode and zone modes per slot as the controller executes them.
+
+        The planned modes per gene period are applied slot by slot; a change of the
+        executed level (``mode_levels``) waits until ``hold_seconds`` after the last
+        change. A return to the level of NORMAL is always allowed (and counts as a
+        change). While a change waits, the modes in effect stay. Changes between modes
+        of the same level (e.g. which zone is forced) are free. Without a hold the
+        planned modes are returned unchanged.
+        """
+        from akkudoktoreos.devices.thermal.zones import aggregate_heating_mode
+
+        zoned = bool(zone_heating)
+        n_zones = len(zone_heating) if zoned else 1
+        agg_out: list[HeatingMode] = []
+        zones_out: list[list[HeatingMode]] = [[] for _ in range(n_zones)]
+        hold = self.hold_seconds
+        normal_level = self.level_of(HeatingMode.NORMAL)
+        level = self.hold_initial_level
+        current: Optional[list[HeatingMode]] = None
+        if level is not None:
+            preferred = list(self.hold_initial_modes)
+            if len(preferred) == n_zones:
+                current = [HeatingMode(int(m)) for m in preferred]
+                agg = aggregate_heating_mode(current) if zoned else current[0]
+                if self.level_of(agg) != level:
+                    current = None
+            if current is None:
+                fallback = self._mode_for_level(level, self.active_heating_mode)
+                current = [fallback] * n_zones
+        last = self.hold_last_change_s
+        for slot in range(self.n_slots):
+            period = self.period_of(slot)
+            want = [z[period] for z in zone_heating] if zoned else [heating[period]]
+            want_agg = heating[period]
+            want_level = self.level_of(want_agg)
+            t = slot * self.slot_seconds
+            if hold <= 0 or level is None or want_level == level:
+                use = want
+                if level is None:
+                    level = want_level  # unknown start: the first planned level is current
+            elif want_level == normal_level or t - last >= hold - 30.0:
+                use = want
+                level = want_level
+                last = t
+            else:
+                use = current if current is not None else want
+            current = list(use)
+            agg_out.append(aggregate_heating_mode(use) if zoned else use[0])
+            for z in range(n_zones):
+                zones_out[z].append(use[z])
+        return agg_out, (zones_out if zoned else [])
+
+    # ------------------------------------------------------------------
     # Simulation
     # ------------------------------------------------------------------
 
@@ -536,6 +648,14 @@ class HeatPumpRunPlan:
         zone_model = self.zone_model if self.zone_initial is not None else None
         zone_heating = self.zone_modes(genes) if zone_model is not None else []
         zstate = self.zone_initial.copy() if self.zone_initial is not None else None
+        # Modes per slot as executed (RL29 fork: minimum hold time between changes).
+        if self.hold_seconds > 0:
+            slot_heating, slot_zones = self.held_slot_modes(heating, zone_heating)
+        else:
+            slot_heating = [heating[self.period_of(s)] for s in range(self.n_slots)]
+            slot_zones = [
+                [modes[self.period_of(s)] for s in range(self.n_slots)] for modes in zone_heating
+            ]
         electric: list[float] = []
         comfort_kh = 0.0
         overheat_kh = 0.0
@@ -584,7 +704,7 @@ class HeatPumpRunPlan:
                 zres = zone_model.step(
                     zstate,
                     inputs,
-                    [modes[period] for modes in zone_heating],
+                    [modes[slot] for modes in slot_zones],
                     option.mode,
                     option.rod_target_c,
                     self.zone_inputs[slot],
@@ -606,13 +726,13 @@ class HeatPumpRunPlan:
                     dhw_violation_kh=zres.dhw_violation_kh,
                 )
             else:
-                result = step(state, inputs, heating[period], option.mode, option.rod_target_c)
+                result = step(state, inputs, slot_heating[slot], option.mode, option.rod_target_c)
             state = result.state
             energy = result.hp_electric_wh + result.rod_electric_wh
             electric.append(energy)
             comfort_kh += result.comfort_violation_kh
             overheat_kh += result.overheat_kh
-            if heating[period] > HeatingMode.NORMAL:
+            if slot_heating[slot] > HeatingMode.NORMAL:
                 active_hours += dt
             if option.mode != DhwMode.HOLD:
                 active_hours += dt
@@ -627,7 +747,7 @@ class HeatPumpRunPlan:
             if deadline is not None and slot < deadline and state.dhw_c >= self.legionella_c - 0.5:
                 reached_by_deadline = True
             if detail:
-                mode = heating[period]
+                mode = slot_heating[slot]
                 if inputs.reduce_locked and mode == HeatingMode.REDUCED:
                     mode = HeatingMode.NORMAL  # what the controller runs (fork)
                 rows["heating_mode"].append(mode.name)
@@ -661,9 +781,7 @@ class HeatPumpRunPlan:
                 rows["standby"].append(1.0 if state.standby else 0.0)
                 if zres is not None:
                     for z, zone_id in enumerate(self.zone_ids):
-                        zone_mode = (
-                            zres.zone_modes[z] if zres.zone_modes else zone_heating[z][period]
-                        )
+                        zone_mode = zres.zone_modes[z] if zres.zone_modes else slot_zones[z][slot]
                         rows[f"zone_{zone_id}_heating_mode"].append(zone_mode.name)
                         rows[f"zone_{zone_id}_room_c"].append(zres.state.rooms[z])
                         rows[f"zone_{zone_id}_slab_c"].append(zres.state.slabs[z])
@@ -1346,6 +1464,37 @@ def build_run_plan(
         # the tank at the restart anyway - it has no value at the end.
         tank_value = tank_value_above = 0.0
 
+    # Minimum hold time (RL29 fork): executed level now and the time of its last change.
+    hold_seconds = float(opt.min_hold_minutes) * 60.0
+    levels = opt.sg_ready_levels()
+    hold_level: Optional[int] = None
+    hold_modes: tuple[int, ...] = ()
+    last_change_s = -1e12
+    if hold_seconds > 0:
+        if parameters.sg_ready_actual is not None:
+            hold_level = int(parameters.sg_ready_actual)
+        elif parameters.active_heating_mode is not None:
+            hold_level = levels[int(parameters.active_heating_mode)]
+        if zone_model is not None:
+            active = parameters.active_zone_modes or {}
+            ids = [z.zone_id for z in settings.zones.zones]
+            if ids and all(z in active for z in ids):
+                hold_modes = tuple(int(active[z]) for z in ids)
+        elif parameters.active_heating_mode is not None:
+            hold_modes = (int(parameters.active_heating_mode),)
+        if parameters.sg_ready_changed_at is not None and slot_starts:
+            last_change_s = (
+                to_datetime(parameters.sg_ready_changed_at).timestamp()
+                - to_datetime(slot_starts[0]).timestamp()
+            )
+        logger.debug(
+            "Heat pump {}: hold {} min, level now {}, last change {:.0f} s before the plan.",
+            parameters.device_id,
+            opt.min_hold_minutes,
+            hold_level,
+            -last_change_s,
+        )
+
     spg = max(1, round(1.0 / slot_hours))
     period_offset = 0
     if spg > 1 and slot_starts:
@@ -1384,6 +1533,12 @@ def build_run_plan(
         away_slots=away_slots,
         zone_setback_slots=tuple(zone_slots),
         ventilate_slots=tuple(vent_slots),
+        hold_seconds=hold_seconds,
+        mode_levels=levels,
+        slot_seconds=slot_hours * 3600.0,
+        hold_initial_level=hold_level,
+        hold_initial_modes=hold_modes,
+        hold_last_change_s=last_change_s,
     )
 
 

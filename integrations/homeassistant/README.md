@@ -60,6 +60,12 @@ out), `<id>-humidity` (highest), `<id>-window-open` (share), holiday (`<id>-away
 `<id>-away-room-temperature`, `<id>-away-min-temperature`), calibration values, and the end of a manual
 lock of the reduction (`<id>-reduce-lock-until-ts`, so EOS plans NORMAL until then).
 
+Minimum hold time (EOS `optimization.min_hold_minutes`, 0.7.2): map `<id>-sg-ready-actual` to the
+entity holding the SG Ready state actually switched (e.g. `input_number.eos_wp_sg_ready_ist`) and
+`<id>-sg-ready-changed-ts` to the time of the last switch (e.g. `input_datetime.eos_wp_letzte_umschaltung`;
+for `*-ts` keys the `timestamp` attribute of an `input_datetime` is used, its state has no time zone).
+EOS then keeps a level for the hold time after each change itself; a return to NORMAL is always allowed.
+
 ## Execution and safety
 
 - Plan missing, older than the limit or EOS unreachable → NORMAL (SG 2) and a repair issue. While

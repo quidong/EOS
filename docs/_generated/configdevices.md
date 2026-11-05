@@ -307,6 +307,15 @@ config path from ``self.device_id`` without needing an external index.
                        "legionella_penalty_amt": 2.0,
                        "mode_change_penalty_amt": 0.002,
                        "stored_heat_price_quantile": 0.25,
+                       "min_hold_minutes": 0.0,
+                       "sg_ready_of_mode": {
+                           "REDUCED": 1,
+                           "NORMAL": 2,
+                           "RAISED": 3,
+                           "PREHEAT": 3,
+                           "FORCED": 4,
+                           "COOL": 2
+                       },
                        "load_forecast_includes_heat_pump": false
                    },
                    "cooling": {
@@ -842,6 +851,15 @@ config path from ``self.device_id`` without needing an external index.
                        "legionella_penalty_amt": 2.0,
                        "mode_change_penalty_amt": 0.002,
                        "stored_heat_price_quantile": 0.25,
+                       "min_hold_minutes": 0.0,
+                       "sg_ready_of_mode": {
+                           "REDUCED": 1,
+                           "NORMAL": 2,
+                           "RAISED": 3,
+                           "PREHEAT": 3,
+                           "FORCED": 4,
+                           "COOL": 2
+                       },
                        "load_forecast_includes_heat_pump": false
                    },
                    "cooling": {
@@ -1082,6 +1100,8 @@ config path from ``self.device_id`` without needing an external index.
                    "measurement_key_away_room_temperature": "wbb12-away-room-temperature",
                    "measurement_key_away_min_temperature": "wbb12-away-min-temperature",
                    "measurement_key_reduce_lock_until": "wbb12-reduce-lock-until-ts",
+                   "measurement_key_sg_ready_actual": "wbb12-sg-ready-actual",
+                   "measurement_key_sg_ready_changed": "wbb12-sg-ready-changed-ts",
                    "measurement_key_setback_room_temperature": "wbb12-setback-room-temperature",
                    "measurement_key_window_open": "wbb12-window-open",
                    "measurement_key_dewpoint": "wbb12-dewpoint",

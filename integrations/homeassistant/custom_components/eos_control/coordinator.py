@@ -18,8 +18,10 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
+from .charts import Charts, PlanMemory, build_charts, parse_time
 from .const import (
     CONF_AIRING_RUN_ON,
+    CONF_EOS_DEVICE,
     CONF_HEATING_SEASON_ENTITY,
     CONF_HEATING_SEASON_STATES,
     CONF_HOLIDAY_DHW_LEAD,
@@ -32,24 +34,21 @@ from .const import (
     CONF_HUMIDITY_MAX,
     CONF_HYSTERESIS,
     CONF_IN_ZONE,
-    CONF_ZONE,
+    CONF_KIND,
     CONF_LOWER,
     CONF_MAX_ROOM,
+    CONF_MEASUREMENT_INTERVAL,
+    CONF_MEASUREMENTS,
     CONF_MIN_VALID_ROOMS,
     CONF_NAME,
+    CONF_PLAN_ENTITIES,
     CONF_PLAN_MAX_AGE,
     CONF_REDUCED_SETPOINT_ENTITY,
     CONF_REDUCTION_LOCK_ENTITY,
     CONF_SCAN_INTERVAL,
+    CONF_SEND_MEASUREMENTS,
     CONF_SETPOINT_ENTITY,
     CONF_SETTLE,
-    CONF_EOS_DEVICE,
-    CONF_KIND,
-    CONF_MEASUREMENT_INTERVAL,
-    CONF_MEASUREMENTS,
-    CONF_PLAN_ENTITIES,
-    CONF_SEND_MEASUREMENTS,
-    ISSUE_AFTER_MIN,
     CONF_SG_ACTUAL_ENTITY,
     CONF_SG_FORCED,
     CONF_SG_NORMAL,
@@ -60,9 +59,11 @@ from .const import (
     CONF_UPPER,
     CONF_URL,
     CONF_WINDOWS,
+    CONF_ZONE,
     CONF_ZONE_ALLOWED_ENTITY,
     DEFAULTS,
     DOMAIN,
+    ISSUE_AFTER_MIN,
     SUBENTRY_DEVICE,
     SUBENTRY_ROOM,
 )
@@ -75,12 +76,7 @@ from .devices import (
     find,
     parse_devices,
 )
-from .charts import Charts, PlanMemory, build_charts, parse_time
 from .instructions import active_instructions
-from .manual import ManualState
-from .measurements import heat_pump_values, payload, state_value, zone_values
-from .plan_statistics import PLAN_STATISTICS, completed_hours, statistic_id
-from .repairs import set_issue
 from .learning import (
     KIND_LOCK,
     KIND_SETPOINT,
@@ -101,6 +97,10 @@ from .logic import (
     decide,
     parse_plan,
 )
+from .manual import ManualState
+from .measurements import heat_pump_values, payload, state_value, zone_values
+from .plan_statistics import PLAN_STATISTICS, completed_hours, statistic_id
+from .repairs import set_issue
 
 _LOGGER = logging.getLogger(__name__)
 STORAGE_VERSION = 1
@@ -374,7 +374,11 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
         for mapping in mappings:
             for key, entity_id in mapping.items():
                 state = self.hass.states.get(entity_id) if entity_id else None
-                values[key] = state_value(key, state.state if state is not None else None)
+                values[key] = state_value(
+                    key,
+                    state.state if state is not None else None,
+                    state.attributes if state is not None else None,
+                )
         heat_pump = self.heat_pump_id
         if heat_pump:
             values.update(
@@ -449,7 +453,9 @@ class EosControlCoordinator(DataUpdateCoordinator[ControlData]):
             StatisticMeanType,
             StatisticMetaData,
         )
-        from homeassistant.components.recorder.statistics import async_add_external_statistics
+        from homeassistant.components.recorder.statistics import (
+            async_add_external_statistics,
+        )
 
         heat_pump = self.heat_pump_id
         for stat in PLAN_STATISTICS:

@@ -459,3 +459,52 @@ def test_cold_zone_that_is_heated_does_not_warn():
 def test_missing_zone_columns_warn():
     report = run_zones(solution([1] * 24))
     assert any("keine Zonenspalten" in m for m in report.warnings)
+
+
+# ----------------------------------------------------------------------
+# Minimum hold time (RL29 fork)
+# ----------------------------------------------------------------------
+
+
+def hold_config(minutes: float, levels: dict | None = None) -> dict:
+    config = json.loads(json.dumps(CONFIG))
+    opt: dict = {"min_hold_minutes": minutes}
+    if levels is not None:
+        opt["sg_ready_of_mode"] = levels
+    config["devices"]["heat_pumps"]["wbb12"]["optimization"] = opt
+    return config
+
+
+def test_hold_kept_is_info_only():
+    q = timedelta(minutes=15)
+    modes = [1] * 4 + [0] * 4 + [1] * 4 + [2] * 4 + [1] * 8  # changes 1 h apart
+    report = script.check(solution(modes, step=q), hold_config(55), "wbb12", NOW)
+    text = "\n".join(report.lines())
+    assert "Haltezeit 55 min eingehalten" in text
+    assert "verletzt" not in text
+
+
+def test_hold_violation_is_a_warning():
+    q = timedelta(minutes=15)
+    # REDUCED 11:00, NORMAL 11:15 (return, allowed), RAISED 11:30: 15 min after the return
+    modes = [1] * 4 + [0, 1, 2, 2] + [1] * 16
+    report = script.check(solution(modes, step=q), hold_config(55), "wbb12", NOW)
+    assert report.exit_code == 1, report.lines()
+    assert any("Haltezeit 55 min verletzt: 11:30 nach 15 min" in w for w in report.warnings)
+
+
+def test_same_level_change_is_no_violation():
+    q = timedelta(minutes=15)
+    modes = [1] * 4 + [3, 2, 3, 2] + [1] * 16  # PREHEAT <-> RAISED: both SG 3
+    report = script.check(solution(modes, step=q), hold_config(55), "wbb12", NOW)
+    assert not any("Haltezeit" in w for w in report.warnings), report.lines()
+    # with RAISED on its own level the same plan violates the hold
+    report = script.check(
+        solution(modes, step=q), hold_config(55, {"raised": 2}), "wbb12", NOW
+    )
+    assert any("Haltezeit" in w for w in report.warnings)
+
+
+def test_no_hold_configured_no_line():
+    report = run(solution([1] * 24))
+    assert not any("Haltezeit" in line for line in report.lines())
