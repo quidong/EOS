@@ -237,6 +237,7 @@
                        "rod_power_steps_w": null,
                        "rod_surplus_c": null,
                        "rod_planned_surplus_only": false,
+                       "rod_legionella_grid_hours": null,
                        "legionella_c": 60.0,
                        "legionella_interval_days": 7,
                        "draw_profile_wh": [

@@ -690,6 +690,7 @@ class HeatPumpRunPlan:
                 "ventilate",
                 "ventilation_w_per_k",
                 "standby",
+                "rod_grid",
             ):
                 rows[name] = []
             if zone_model is not None:
@@ -779,6 +780,9 @@ class HeatPumpRunPlan:
                 rows["ventilate"].append(1.0 if slot < len(vent) and vent[slot] else 0.0)
                 rows["ventilation_w_per_k"].append(float(inputs.ventilation_w_per_k))
                 rows["standby"].append(1.0 if state.standby else 0.0)
+                rows["rod_grid"].append(
+                    1.0 if option.mode == DhwMode.ROD and inputs.rod_grid_allowed else 0.0
+                )
                 if zres is not None:
                     for z, zone_id in enumerate(self.zone_ids):
                         zone_mode = zres.zone_modes[z] if zres.zone_modes else slot_zones[z][slot]
@@ -1459,6 +1463,13 @@ def build_run_plan(
             slot = max(1, int(remaining_h / slot_hours)) if remaining_h > 0 else len(inputs)
             if slot <= len(inputs):
                 deadline_slot = slot
+                grid_h = settings.dhw.rod_legionella_grid_hours
+                if settings.dhw.rod_planned_surplus_only and grid_h is not None:
+                    # Fork: legionella fallback - the rod may use the grid shortly
+                    # before the deadline, or at once when it is overdue.
+                    start = 0 if remaining_h <= grid_h else slot - int(grid_h / slot_hours)
+                    for i in range(max(0, start), slot):
+                        inputs[i].rod_grid_allowed = True
 
     tank_value = mean_price / cop_dhw if cop_dhw > 0 else 0.0
     tank_value_above = tank_value * retention

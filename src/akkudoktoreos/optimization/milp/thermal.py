@@ -261,7 +261,10 @@ def thermal_block(plan: "HeatPumpRunPlan") -> Optional[ThermalBlock]:
         rod_power_w=rod_power,
         rod_max_c=rod_max,
         rod_cap_w=(
-            [min(rod_power, max(0.0, float(i.pv_surplus_w))) for i in inputs]
+            [
+                rod_power if i.rod_grid_allowed else min(rod_power, max(0.0, float(i.pv_surplus_w)))
+                for i in inputs
+            ]
             if rod_power > 0 and system.dhw.rod_planned_surplus_only
             else []
         ),

@@ -147,3 +147,73 @@ def test_milp_rod_cap_follows_the_surplus():
     assert block.rod_cap_w == [3000.0, 1000.0, 0.0, 3000.0]
     plain = thermal_block(run_plan(device(planned_surplus=False), surplus, n=4))
     assert plain is not None and plain.rod_cap_w == []
+
+
+# --- Legionella fallback from the grid (dhw.rod_legionella_grid_hours) ---------------
+
+
+def test_grid_allowed_slot_heats_at_full_power():
+    grid_slot = slot(0.0)
+    grid_slot.rod_grid_allowed = True
+    result = system().step(IDLE, grid_slot, HeatingMode.NORMAL, DhwMode.ROD, 60.0)
+    assert result.rod_electric_wh == pytest.approx(3000.0 * 0.25, rel=0.01)
+
+
+def legionella_plan(hours_since: float, grid_hours, n: int = 48):
+    settings = device(rod_legionella_grid_hours=grid_hours, legionella_interval_days=7)
+    params = GeneticHeatPumpParameters(
+        device_id="hp1",
+        settings=settings,
+        initial_room_c=21.5,
+        initial_dhw_c=46.0,
+        hours_since_legionella=hours_since,
+    )
+    starts = [NOON.add(hours=i) for i in range(n)]
+    return build_run_plan(params, starts, 1.0, [10.0] * n, [0.0] * n, [0.0003] * n, [0.0] * n)
+
+
+def test_grid_window_before_the_deadline():
+    # deadline in 30 h, window 24 h -> slots 6..29 may use the grid
+    run = legionella_plan(7 * 24 - 30, 24.0)
+    assert run.legionella_deadline_slot == 30
+    allowed = [i.rod_grid_allowed for i in run.inputs]
+    assert not any(allowed[:6])
+    assert all(allowed[6:30])
+    assert not any(allowed[30:])
+
+
+def test_grid_window_at_once_when_overdue_or_close():
+    run = legionella_plan(7 * 24 + 5, 24.0)
+    assert all(i.rod_grid_allowed for i in run.inputs[: run.legionella_deadline_slot])
+    close = legionella_plan(7 * 24 - 10, 24.0)
+    assert all(i.rod_grid_allowed for i in close.inputs[: close.legionella_deadline_slot])
+
+
+def test_no_grid_window_without_the_setting():
+    run = legionella_plan(7 * 24 - 10, None)
+    assert run.legionella_deadline_slot is not None
+    assert not any(i.rod_grid_allowed for i in run.inputs)
+
+
+def test_legionella_without_pv_heats_from_the_grid_and_marks_the_slots():
+    run = legionella_plan(7 * 24 - 10, 24.0, n=16)
+    genes = run.genes_for_modes([HeatingMode.NORMAL] * run.n_periods, [DhwMode.ROD] * run.n_periods)
+    res = run.evaluate(genes, detail=True)
+    detail = res.detail or {}
+    assert res.legionella_ok is True
+    assert sum(detail["rod_electric_wh"]) > 0
+    assert any(v == 1.0 for v in detail["rod_grid"])
+    held = run.evaluate(
+        run.genes_for_modes([HeatingMode.NORMAL] * run.n_periods, [DhwMode.HOLD] * run.n_periods),
+        detail=True,
+    )
+    assert all(v == 0.0 for v in (held.detail or {})["rod_grid"])
+
+
+def test_milp_cap_is_full_power_in_the_grid_window():
+    run = legionella_plan(7 * 24 - 10, 24.0, n=16)
+    block = thermal_block(run)
+    assert block is not None
+    assert (
+        block.rod_cap_w[: run.legionella_deadline_slot] == [3000.0] * run.legionella_deadline_slot
+    )

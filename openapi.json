@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2611072073505693"
+    "version": "v0.3.0.dev2611072395409074"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -12732,6 +12732,23 @@
             "title": "Rod Planned Surplus Only",
             "description": "Fork: a planned ROD slot (higher temperature, legionella) runs the rod in its controller's PV surplus mode, so it only uses the forecast PV surplus left after the heat pump - never grid or battery. EOS plans ROD only where the surplus covers it. False = a planned ROD slot heats at full power.",
             "default": false
+          },
+          "rod_legionella_grid_hours": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rod Legionella Grid Hours",
+            "description": "Fork: legionella fallback with rod_planned_surplus_only. In the last hours before the legionella deadline (at once when it is overdue) a planned ROD slot may heat from the grid at full power; the plan marks these slots with the column <id>_rod_grid = 1 so the controller starts the rod in forced mode. None = the rod never uses the grid.",
+            "examples": [
+              null,
+              24.0
+            ]
           },
           "legionella_c": {
             "type": "number",

@@ -333,6 +333,20 @@ class HeatPumpDhwSettings(SettingsBaseModel):
             ),
         },
     )
+    rod_legionella_grid_hours: Optional[float] = Field(
+        default=None,
+        ge=0,
+        json_schema_extra={
+            "description": (
+                "Fork: legionella fallback with rod_planned_surplus_only. In the last hours "
+                "before the legionella deadline (at once when it is overdue) a planned ROD "
+                "slot may heat from the grid at full power; the plan marks these slots with "
+                "the column <id>_rod_grid = 1 so the controller starts the rod in forced "
+                "mode. None = the rod never uses the grid."
+            ),
+            "examples": [None, 24.0],
+        },
+    )
     legionella_c: float = Field(
         default=60.0, json_schema_extra={"description": "Legionella protection temperature [degC]."}
     )

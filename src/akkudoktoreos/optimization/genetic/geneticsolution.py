@@ -63,6 +63,7 @@ HEAT_PUMP_SOLUTION_COLUMNS: list[tuple[str, str, Any]] = [
     ("zone_setback", "zone_setback", float),
     ("ventilate", "ventilate", float),
     ("standby", "standby", float),
+    ("rod_grid", "rod_grid", float),
 ]
 
 

@@ -365,6 +365,12 @@ keeps the tank at its own setpoint (`dhw_modes: [0, 2]`, no heat pump boost), th
 Execution: start the controller's surplus mode with the planned target while `ROD` is planned. Without
 PV surplus the legionella deadline can pass; the plan then reports `legionella_ok: false`.
 
+Legionella fallback: `dhw.rod_legionella_grid_hours` (e.g. 24) lets a planned `ROD` slot heat at full
+power from the grid in the last hours before the legionella deadline, or at once when it is overdue.
+EOS still prefers PV slots and only falls back to the cheapest grid hours of that window. Such slots
+carry `<id>_rod_grid = 1` in the plan: start the controller's forced mode there, its surplus mode
+elsewhere.
+
 ## Weather warnings
 
 `weather_warning` (`enabled`, `raise_room_k` 1 K, `dhw_min_c` 50 °C, `max_hours` 48): the controller

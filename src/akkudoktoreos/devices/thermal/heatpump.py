@@ -282,6 +282,9 @@ class SlotInputs:
     pv_surplus_w: float = 0.0
     """Forecast PV surplus (PV minus household load) of the slot [W] (fork): what a rod
     in surplus mode may use after the heat pump."""
+    rod_grid_allowed: bool = False
+    """Fork: with ``rod_planned_surplus_only`` a planned ROD slot may still heat at full
+    power from the grid (legionella fallback shortly before the deadline)."""
     dhw_min_c: Optional[float] = None
     """Hot water minimum of this slot (fork, e.g. raised before a weather warning);
     None = the tank's ``min_c``."""
@@ -570,7 +573,11 @@ class HeatPumpSystem:
         # is sized after the heat pump below.
         rod_w = 0.0
         surplus_rod_target: Optional[float] = None
-        if rod_target is not None and self.dhw.rod_planned_surplus_only:
+        if (
+            rod_target is not None
+            and self.dhw.rod_planned_surplus_only
+            and not inputs.rod_grid_allowed
+        ):
             surplus_rod_target = rod_target
             rod_target = None
         if rod_target is not None and self.dhw.rod_power_w > 0 and state.dhw_c < rod_target:
