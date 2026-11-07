@@ -236,6 +236,7 @@
                        "rod_max_c": 70.0,
                        "rod_power_steps_w": null,
                        "rod_surplus_c": null,
+                       "rod_planned_surplus_only": false,
                        "legionella_c": 60.0,
                        "legionella_interval_days": 7,
                        "draw_profile_wh": [

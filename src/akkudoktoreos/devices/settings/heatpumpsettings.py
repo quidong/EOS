@@ -322,6 +322,17 @@ class HeatPumpDhwSettings(SettingsBaseModel):
             "examples": [None, 60.0],
         },
     )
+    rod_planned_surplus_only: bool = Field(
+        default=False,
+        json_schema_extra={
+            "description": (
+                "Fork: a planned ROD slot (higher temperature, legionella) runs the rod in "
+                "its controller's PV surplus mode, so it only uses the forecast PV surplus "
+                "left after the heat pump - never grid or battery. EOS plans ROD only where "
+                "the surplus covers it. False = a planned ROD slot heats at full power."
+            ),
+        },
+    )
     legionella_c: float = Field(
         default=60.0, json_schema_extra={"description": "Legionella protection temperature [degC]."}
     )
@@ -1775,6 +1786,7 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
                 rod_power_w=dhw.rod_power_w,
                 rod_max_c=dhw.rod_max_c,
                 rod_surplus_c=dhw.rod_surplus_c,
+                rod_planned_surplus_only=dhw.rod_planned_surplus_only,
                 rod_power_steps_w=(
                     tuple(sorted(float(w) for w in dhw.rod_power_steps_w if w > 0))
                     if dhw.rod_power_steps_w

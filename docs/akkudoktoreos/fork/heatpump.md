@@ -348,11 +348,22 @@ EOS about it: in every slot the rod uses the forecast PV surplus (PV minus house
 the heat pump, up to this temperature. EOS then plans no heat pump charge the rod covers anyway, and
 values the rod energy like any other load (lost feed-in). A planned `ROD_<target>` slot remains a
 boost from the grid (negative prices, legionella) that the controller has to start, e.g. via the
-diverter's boost or setpoint input. The MILP model plans without this rod; its final check uses the
-model above.
+diverter's boost or setpoint input (or, with `rod_planned_surplus_only`, its surplus mode – see
+below). The MILP model plans without this rod; its final check uses the model above.
 
 Rods with relay stages instead of stepless control: `dhw.rod_power_steps_w` (e.g. `[1000, 2000, 3000]`).
 In surplus mode the rod then uses the highest stage the surplus covers, never a partial stage.
+
+### Planned rod in surplus mode
+
+`dhw.rod_planned_surplus_only: true` is for a rod that only runs when EOS plans it, but then in its
+controller's PV surplus mode (no grid, no battery). A planned `ROD_<target>` slot (e.g. 70 °C for a
+large hot water reserve, 60 °C for legionella) then uses only the forecast PV surplus left after the
+heat pump, up to the planned target; without surplus it does nothing. Outside planned slots the rod
+stays off. The MILP model caps the rod per slot at the forecast surplus. Typical use: the heat pump
+keeps the tank at its own setpoint (`dhw_modes: [0, 2]`, no heat pump boost), the rod lifts it above.
+Execution: start the controller's surplus mode with the planned target while `ROD` is planned. Without
+PV surplus the legionella deadline can pass; the plan then reports `legionella_ok: false`.
 
 ## Weather warnings
 

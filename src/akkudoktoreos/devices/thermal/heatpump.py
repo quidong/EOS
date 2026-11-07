@@ -192,6 +192,10 @@ class DhwControlParameters:
     """Fork: the rod controller (e.g. a PV power diverter) heats on its own with PV
     surplus up to this temperature; None = the rod runs only as planned (ROD)."""
 
+    rod_planned_surplus_only: bool = False
+    """Fork: a planned ROD slot runs the rod in its controller's PV surplus mode: it
+    only uses the PV surplus left after the heat pump (no grid, no battery)."""
+
     raised_setpoint_c: Optional[float] = None
     """Hot water setpoint while heating is RAISED (SG Ready 3); None = unchanged."""
 
@@ -561,8 +565,14 @@ class HeatPumpSystem:
                 self.dhw.rod_max_c,
             )
 
-        # Rod first (it can run in parallel to the heat pump on the tank).
+        # Rod first (it can run in parallel to the heat pump on the tank). With
+        # rod_planned_surplus_only the planned rod follows the PV surplus instead and
+        # is sized after the heat pump below.
         rod_w = 0.0
+        surplus_rod_target: Optional[float] = None
+        if rod_target is not None and self.dhw.rod_planned_surplus_only:
+            surplus_rod_target = rod_target
+            rod_target = None
         if rod_target is not None and self.dhw.rod_power_w > 0 and state.dhw_c < rod_target:
             need = self.tank.heat_to_reach(state.dhw_c, rod_target, inputs.draw_wh)
             rod_w = min(self.dhw.rod_power_w, max(0.0, need))
@@ -662,12 +672,20 @@ class HeatPumpSystem:
         hp_el_w += cool_w / eer
         in_standby = stays_standby and hp_dhw_w <= 0 and space_w <= 0
         hp_el_w += self.off_w if in_standby else self.hp.standby_w
+        surplus_limit_c = self.dhw.rod_surplus_c
+        if surplus_rod_target is not None:
+            # Planned ROD in surplus mode: up to the planned target.
+            surplus_limit_c = (
+                surplus_rod_target
+                if surplus_limit_c is None
+                else max(surplus_limit_c, surplus_rod_target)
+            )
         if (
             rod_w <= 0
-            and self.dhw.rod_surplus_c is not None
+            and surplus_limit_c is not None
             and self.dhw.rod_power_w > 0
             and inputs.pv_surplus_w > 0
-            and state.dhw_c < self.dhw.rod_surplus_c
+            and state.dhw_c < surplus_limit_c
         ):
             # Rod in surplus mode (fork): its own controller uses the PV surplus left
             # after the heat pump, up to its temperature limit.
@@ -675,7 +693,7 @@ class HeatPumpSystem:
             if self.dhw.rod_power_steps_w:
                 # Relay stages: the highest stage the surplus covers, no partial power.
                 free_w = max((w for w in self.dhw.rod_power_steps_w if w <= free_w), default=0.0)
-            need = self.tank.heat_to_reach(state.dhw_c, self.dhw.rod_surplus_c, inputs.draw_wh)
+            need = self.tank.heat_to_reach(state.dhw_c, surplus_limit_c, inputs.draw_wh)
             rod_w = min(self.dhw.rod_power_w, free_w, max(0.0, need))
         if cool_w > 0:
             _, flow = self._space_cool_capacity_w(state.slab_c, inputs.dewpoint_c)

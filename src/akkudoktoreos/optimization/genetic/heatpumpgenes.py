@@ -1242,7 +1242,11 @@ def build_run_plan(
         raise ValueError("Heat pump run plan needs at least one slot.")
 
     # Rod in surplus mode (fork): the PV surplus it may use per slot.
-    if settings.dhw.rod_surplus_c is not None and settings.dhw.rod_power_w > 0 and pv_surplus_w:
+    if (
+        (settings.dhw.rod_surplus_c is not None or settings.dhw.rod_planned_surplus_only)
+        and settings.dhw.rod_power_w > 0
+        and pv_surplus_w
+    ):
         for i, slot_input in enumerate(inputs):
             if i < len(pv_surplus_w):
                 slot_input.pv_surplus_w = max(0.0, float(pv_surplus_w[i]))

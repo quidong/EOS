@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2611051876109823"
+    "version": "v0.3.0.dev2611072073505693"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -12726,6 +12726,12 @@
               null,
               60.0
             ]
+          },
+          "rod_planned_surplus_only": {
+            "type": "boolean",
+            "title": "Rod Planned Surplus Only",
+            "description": "Fork: a planned ROD slot (higher temperature, legionella) runs the rod in its controller's PV surplus mode, so it only uses the forecast PV surplus left after the heat pump - never grid or battery. EOS plans ROD only where the surplus covers it. False = a planned ROD slot heats at full power.",
+            "default": false
           },
           "legionella_c": {
             "type": "number",

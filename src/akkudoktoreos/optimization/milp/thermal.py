@@ -107,6 +107,9 @@ class ThermalBlock:
     tank_setpoint_c: float = 45.0
     separate_price_per_wh: Optional[list[float]] = None
     device_id: str = ""
+    rod_cap_w: list[float] = field(default_factory=list)
+    """Fork: rod power cap per slot (PV surplus with rod_planned_surplus_only); empty =
+    rod_power_w in every slot."""
 
 
 @dataclass
@@ -257,6 +260,11 @@ def thermal_block(plan: "HeatPumpRunPlan") -> Optional[ThermalBlock]:
         dhw_penalty=plan.dhw_penalty,
         rod_power_w=rod_power,
         rod_max_c=rod_max,
+        rod_cap_w=(
+            [min(rod_power, max(0.0, float(i.pv_surplus_w))) for i in inputs]
+            if rod_power > 0 and system.dhw.rod_planned_surplus_only
+            else []
+        ),
         standby_w=hp.standby_w,
         idle_w=idle_w,
         max_electric_w=max_el,
@@ -316,7 +324,7 @@ def add_thermal(b: Any, block: ThermalBlock) -> ThermalVars:
         b.row(q_row, 0.0, 0.0)
         b.row(e_row, 0.0, 0.0)
         w = b.var(0.0, block.dhw_heat_w)
-        r = b.var(0.0, block.rod_power_w)
+        r = b.var(0.0, block.rod_cap_w[t] if t < len(block.rod_cap_w) else block.rod_power_w)
         energy = b.var(0.0, inf, (sep[t] if sep is not None and t < len(sep) else 0.0))
         idle = block.idle_w[t] if t < len(block.idle_w) else block.standby_w
         # energy [Wh] = dt * (space + dhw + rod + standby)
