@@ -48,6 +48,47 @@ RETURN_READY_HOURS = 2.0
 
 
 @dataclass
+class ModeControl:
+    """Heating modes as binaries (RL29 fork, ``milp.joint_modes``).
+
+    The controller's space heat in mode ``m`` and slot ``t`` is
+    ``clip(const[t][m] + k_room[t] * room + k_slab[t] * slab, 0, capacity)`` with the
+    room and screed temperature at the slot start (``HeatPumpSystem.step``: feed-forward
+    of the steady demand plus the screed correction, the comfort minimum as floor;
+    FORCED runs at full capacity). One binary per gene period and mode selects the mode.
+    """
+
+    period_of_slot: list[int]
+    n_periods: int
+    modes: list[int]
+    """Allowed heating modes (``HeatingMode`` values) in gene order."""
+    const_w: list[list[float]]
+    """Per slot and mode: the state-independent part of the heat [W]."""
+    k_room: list[float]
+    k_slab: list[float]
+    period_hours: list[float]
+    change_penalty: float = 0.0
+    active_penalty: float = 0.0
+    initial_mode: Optional[int] = None
+    """Gene index in effect now (a different first mode counts as a change)."""
+    fixed_periods: dict[int, int] = field(default_factory=dict)
+    """Periods whose mode the hold time keeps (gene index)."""
+    deviation_cost_per_wh: float = 0.002
+    """Cost of heat that differs from the selected mode's controller heat [currency/Wh]."""
+    integer_periods: Optional[set[int]] = None
+    """Periods with integral mode and clipping binaries; the others are relaxed to
+    [0, 1] (relax-and-fix). None = all periods integral."""
+
+    def integral(self, period: int) -> bool:
+        """Binaries of the period are integral: in the window or already fixed."""
+        return (
+            self.integer_periods is None
+            or period in self.integer_periods
+            or period in self.fixed_periods
+        )
+
+
+@dataclass
 class ThermalBlock:
     """Numbers of one heat pump for the MILP; built from a run plan."""
 
@@ -110,6 +151,8 @@ class ThermalBlock:
     rod_cap_w: list[float] = field(default_factory=list)
     """Fork: rod power cap per slot (PV surplus with rod_planned_surplus_only); empty =
     rod_power_w in every slot."""
+    mode_control: Optional[ModeControl] = None
+    """Fork: heating modes as binaries; None = free heat schedule (projected later)."""
 
 
 @dataclass
@@ -121,6 +164,8 @@ class ThermalVars:
     slab: list[int]
     room: list[int]
     tank: list[int]
+    mode: list[list[int]] = field(default_factory=list)
+    """Per gene period: one binary per allowed heating mode (``ModeControl``)."""
 
 
 @dataclass
@@ -135,6 +180,8 @@ class ThermalTrajectory:
     room_c: list[float]
     tank_c: list[float]
     extra: dict[str, Any] = field(default_factory=dict)
+    heating_genes: Optional[list[int]] = None
+    """Heating mode gene index per period when the modes were planned (``ModeControl``)."""
 
 
 # ----------------------------------------------------------------------
@@ -149,8 +196,82 @@ def _breakpoints(f: Any, cap: float, k: int = SPACE_BREAKPOINTS) -> list[tuple[f
     return [(cap * i / k, float(f(cap * i / k))) for i in range(k + 1)]
 
 
-def thermal_block(plan: "HeatPumpRunPlan") -> Optional[ThermalBlock]:
-    """Linear model of one heat pump; None when the plan is out of the model's scope."""
+FORCED_HEAT_W = 1e6
+"""State-independent heat of FORCED: far above any capacity, so it clips to full power."""
+
+
+def mode_heat_coefficients(
+    system: Any, inputs: Any, room_target_c: float, room_ref_c: float
+) -> tuple[float, float, float]:
+    """(const, k_room, k_slab) of the controller's unclipped heat for a room target.
+
+    ``HeatPumpSystem._space_heat_demand_w`` is
+    ``steady(T) + (steady_slab(T) + k (T - room) - slab) * C_slab / tau``; the
+    airing loss enters the gains with the room temperature at the slot start, which is
+    taken from ``room_ref_c`` here so the expression stays affine in the state.
+    """
+    building = system.building
+    hp = system.hp
+    out = float(inputs.outdoor_c)
+    gains = system.slot_gains_w(inputs)
+    if inputs.ventilation_w_per_k > 0:
+        gains -= inputs.ventilation_w_per_k * (room_ref_c - out)
+    factor = building.params.slab_capacity_wh_per_k / hp.slab_time_constant_h
+    steady = building.steady_heat_w(room_target_c, out, gains)
+    slab_star = building.steady_slab_c(room_target_c, out, gains)
+    const = steady + (slab_star + hp.room_gain_k_per_k * room_target_c) * factor
+    return const, -hp.room_gain_k_per_k * factor, -factor
+
+
+def mode_control(plan: "HeatPumpRunPlan", room_ref_c: Sequence[float]) -> ModeControl:
+    """Heating modes of a run plan as MILP data (see ``ModeControl``)."""
+    system = plan.system
+    modes = [int(m) for m in plan.heating_modes]
+    const_w: list[list[float]] = []
+    k_room: list[float] = []
+    k_slab: list[float] = []
+    for t, slot in enumerate(plan.inputs):
+        ref = room_ref_c[t] if t < len(room_ref_c) else plan.initial.room_c
+        low, setpoint, _ = system.comfort_band(slot)
+        floor_target = min(slot.comfort_min_c + REPAIR_MARGIN_K, setpoint)
+        floor_const, kr, ks = mode_heat_coefficients(system, slot, floor_target, ref)
+        row: list[float] = []
+        for mode in modes:
+            if mode == int(HeatingMode.FORCED):
+                row.append(FORCED_HEAT_W)
+                continue
+            target = system._room_target(HeatingMode(mode), slot)
+            const, _, _ = mode_heat_coefficients(system, slot, target, ref)
+            row.append(max(const, floor_const))  # the comfort minimum is the floor
+        const_w.append(row)
+        k_room.append(kr)
+        k_slab.append(ks)
+    n_periods = plan.n_periods
+    hours = [len(plan.period_slots(p)) * system.dt for p in range(n_periods)]
+    initial = (
+        plan.heating_index(plan.active_heating_mode)
+        if plan.active_heating_mode is not None
+        else None
+    )
+    return ModeControl(
+        period_of_slot=[plan.period_of(t) for t in range(plan.n_slots)],
+        n_periods=n_periods,
+        modes=modes,
+        const_w=const_w,
+        k_room=k_room,
+        k_slab=k_slab,
+        period_hours=hours,
+        change_penalty=plan.mode_change_penalty,
+        active_penalty=plan.active_mode_penalty,
+        initial_mode=initial,
+    )
+
+
+def thermal_block(plan: "HeatPumpRunPlan", joint_modes: bool = False) -> Optional[ThermalBlock]:
+    """Linear model of one heat pump; None when the plan is out of the model's scope.
+
+    With ``joint_modes`` the heating modes are binaries of the model (``ModeControl``).
+    """
     inputs = plan.inputs
     n = len(inputs)
     if n == 0 or any(i.cooling_season for i in inputs):
@@ -287,6 +408,15 @@ def thermal_block(plan: "HeatPumpRunPlan") -> Optional[ThermalBlock]:
             else None
         ),
         device_id=plan.device_id,
+        mode_control=(
+            mode_control(
+                plan,
+                [plan.initial.room_c]
+                + [float(v) for v in reference.get("room_c", [])][: max(0, n - 1)],
+            )
+            if joint_modes
+            else None
+        ),
     )
 
 
@@ -313,6 +443,7 @@ def add_thermal(b: Any, block: ThermalBlock) -> ThermalVars:
     hp_wh: list[int] = []
     sep = block.separate_price_per_wh
     free = block.tank0
+    mode_vars: list[list[int]] = []
     for t in range(n):
         cap = block.q_cap_w[t]
         q = b.var(0.0, cap)
@@ -327,6 +458,10 @@ def add_thermal(b: Any, block: ThermalBlock) -> ThermalVars:
         b.row(q_row, 0.0, 0.0)
         b.row(e_row, 0.0, 0.0)
         w = b.var(0.0, block.dhw_heat_w)
+        if block.mode_control is not None:
+            if not mode_vars:
+                mode_vars.extend(_add_mode_binaries(b, block.mode_control))
+            _add_mode_heat(b, block, t, q, w, room[t], slab[t], mode_vars)
         r = b.var(0.0, block.rod_cap_w[t] if t < len(block.rod_cap_w) else block.rod_power_w)
         energy = b.var(0.0, inf, (sep[t] if sep is not None and t < len(sep) else 0.0))
         idle = block.idle_w[t] if t < len(block.idle_w) else block.standby_w
@@ -442,13 +577,132 @@ def add_thermal(b: Any, block: ThermalBlock) -> ThermalVars:
         below = b.var(-inf, block.tank_setpoint_c, -block.tank_value_below * block.tank_capacity)
         above = b.var(0.0, inf, -block.tank_value_above * block.tank_capacity)
         b.row({below: 1.0, above: 1.0, tank[n]: -1.0}, 0.0, 0.0)
-    return ThermalVars(hp_wh, q_vars, w_vars, r_vars, slab, room, tank)
+    return ThermalVars(hp_wh, q_vars, w_vars, r_vars, slab, room, tank, mode_vars)
+
+
+ROOM_RANGE_C = (12.0, 30.0)
+SLAB_RANGE_C = (12.0, 50.0)
+"""Hard state bounds of the joint mode model (outside any real heating state); they keep
+the big-M constants of the mode heat small enough for the solver tolerances."""
+
+
+def _state_range_w(k_room: float, k_slab: float) -> tuple[float, float]:
+    """Lowest and highest state-dependent heat over the state bounds [W]."""
+    rooms = (k_room * ROOM_RANGE_C[0], k_room * ROOM_RANGE_C[1])
+    slabs = (k_slab * SLAB_RANGE_C[0], k_slab * SLAB_RANGE_C[1])
+    return min(rooms) + min(slabs), max(rooms) + max(slabs)
+
+
+def _add_mode_binaries(b: Any, mc: ModeControl) -> list[list[int]]:
+    """One binary per period and mode, exactly one per period, change and activity costs."""
+    normal = mc.modes.index(int(HeatingMode.NORMAL)) if int(HeatingMode.NORMAL) in mc.modes else -1
+    periods: list[list[int]] = []
+    for period in range(mc.n_periods):
+        hours = mc.period_hours[period] if period < len(mc.period_hours) else 1.0
+        ys = []
+        for index in range(len(mc.modes)):
+            cost = 0.0 if index == normal else mc.active_penalty * hours
+            fixed = mc.fixed_periods.get(period)
+            lb = 1.0 if fixed == index else 0.0
+            ub = 0.0 if fixed is not None and fixed != index else 1.0
+            ys.append(b.var(lb, ub, cost, integer=mc.integral(period)))
+        b.row({y: 1.0 for y in ys}, 1.0, 1.0)
+        periods.append(ys)
+    if mc.change_penalty > 0:
+        for period, ys in enumerate(periods):
+            change = b.var(0.0, 1.0, mc.change_penalty)
+            for index, y in enumerate(ys):
+                if period == 0:
+                    if mc.initial_mode is None:
+                        continue
+                    before = 1.0 if index == mc.initial_mode else 0.0
+                    # change >= y - before
+                    b.row({change: 1.0, y: -1.0}, -before, math.inf)
+                else:
+                    b.row({change: 1.0, y: -1.0, periods[period - 1][index]: 1.0}, 0.0, math.inf)
+    return periods
+
+
+def _add_mode_heat(
+    b: Any,
+    block: ThermalBlock,
+    t: int,
+    q: int,
+    w: int,
+    room: int,
+    slab: int,
+    mode_vars: list[list[int]],
+) -> None:
+    """Rows that make ``q`` the controller's heat of the selected mode (exact clipping).
+
+    ``d = sum_m const[m] y_m + k_room room + k_slab slab``, ``p = max(d, 0)`` and
+    ``q = min(p, cap (1 - w / dhw_heat))`` with one binary each (big-M from the state
+    bounds). The hot water charge takes its share of the compressor first, like the
+    exact simulation.
+    """
+    mc = block.mode_control
+    if mc is None:  # pragma: no cover - guarded by the caller
+        return
+    inf = math.inf
+    period = mc.period_of_slot[t]
+    ys = mode_vars[period]
+    integral = mc.integral(period)
+    consts = mc.const_w[t]
+    kr, ks = mc.k_room[t], mc.k_slab[t]
+    cap = block.q_cap_w[t]
+    state_lo, state_hi = _state_range_w(kr, ks)
+    # FORCED: just enough above the capacity to clip to full power in every state.
+    consts = [cap - state_lo + 1.0 if c >= FORCED_HEAT_W else c for c in consts]
+    d_lo = min(consts) + state_lo
+    d_hi = max(consts) + state_hi
+    # The state variables stay inside the bounds the big-M constants assume.
+    for var, (low, high) in ((room, ROOM_RANGE_C), (slab, SLAB_RANGE_C)):
+        b.lb[var] = max(b.lb[var], low)
+        b.ub[var] = min(b.ub[var], high)
+    d = b.var(d_lo, d_hi)
+    row: dict[int, float] = {d: 1.0, room: -kr, slab: -ks}
+    for y, const in zip(ys, consts):
+        row[y] = row.get(y, 0.0) - const
+    b.row(row, 0.0, 0.0)
+    if cap <= 0:
+        b.row({q: 1.0}, 0.0, 0.0)
+        return
+    # p = max(d, 0); one binary only where d can take both signs.
+    if d_lo >= 0:
+        p = d
+    elif d_hi <= 0:
+        p = b.var(0.0, 0.0)
+    else:
+        p = b.var(0.0, d_hi)
+        u = b.var(0.0, 1.0, 0.0, integer=integral)
+        b.row({p: 1.0, d: -1.0}, 0.0, inf)  # p >= d
+        b.row({p: 1.0, d: -1.0, u: -d_lo}, -inf, -d_lo)  # p <= d - d_lo (1 - u)
+        b.row({p: 1.0, u: -d_hi}, -inf, 0.0)  # p <= d_hi u
+    # h = min(p, cap_eff), cap_eff = cap - cap / dhw_heat * w: the controller's heat.
+    share = cap / block.dhw_heat_w if block.dhw_heat_w > 0 else 0.0
+    h = b.var(0.0, cap)
+    b.row({h: 1.0, p: -1.0}, -inf, 0.0)  # h <= p
+    b.row({h: 1.0, w: share}, -inf, cap)  # h <= cap_eff
+    if max(d_hi, 0.0) > 0.0:
+        v = b.var(0.0, 1.0, 0.0, integer=integral)
+        big_p = max(d_hi, 0.0)
+        b.row({h: 1.0, p: -1.0, v: big_p}, 0.0, inf)  # h >= p - M v
+        b.row({h: 1.0, w: share, v: -cap}, 0.0, inf)  # h >= cap_eff - cap (1 - v)
+    # The planned heat follows the controller; a deviation is allowed at a high cost,
+    # so every mode choice stays feasible and the solver finds solutions quickly.
+    cost = mc.deviation_cost_per_wh * block.dt
+    above = b.var(0.0, inf, cost)
+    below = b.var(0.0, inf, cost)
+    b.row({q: 1.0, h: -1.0, above: -1.0, below: 1.0}, 0.0, 0.0)
 
 
 def trajectory(sol: Any, tv: ThermalVars) -> ThermalTrajectory:
     def vals(ids: Sequence[int]) -> list[float]:
         return [float(sol[i]) for i in ids]
 
+    heating_genes = None
+    if tv.mode:
+        heating_genes = [max(range(len(ys)), key=lambda i: float(sol[ys[i]])) for ys in tv.mode]
     return ThermalTrajectory(
         space_heat_w=vals(tv.q),
         dhw_heat_w=vals(tv.w),
@@ -457,6 +711,7 @@ def trajectory(sol: Any, tv: ThermalVars) -> ThermalTrajectory:
         slab_c=vals(tv.slab[1:]),
         room_c=vals(tv.room[1:]),
         tank_c=vals(tv.tank[1:]),
+        heating_genes=heating_genes,
     )
 
 
@@ -530,3 +785,47 @@ def project_modes(
         dhw_genes.append(best[2])
         state = best[3]
     return plan.expand_zone_genes(heating_genes + dhw_genes)
+
+
+def project_dhw(
+    plan: "HeatPumpRunPlan", traj: ThermalTrajectory, heating_genes: Sequence[int]
+) -> list[int]:
+    """Hot water option per period for fixed heating modes, following the MILP tank.
+
+    Like ``project_modes`` but only the hot water option is chosen; returns the full
+    single-zone gene list (heating + hot water), expanded to the zones.
+    """
+    system = plan.system
+    ct = system.tank.capacity
+    state: ThermalState = plan.initial.copy()
+    dhw_genes: list[int] = []
+    default_dhw = plan.dhw_index(DhwMode.HOLD)
+    for period in range(plan.n_periods):
+        slots = plan.period_slots(period)
+        h_mode = HeatingMode(plan.heating_modes[heating_genes[period]])
+        if not slots:  # pragma: no cover - every period controls at least one slot
+            dhw_genes.append(default_dhw)
+            continue
+        last = slots.stop - 1
+        best: Optional[tuple[float, int, ThermalState]] = None
+        for d_index, option in enumerate(plan.dhw_options):
+            current = state.copy()
+            violation = 0.0
+            for slot in slots:
+                result = system.step(
+                    current, plan.inputs[slot], h_mode, option.mode, option.rod_target_c
+                )
+                current = result.state
+                violation += result.dhw_violation_kh
+            score = (
+                abs(ct * (current.dhw_c - traj.tank_c[last]))
+                + violation * 1e4
+                + (0.0 if d_index == default_dhw else 1e-3)
+            )
+            if best is None or score < best[0]:
+                best = (score, d_index, current)
+        if best is None:  # pragma: no cover - HOLD is always allowed
+            raise ValueError("no hot water option allowed")
+        dhw_genes.append(best[1])
+        state = best[2]
+    return plan.expand_zone_genes(list(heating_genes) + dhw_genes)

@@ -68,6 +68,9 @@
                "mip_rel_gap": 0.0001,
                "hp_search_seconds": 20.0,
                "thermal_model": true,
+               "joint_modes": false,
+               "joint_time_limit_s": 30.0,
+               "joint_window_hours": 6,
                "seeds": 3,
                "polish_generations": 30,
                "polish_individuals": 60,
@@ -139,6 +142,9 @@
                "mip_rel_gap": 0.0001,
                "hp_search_seconds": 20.0,
                "thermal_model": true,
+               "joint_modes": false,
+               "joint_time_limit_s": 30.0,
+               "joint_window_hours": 6,
                "seeds": 3,
                "polish_generations": 30,
                "polish_individuals": 60,
@@ -207,6 +213,9 @@
 | Name | Type | Read-Only | Default | Description |
 | ---- | ---- | --------- | ------- | ----------- |
 | hp_search_seconds | `float` | `rw` | `20.0` | Time budget of the coordinate search over the heat pump modes [s]. |
+| joint_modes | `bool` | `rw` | `False` | RL29 fork: plan the heating modes inside the MILP. One binary per gene period and mode selects the room target; the controller's heat for that target (affine in room and screed temperature, clipped to zero and the capacity) is modelled exactly with binaries. The resulting modes are one more candidate for the exact simulation and the search, next to the projected heat schedule. Needs thermal_model. |
+| joint_time_limit_s | `float` | `rw` | `30.0` | Time limit of the joint mode MILP [s]. |
+| joint_window_hours | `int` | `rw` | `6` | Relax-and-fix window of the joint mode MILP [h]: the modes of one window are decided with binaries while the later hours are relaxed, then fixed; the time limit is shared between the windows. |
 | load_scenario_spread | `Optional[float]` | `rw` | `None` | Load of the outer scenarios: forecast x (1 +/- spread). None = the quantile width published by LoadML, else 0.2. |
 | max_grid_export_w | `Optional[float]` | `rw` | `None` | Grid feed-in limit [W]; PV above it is curtailed. |
 | max_grid_import_w | `Optional[float]` | `rw` | `None` | Grid import limit [W] (e.g. main fuse); infeasible plans fall back to no limit. |
@@ -235,6 +244,9 @@
                "mip_rel_gap": 0.0001,
                "hp_search_seconds": 20.0,
                "thermal_model": true,
+               "joint_modes": false,
+               "joint_time_limit_s": 30.0,
+               "joint_window_hours": 6,
                "seeds": 3,
                "polish_generations": 30,
                "polish_individuals": 60,
