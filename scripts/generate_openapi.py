@@ -18,6 +18,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 # Add the src directory to sys.path so import akkudoktoreos works in all cases
@@ -25,21 +26,29 @@ PROJECT_ROOT = Path(__file__).parent.parent
 SRC_DIR = PROJECT_ROOT / "src"
 sys.path.insert(0, str(SRC_DIR))
 
+from akkudoktoreos.config.config import ConfigEOS
 from akkudoktoreos.core.coreabc import get_config
 from akkudoktoreos.server.eos import app
 
 
 def generate_openapi() -> dict:
-    # Make minimal config to make the generation reproducable
-    config_eos = get_config(init={
-            "with_init_settings": True,
-            "with_env_settings": False,
-            "with_dotenv_settings": False,
-            "with_file_settings": False,
-            "with_file_secret_settings": False,
-        })
+    # Documentation mode: leave runtime state (e.g. optimization solution keys,
+    # Home Assistant entity IDs) out of the specification.
+    force_documentation_mode = ConfigEOS._force_documentation_mode
+    ConfigEOS._force_documentation_mode = True
+    try:
+        # Make minimal config to make the generation reproducable
+        config_eos = get_config(init={
+                "with_init_settings": True,
+                "with_env_settings": False,
+                "with_dotenv_settings": False,
+                "with_file_settings": False,
+                "with_file_secret_settings": False,
+            })
 
-    openapi_spec = app.openapi()
+        openapi_spec = app.openapi()
+    finally:
+        ConfigEOS._force_documentation_mode = force_documentation_mode
 
     config_schema = (
         openapi_spec
@@ -93,4 +102,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # EOS creates a config file if it finds none. Let it do so in a temporary
+    # directory, not in the working directory (e.g. the repository root).
+    with tempfile.TemporaryDirectory(prefix="eos-docs-") as eos_dir:
+        os.environ["EOS_DIR"] = eos_dir
+        os.environ["EOS_CONFIG_DIR"] = eos_dir
+        main()

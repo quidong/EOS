@@ -1,7 +1,7 @@
 from typing import Any, Iterator, Optional
 
 import numpy as np
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from akkudoktoreos.devices.settings.batterysettings import BATTERY_DEFAULT_CHARGE_RATES
 from akkudoktoreos.optimization.genetic.geneticdevices import DeviceParameters
@@ -144,6 +144,48 @@ class SolarPanelBatteryParameters(BaseBatteryParameters, _GridControlFields):
         },
     )
     max_charge_power_w: Optional[float] = max_charging_power_field()
+    full_charge_soc_percentage: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=100,
+        json_schema_extra={
+            "description": (
+                "State of charge a due full charge has to reach at least once "
+                "before 'full_charge_deadline_datetime' [%]. Must not exceed "
+                "'max_soc_percentage'. None means no full charge is due."
+            ),
+            "examples": [None, 100],
+        },
+    )
+    full_charge_deadline_datetime: Optional[DateTime] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "Moment by which 'full_charge_soc_percentage' has to be reached. "
+                "A date time without timezone is read as local time. None means "
+                "end of the optimization horizon."
+            ),
+            "examples": [None, "2026-11-20T07:00:00+01:00"],
+        },
+    )
+
+    @field_validator("full_charge_deadline_datetime", mode="before")
+    @classmethod
+    def transform_full_charge_deadline(cls, value: Any) -> Optional[DateTime]:
+        """Accept the usual date time representations, naive input is local time."""
+        if value is None:
+            return None
+        return to_datetime(value)
+
+    @model_validator(mode="after")
+    def validate_full_charge_target(self) -> "SolarPanelBatteryParameters":
+        """A full charge target above the maximum SoC could never be reached."""
+        if (
+            self.full_charge_soc_percentage is not None
+            and self.full_charge_soc_percentage > self.max_soc_percentage
+        ):
+            raise ValueError("full_charge_soc_percentage must be <= max_soc_percentage")
+        return self
 
 
 class ElectricVehicleParameters(BaseBatteryParameters, _GridControlFields):
@@ -400,6 +442,9 @@ class Battery:
 
         # Raw extractable energy above minimum SoC
         raw_available_wh = max(self.soc_wh - self.min_soc_wh, 0.0)
+        if raw_available_wh == 0.0:
+            # A measured SoC below the reserve must not be raised by discharging.
+            return 0.0, 0.0
 
         # Maximum raw discharge due to power limit, scaled to the slot duration.
         # max_charge_power_w is a power [W]; energy movable in one slot is

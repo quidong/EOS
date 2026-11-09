@@ -5,7 +5,9 @@ from typing import Any, List, Optional, Self
 from pydantic import Field, computed_field, field_validator, model_validator
 
 from akkudoktoreos.config.configabc import SettingsBaseModel
-from akkudoktoreos.core.coreabc import get_prediction
+from akkudoktoreos.prediction.pvakkuadapt import (
+    PVForecastAdaptiveAkkudoktorCommonSettings,
+)
 from akkudoktoreos.prediction.pvforecastabc import PVForecastProvider
 from akkudoktoreos.prediction.pvforecastakkudoktorlocal import (
     PVForecastAkkudoktorLocalCommonSettings,
@@ -27,32 +29,63 @@ from akkudoktoreos.prediction.pvforecastvrm import PVForecastVrmCommonSettings
 
 def pvforecast_provider_ids() -> list[str]:
     """Valid PV forecast providers."""
-    try:
-        prediction_eos = get_prediction()
-    except Exception:
-        # Prediction may not be initialized
-        # Return at least provider used in example
-        return [
-            "PVForecastAkkudoktor",
-            "PVForecastEnsemble",
-            "PVForecastForecastSolar",
-            "PVForecastHomeAssistant",
-            "PVForecastImport",
-            "PVForecastPVLib",
-            "PVForecastPVNode",
-            "PVForecastSolcast",
-            "PVForecastVrm",
-        ]
+    # From the provider classes: valid also while the configuration is created,
+    # before the prediction instance exists.
+    from akkudoktoreos.prediction.prediction import prediction_provider_ids
 
-    return [
-        provider.provider_id()
-        for provider in prediction_eos.providers
-        if isinstance(provider, PVForecastProvider)
-    ]
+    return prediction_provider_ids(PVForecastProvider)
 
 
 class PVForecastPlaneSetting(SettingsBaseModel):
     """PV Forecast Plane Configuration."""
+
+    name: Optional[str] = Field(
+        default=None, description="Readable PV string name.", examples=[None]
+    )
+    measurement_key: Optional[str] = Field(
+        default=None,
+        description="Matching EOS power measurement key for adaptive learning.",
+        examples=[None],
+    )
+    nowcast_reference: bool = Field(
+        default=False, description="Use this independent array as a local weather reference."
+    )
+    curtailment_sensitive: bool = Field(
+        default=False,
+        description="Battery-full curtailment possible; exclude from unrestricted weather learning.",
+    )
+    parameters_estimated: bool = Field(
+        default=False,
+        description="Geometry and peak power are effective fitted model estimates, not verified nameplate data.",
+    )
+    correction_group: Optional[str] = Field(
+        default=None,
+        examples=[None],
+        min_length=1,
+        max_length=128,
+        description="Optional group of planes sharing short-term validation. Unset independent references share one group; other planes are separate.",
+    )
+    curtailment_key: Optional[str] = Field(
+        default=None,
+        examples=[None],
+        min_length=1,
+        max_length=128,
+        description="Optional measured flag: 0 explicitly unrestricted, 1 curtailed. Missing or stale flags never authorize learning a curtailment-sensitive plane.",
+    )
+    learning_guard_key: Optional[str] = Field(
+        default=None,
+        examples=[None],
+        min_length=1,
+        max_length=128,
+        description="Optional site-specific positive learning guard, e.g. battery SoC, as an alternative to a binary curtailment flag.",
+    )
+    learning_guard_max: Optional[float] = Field(
+        default=None,
+        examples=[None],
+        allow_inf_nan=False,
+        description="Learn only while every supported guard value is below this bound. This is an explicit site assumption, not automatic curtailment detection.",
+    )
+    learning_guard_max_gap_seconds: int = Field(default=600, ge=1, le=3600)
 
     # latitude: Optional[float] = Field(default=None, json_schema_extra={ "description": "Latitude in decimal degrees, between -90 and 90, north is positive (ISO 19115) (°)" })
     surface_tilt: Optional[float] = Field(
@@ -170,6 +203,15 @@ class PVForecastPlaneSetting(SettingsBaseModel):
 
     @model_validator(mode="after")
     def validate_list_length(self) -> Self:
+        if bool(self.learning_guard_key) != (self.learning_guard_max is not None):
+            raise ValueError("A learning guard requires both a key and an explicit upper bound.")
+        if self.curtailment_key and self.learning_guard_key:
+            raise ValueError("Use either a curtailment flag or a site-specific learning guard.")
+        if self.measurement_key and self.measurement_key in (
+            self.curtailment_key,
+            self.learning_guard_key,
+        ):
+            raise ValueError("Power and learning-status measurements must use distinct keys.")
         # Check if either attribute is set and add to active planes
         if self.trackingtype == 2:
             # Tilt angle from horizontal plane is ignored for two-axis tracking.
@@ -213,6 +255,11 @@ class PVForecastCommonSettings(SettingsBaseModel):
         json_schema_extra={
             "description": "Akkudoktor forecast backend and local calibration settings",
         },
+    )
+
+    adaptive: PVForecastAdaptiveAkkudoktorCommonSettings = Field(
+        default_factory=PVForecastAdaptiveAkkudoktorCommonSettings,
+        description="Adaptive Akkudoktor: configure string measurements and independent reference flags on the planes.",
     )
 
     pvforecastimport: PVForecastImportCommonSettings = Field(

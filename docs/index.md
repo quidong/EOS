@@ -57,6 +57,7 @@ akkudoktoreos/optimpost.md
 akkudoktoreos/optimauto.md
 akkudoktoreos/resource.md
 akkudoktoreos/prediction.md
+akkudoktoreos/pvakkuadapt.md
 akkudoktoreos/measurement.md
 akkudoktoreos/integration.md
 akkudoktoreos/logging.md
@@ -72,6 +73,7 @@ akkudoktoreos/api.rst
 :caption: Development
 
 develop/develop.md
+develop/ai.md
 develop/release.md
 develop/async.md
 develop/CHANGELOG.md

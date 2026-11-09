@@ -126,9 +126,9 @@
                "LoadAkkudoktor",
                "LoadAkkudoktorAdjusted",
                "LoadImport",
-               "LoadVrm",
                "LoadMeasured",
-               "LoadML"
+               "LoadML",
+               "LoadVrm"
            ]
        }
    }

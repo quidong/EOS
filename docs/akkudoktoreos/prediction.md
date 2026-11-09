@@ -908,6 +908,50 @@ Hourly meters are fitted hourly; native quarter-hour meters retain their cadence
 Probable outage or curtailment days are excluded by default. Without sufficient
 usable measurements the uncalibrated physical model is used.
 
+##### Snow on the modules
+
+Set `snow_enabled` to true to model snow lying on the modules. The local backend
+then also requests hourly `snowfall` and `snow_depth` from Open-Meteo and runs the
+NREL snow coverage model (`pvlib.snow.coverage_nrel`) per plane: heavy snowfall
+covers the modules, warmth and sunshine let the snow slide off, and the modules
+count as clear once the ground snow depth drops below `snow_threshold_depth_cm`.
+The forecast is reduced by the covered fraction. No state is stored between runs;
+every update replays the last `snow_lookback_days` of weather to rebuild the
+current coverage.
+
+The weather model alone often misjudges how long snow stays on the modules. With
+`measurement.pv_production_emr_keys` configured (cumulative meter readings in
+kWh), `snow_feedback_enabled` corrects the coverage with the measured production
+of the past hours:
+
+- Production above the snow model clears the coverage at once.
+- Production far below the clean-module model (less than `snow_detection_ratio`)
+  raises the coverage, but only while snow is plausible: snow lies on the ground
+  or the model already holds some coverage. Low production on a snow-free day
+  (curtailment, an inverter fault) is ignored.
+- Persisting snow also slows the modelled slide rate. This fades back with
+  `snow_feedback_memory_hours`, so a warm night after a covered day still clears
+  the modules in the forecast.
+
+Intervals with possible snow are excluded from the calibration fit, so snow is
+never learned as a permanent model loss. Meter jumps larger than the plant can
+produce are ignored.
+
+```json
+{
+  "pvforecast": {
+    "provider": "PVForecastAkkudoktor",
+    "akkudoktor": {
+      "backend": "local",
+      "snow_enabled": true
+    }
+  },
+  "measurement": {
+    "pv_production_emr_keys": ["pv_production_emr"]
+  }
+}
+```
+
 Transient weather errors are retried. If an update still fails, existing usable
 AC forecasts are retained; a cold start or expired-only forecast reports the
 error. Retention does not extend the available forecast horizon. Calibration and
@@ -970,6 +1014,13 @@ uses the configured PV system geometry together with the weather prediction
 simulate the expected DC module power and AC inverter output.
 
 The provider supports multiple PV planes and automatically sums their power.
+Planes that share the same `inverter_paco` feed a single physical inverter:
+their combined AC output is clipped to that rating, so the forecast never
+exceeds the inverter's AC power rating. Planes with different ratings are
+treated as separate inverters, and planes without a rating are not clipped.
+The configured system loss (`planes[].loss`, percent) is applied to both DC
+and AC output as a factor of `1 - loss / 100`, with the same semantics as
+`PVForecastAkkudoktorLocal`.
 Module and inverter models are selected from the CEC database by name or by
 their nominal power rating. AkkudoktorEOS automatically generates and caches
 the required CEC databases on first use by combining the current SAM database,
@@ -1014,7 +1065,17 @@ The prediction keys for the PV forecast data are:
 The `PVForecastForecastSolar` provider retrieves PV power forecasts from the free
 [Forecast.Solar](https://forecast.solar) API. No API key is required for the public endpoint; an
 optional key raises the rate limit. The location is taken from `general.latitude`/`longitude` and
-the system geometry from the configured `planes` (one request per plane, summed per timestamp).
+the system geometry from the configured `planes` (one request per plane).
+
+The provider integrates Forecast.Solar's instantaneous power samples into 15-minute
+interval-average W before summing the planes. Sunrise and sunset retain their actual
+timestamps during integration; explicit zero boundaries establish nighttime zeros within
+each forecast day. Missing daylight samples, invalid values, and unavailable days remain
+missing. GENETIC converts the averages to Wh for its configured 15-minute or hourly slots.
+Refreshing the provider replaces older samples and removes unavailable forecast tails.
+On the first refresh after upgrading, legacy forecasts with non-aligned timestamps are
+cleared, including history, so they cannot distort cadence detection. Later refreshes
+retain the normalized history.
 
 ```python
     {

@@ -26,7 +26,7 @@ Attributes:
     weather_clearoutside (WeatherClearOutside): Weather forecast provider using ClearOutside.
 """
 
-from typing import Optional, Union
+from typing import Optional, Union, get_args
 
 from pydantic import Field
 
@@ -55,6 +55,9 @@ from akkudoktoreos.prediction.loadmeasured import LoadMeasured
 from akkudoktoreos.prediction.loadml import LoadML
 from akkudoktoreos.prediction.loadvrm import LoadVrm
 from akkudoktoreos.prediction.predictionabc import PredictionContainer
+from akkudoktoreos.prediction.pvakkuadapt import (
+    PVForecastAdaptiveAkkudoktor,
+)
 from akkudoktoreos.prediction.pvforecastakkudoktor import PVForecastAkkudoktor
 from akkudoktoreos.prediction.pvforecastensemble import PVForecastEnsemble
 from akkudoktoreos.prediction.pvforecastforecastsolar import PVForecastForecastSolar
@@ -112,6 +115,7 @@ loadforecast_measured = LoadMeasured()
 loadforecast_ml = LoadML()
 pvforecast_ensemble = PVForecastEnsemble()
 pvforecast_akkudoktor = PVForecastAkkudoktor()
+pvforecast_adaptive_akkudoktor = PVForecastAdaptiveAkkudoktor()
 pvforecast_vrm = PVForecastVrm()
 pvforecast_homeassistant = PVForecastHomeAssistant()
 pvforecast_pvlib = PVForecastPVLib()
@@ -149,6 +153,7 @@ PredictionProviderType = Union[
     LoadVrm,
     PVForecastAkkudoktor,
     PVForecastEnsemble,
+    PVForecastAdaptiveAkkudoktor,
     PVForecastForecastSolar,
     PVForecastHomeAssistant,
     PVForecastImport,
@@ -161,6 +166,26 @@ PredictionProviderType = Union[
     WeatherImport,
     WeatherOpenMeteo,
 ]
+
+
+def prediction_provider_ids(provider_type: type) -> list[str]:
+    """Return the ids of all prediction providers of a kind.
+
+    Derived from the provider classes, so it does not need the prediction
+    instance. The configuration validates its provider ids with it while it is
+    created, before the prediction instance exists.
+
+    Args:
+        provider_type: Provider base class of the kind, e.g. ``WeatherProvider``.
+
+    Returns:
+        The provider ids of all provider classes derived from ``provider_type``.
+    """
+    return [
+        provider_class.provider_id()
+        for provider_class in get_args(PredictionProviderType)
+        if issubclass(provider_class, provider_type)
+    ]
 
 
 def prediction_providers() -> list[PredictionProviderType]:
@@ -192,6 +217,7 @@ def prediction_providers() -> list[PredictionProviderType]:
         loadforecast_ml, \
         pvforecast_ensemble, \
         pvforecast_akkudoktor, \
+        pvforecast_adaptive_akkudoktor, \
         pvforecast_vrm, \
         pvforecast_homeassistant, \
         pvforecast_pvlib, \
@@ -233,6 +259,7 @@ def prediction_providers() -> list[PredictionProviderType]:
         loadforecast_import,
         loadforecast_vrm,
         pvforecast_akkudoktor,
+        pvforecast_adaptive_akkudoktor,
         pvforecast_forecastsolar,
         pvforecast_homeassistant,
         pvforecast_import,

@@ -30,6 +30,9 @@ from akkudoktoreos.prediction.prediction import (
     Prediction,
     PredictionCommonSettings,
 )
+from akkudoktoreos.prediction.pvakkuadapt import (
+    PVForecastAdaptiveAkkudoktor,
+)
 from akkudoktoreos.prediction.pvforecastakkudoktor import PVForecastAkkudoktor
 from akkudoktoreos.prediction.pvforecastforecastsolar import PVForecastForecastSolar
 from akkudoktoreos.prediction.pvforecasthomeassistant import PVForecastHomeAssistant
@@ -78,6 +81,7 @@ def forecast_providers():
         LoadImport(),
         LoadVrm(),
         PVForecastAkkudoktor(),
+        PVForecastAdaptiveAkkudoktor(),
         PVForecastForecastSolar(),
         PVForecastHomeAssistant(),
         PVForecastImport(),
@@ -144,22 +148,26 @@ def test_provider_sequence(prediction):
     assert isinstance(prediction.providers[21], LoadImport)
     assert isinstance(prediction.providers[22], LoadVrm)
     assert isinstance(prediction.providers[23], PVForecastAkkudoktor)
-    assert isinstance(prediction.providers[24], PVForecastForecastSolar)
-    assert isinstance(prediction.providers[25], PVForecastHomeAssistant)
-    assert isinstance(prediction.providers[26], PVForecastImport)
-    assert isinstance(prediction.providers[27], PVForecastPVLib)
-    assert isinstance(prediction.providers[28], PVForecastPVNode)
-    assert isinstance(prediction.providers[29], PVForecastSolcast)
-    assert isinstance(prediction.providers[30], PVForecastVrm)
-    assert isinstance(prediction.providers[31], LoadMeasured)  # RL29 fork
-    assert isinstance(prediction.providers[32], LoadML)  # RL29 fork
-    assert isinstance(prediction.providers[33], PVForecastEnsemble)  # RL29 fork
+    assert isinstance(prediction.providers[24], PVForecastAdaptiveAkkudoktor)
+    assert isinstance(prediction.providers[25], PVForecastForecastSolar)
+    assert isinstance(prediction.providers[26], PVForecastHomeAssistant)
+    assert isinstance(prediction.providers[27], PVForecastImport)
+    assert isinstance(prediction.providers[28], PVForecastPVLib)
+    assert isinstance(prediction.providers[29], PVForecastPVNode)
+    assert isinstance(prediction.providers[30], PVForecastSolcast)
+    assert isinstance(prediction.providers[31], PVForecastVrm)
+    assert isinstance(prediction.providers[32], LoadMeasured)  # RL29 fork
+    assert isinstance(prediction.providers[33], LoadML)  # RL29 fork
+    assert isinstance(prediction.providers[34], PVForecastEnsemble)  # RL29 fork
 
 
 def test_provider_by_id(prediction, forecast_providers):
     """Test that provider_by_id method returns the correct provider."""
     for provider in forecast_providers:
-        assert prediction.provider_by_id(provider.provider_id()).provider_id() == provider.provider_id()
+        assert (
+            prediction.provider_by_id(provider.provider_id()).provider_id()
+            == provider.provider_id()
+        )
 
 
 def test_prediction_repr(prediction):
@@ -210,3 +218,34 @@ async def test_empty_providers(prediction, forecast_providers):
 
     # Cleanup after Test
     prediction.providers = providers_bkup
+
+
+@pytest.mark.parametrize(
+    "provider_type",
+    [
+        "WeatherProvider",
+        "PVForecastProvider",
+        "LoadProvider",
+        "ElecPriceProvider",
+        "FeedInTariffProvider",
+        "ElecFeeProvider",
+    ],
+)
+def test_provider_ids_without_prediction_instance(prediction, provider_type):
+    """The ids from the provider classes match the providers of the prediction."""
+    import importlib
+
+    from akkudoktoreos.prediction.prediction import prediction_provider_ids
+
+    module_name = {
+        "WeatherProvider": "weatherabc",
+        "PVForecastProvider": "pvforecastabc",
+        "LoadProvider": "loadabc",
+        "ElecPriceProvider": "elecpriceabc",
+        "FeedInTariffProvider": "feedintariffabc",
+        "ElecFeeProvider": "elecfeeabc",
+    }[provider_type]
+    base = getattr(importlib.import_module(f"akkudoktoreos.prediction.{module_name}"), provider_type)
+    expected = {p.provider_id() for p in prediction.providers if isinstance(p, base)}
+    assert expected
+    assert set(prediction_provider_ids(base)) == expected

@@ -25,7 +25,7 @@ dependencies = [
     "fastapi_cli==0.0.32",
     "rich-toolkit==0.20.6",
     "python-fasthtml==0.14.14",
-    "MonsterUI==1.0.47",
+    "MonsterUI==1.0.48",
     "markdown-it-py==4.2.0",
     "mdit-py-plugins==0.6.1",
     "bokeh==3.9.2",
@@ -36,10 +36,10 @@ dependencies = [
     "requests==2.34.2",
     "pandas==3.1.0",
     "pendulum==3.3.0",
-    "platformdirs==4.13.5",
+    "platformdirs==4.14.2",
     "psutil==7.2.2",
     "pvlib==0.16.1",
-    "pydantic==2.14.1",
+    "pydantic==2.14.2",
     "pydantic_extra_types==2.11.2",
     "statsmodels==0.15.0",
     "pydantic-settings==2.16.1",
@@ -63,7 +63,7 @@ dev = [
     #
     # !!! Sync .pre-commit-config.yaml with these dependencies !!!
     "pre-commit==4.7.0",
-    "mypy==2.4.0",
+    "mypy==2.4.1",
     "types-requests==2.33.0.20261006", # for mypy
     "pandas-stubs==3.0.5.260914", # for mypy
     "tokenize-rt==6.2.0", # for mypy
@@ -85,11 +85,14 @@ dev = [
 
     # Pytest
     "pytest==9.1.1",
-    "pytest-asyncio==1.4.0",
+    "pytest-asyncio==1.4.1",
     "pytest-cov==7.1.0",
     "pytest-xprocess==1.0.2",
     "coverage==7.16.2",
-    "pypdf==6.21.2",
+    "pypdf==6.21.4",
+    # Browser tests of EOSdash (pytest --browser-test). The browser itself is installed
+    # separately: uv run playwright install chromium
+    "playwright==1.64.1",
 ]
 
 [project.urls]
@@ -164,7 +167,8 @@ minversion = "8.3.3"
 pythonpath = [ "src", ]
 testpaths = [ "tests", ]
 markers = [
-    "docker: marks tests that require a local Docker engine"
+    "docker: marks tests that require a local Docker engine",
+    "browser: marks EOSdash tests that run in a headless browser (enable with --browser-test)",
 ]
 filterwarnings = [
     # Treat pandas 4 deprecations in EOS code as errors; upstream callers remain visible.
@@ -210,6 +214,48 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["cachebox", "fasthtml.*", "monsterui.*", "pvlib.*", "statsmodels.*"]
 ignore_missing_imports = true
+
+[tool.eos-filename-linter]
+max_filename_length = 64
+
+exclude = [
+    ".git/**",
+    ".venv/**",
+    "docs/_build/**",
+    "**/*.egg-info/**",
+]
+
+# Test modules except single test modules.
+[[tool.eos-filename-linter.rules]]
+name = "pytest module: test_ prefix, lowercase letters and digits without underscores or hyphens"
+paths = ["tests/**/*.py"]
+pattern = "^test_[a-z0-9]+\\.py$"
+allowed_names = ["conftest.py"]
+exclude = ["tests/single_test_*.py"]
+suggestion = "test_prefix_alnum"
+
+# Single test modules.
+[[tool.eos-filename-linter.rules]]
+name = "Single pytest modules"
+paths = ["tests/single_test_*.py"]
+pattern = "^single_test_[a-z0-9]+\\.py$"
+suggestion = "single_test_prefix_alnum"
+
+# Production Python modules.
+[[tool.eos-filename-linter.rules]]
+name = "python source module: lowercase letters and digits without underscores or hyphens"
+paths = ["src/akkudoktoreos/**/*.py"]
+pattern = "^[a-z][a-z0-9]*\\.py$"
+allowed_names = ["__init__.py", "_version_date.py"]
+suggestion = "lowercase_alnum"
+
+# Standalone scripts.
+[[tool.eos-filename-linter.rules]]
+name = "python script: lowercase letters, digits, underscores without hyphens"
+paths = ["scripts/**/*.py"]
+pattern = "^[a-z][a-z0-9_]*\\.py$"
+allowed_names = ["__init__.py"]
+suggestion = "lowercase_snake"
 
 [tool.commitizen]
 # Only used as linter
