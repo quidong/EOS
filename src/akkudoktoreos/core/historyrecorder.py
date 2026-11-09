@@ -22,6 +22,7 @@ from akkudoktoreos.core.history import (
     _finite,
     _utc,
     baseline_self_consumption_cost,
+    expected_direct_pv_wh,
     frame_rows,
 )
 
@@ -205,6 +206,11 @@ def run_payload(
         if len(plan.index) > 1:
             slot_h = (plan.index[1] - plan.index[0]).total_seconds() / 3600.0
         battery = battery_baseline_parameters(config, plan)
+        try:
+            direct = expected_direct_pv_wh(pv[:n], load[:n], slot_h)
+        except Exception as exc:  # interpolator data missing: fall back to netting
+            logger.warning("History baseline: direct PV share unavailable ({}).", exc)
+            direct = None
         baseline = baseline_self_consumption_cost(
             pv[:n],
             load[:n],
@@ -217,7 +223,9 @@ def run_payload(
             charge_eff=battery.get("charge_eff", 0.95),
             discharge_eff=battery.get("discharge_eff", 0.95),
             min_soc_wh=battery.get("min_soc_wh", 0.0),
+            direct_wh=direct,
         )
+        baseline["intra_slot_model"] = direct is not None
     plan_costs = sum(_column(plan, "costs_amt")[:n]) if n else None
     plan_revenue = sum(_column(plan, "revenue_amt")[:n]) if n else None
     meta: dict[str, Any] = {

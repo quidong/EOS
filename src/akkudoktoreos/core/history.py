@@ -393,12 +393,22 @@ def baseline_self_consumption_cost(
     charge_eff: float = 0.95,
     discharge_eff: float = 0.95,
     min_soc_wh: float = 0.0,
+    direct_wh: Optional[Sequence[float]] = None,
 ) -> dict[str, float]:
     """Costs of the plain self-consumption strategy for the same forecasts.
 
     PV covers the load first, the surplus charges the battery, the rest is fed in;
     a deficit is taken from the battery, then from the grid. No grid charging, no
     shifting of controllable loads. This is the reference the optimizer must beat.
+
+    Args:
+        direct_wh: Expected PV energy that directly covers the load in each slot.
+            The optimizer's simulation does not net PV and load perfectly within a
+            slot: load and PV peaks do not coincide, so part of the load is imported
+            while part of the PV is fed in during the same 15 minutes. Pass the same
+            expectation here (see ``expected_direct_pv_wh``) so the baseline is
+            simulated like the plan. ``None`` nets each slot perfectly, which makes
+            the baseline look better than any plan can be.
     """
     soc = max(min(battery_soc_wh, battery_capacity_wh), 0.0)
     costs = revenue = grid_import = grid_export = 0.0
@@ -407,22 +417,27 @@ def baseline_self_consumption_cost(
         load = max(_finite(load_wh[i]) or 0.0, 0.0)
         price = _finite(price_amt_kwh[i]) or 0.0
         tariff = _finite(feed_in_amt_kwh[i]) or 0.0
-        net = pv - load
-        if net >= 0:
-            room = max(battery_capacity_wh - soc, 0.0) / max(charge_eff, 1e-9)
-            into_battery = min(net, max_charge_wh, room)
-            soc += into_battery * charge_eff
-            export = net - into_battery
-            grid_export += export
-            revenue += export / 1000.0 * tariff
-        else:
-            deficit = -net
+        direct = min(pv, load)
+        if direct_wh is not None and i < len(direct_wh):
+            direct = min(max(_finite(direct_wh[i]) or 0.0, 0.0), direct)
+        # Load gap and PV surplus can both occur within one slot. Like the plan
+        # simulation, serve the gap from the battery first, then charge the surplus.
+        deficit = load - direct
+        surplus = pv - direct
+        if deficit > 0:
             available = max(soc - min_soc_wh, 0.0) * discharge_eff
             from_battery = min(deficit, max_discharge_wh, available)
             soc -= from_battery / max(discharge_eff, 1e-9)
             imported = deficit - from_battery
             grid_import += imported
             costs += imported / 1000.0 * price
+        if surplus > 0:
+            room = max(battery_capacity_wh - soc, 0.0) / max(charge_eff, 1e-9)
+            into_battery = min(surplus, max_charge_wh, room)
+            soc += into_battery * charge_eff
+            export = surplus - into_battery
+            grid_export += export
+            revenue += export / 1000.0 * tariff
     return {
         "costs_amt": round(costs, 4),
         "revenue_amt": round(revenue, 4),
@@ -430,6 +445,31 @@ def baseline_self_consumption_cost(
         "grid_import_wh": round(grid_import, 1),
         "grid_export_wh": round(grid_export, 1),
     }
+
+
+def expected_direct_pv_wh(
+    pv_wh: Sequence[float], load_wh: Sequence[float], slot_hours: float
+) -> list[float]:
+    """Expected direct PV-to-load energy per slot, as the plan simulation uses it.
+
+    Uses the same probabilistic load interpolator as the genetic inverter model
+    (``calculate_expected_direct_consumption``), so the baseline and the plan see
+    the same intra-slot mismatch between PV and load.
+    """
+    from akkudoktoreos.prediction.interpolator import get_eos_load_interpolator
+
+    predictor = get_eos_load_interpolator()
+    hours = slot_hours if slot_hours > 0 else 1.0
+    direct: list[float] = []
+    for pv_raw, load_raw in zip(pv_wh, load_wh):
+        pv = max(_finite(pv_raw) or 0.0, 0.0)
+        load = max(_finite(load_raw) or 0.0, 0.0)
+        if pv <= 0.0 or load <= 0.0:
+            direct.append(0.0)
+            continue
+        power_w = predictor.calculate_expected_direct_consumption(load / hours, pv / hours)
+        direct.append(min(max(power_w * hours, 0.0), pv, load))
+    return direct
 
 
 # --------------------------------------------------------------------------------------

@@ -628,3 +628,70 @@ async def test_history_endpoints_without_database(config_eos, monkeypatch):
         hours = (await client.get("/v1/energy-management/history/hours")).json()
     assert summary["enabled"] is False and summary["kpi"] == {} and summary["days"] == []
     assert hours["data"] == []
+
+
+def test_baseline_with_intra_slot_mismatch():
+    """Only the expected direct share nets PV against load inside a slot."""
+    from akkudoktoreos.core.history import baseline_self_consumption_cost as baseline
+
+    result = baseline(
+        pv_wh=[1000, 0],
+        load_wh=[400, 500],
+        price_amt_kwh=[0.3, 0.3],
+        feed_in_amt_kwh=[0.08, 0.08],
+        direct_wh=[300, 0],
+    )
+    # Slot 0: 100 Wh of the load is imported while 700 Wh of PV are fed in.
+    assert result["grid_import_wh"] == 600
+    assert result["grid_export_wh"] == 700
+    assert result["costs_amt"] == pytest.approx(0.18)
+    assert result["revenue_amt"] == pytest.approx(0.056)
+
+
+def test_baseline_direct_share_is_bounded():
+    from akkudoktoreos.core.history import baseline_self_consumption_cost as baseline
+
+    perfect = baseline([1000], [400], [0.3], [0.08])
+    too_high = baseline([1000], [400], [0.3], [0.08], direct_wh=[5000])
+    assert too_high == perfect
+
+
+def test_expected_direct_pv_matches_inverter_model():
+    """The baseline uses the same direct-consumption expectation as the plan."""
+    from akkudoktoreos.core.history import expected_direct_pv_wh
+    from akkudoktoreos.prediction.interpolator import get_eos_load_interpolator
+
+    pv = [0.0, 50.0, 300.0, 1100.0]
+    load = [200.0, 200.0, 250.0, 1000.0]
+    direct = expected_direct_pv_wh(pv, load, 0.25)
+    predictor = get_eos_load_interpolator()
+    assert direct[0] == 0.0
+    for p, l, d in zip(pv[1:], load[1:], direct[1:]):
+        expected = predictor.calculate_expected_direct_consumption(l / 0.25, p / 0.25) * 0.25
+        assert d == pytest.approx(min(expected, p, l))
+        assert 0.0 < d <= min(p, l)
+    # Large comparable PV and load do not net perfectly within a slot.
+    assert direct[3] < 1000.0
+
+
+def test_run_payload_baseline_equals_plan_without_flexibility():
+    """Without battery the baseline is the plan itself: no fictitious loss.
+
+    Regression: the baseline netted each slot perfectly while the plan used the
+    probabilistic direct share, so a plan with nothing to optimise showed a loss.
+    """
+    from akkudoktoreos.core.history import expected_direct_pv_wh
+
+    issued = T0
+    solution = fake_solution(issued)
+    prediction = solution.prediction.to_dataframe()
+    plan = solution.solution.to_dataframe()
+    pv = prediction["pvforecast_ac_energy_wh"].tolist()
+    load = plan["load_energy_wh"].tolist()
+    direct = expected_direct_pv_wh(pv, load, 0.25)
+    plan["costs_amt"] = [(lo - d) / 1000 * 0.30 for lo, d in zip(load, direct)]
+    plan["revenue_amt"] = [(p - d) / 1000 * 0.08 for p, d in zip(pv, direct)]
+    payload = run_payload(fake_config(HistorySettings()), solution, "MILP", 1.0, 48)
+    meta = payload["meta"]
+    assert meta["baseline"]["intra_slot_model"] is True
+    assert meta["saving_vs_baseline_amt"] == pytest.approx(0.0, abs=1e-3)
