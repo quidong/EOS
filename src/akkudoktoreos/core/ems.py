@@ -134,6 +134,12 @@ def _genetic_family_budget(
     return config.optimization.genetic.generations, None
 
 
+def _snapshots_enabled(config: Any) -> bool:
+    """``optimization.snapshots.enabled``; False for configurations without the section."""
+    snapshots = getattr(getattr(config, "optimization", None), "snapshots", None)
+    return bool(getattr(snapshots, "enabled", False))
+
+
 _snapshot_tasks: set[Any] = set()
 """Pending snapshot writes (kept referenced until done)."""
 
@@ -631,7 +637,7 @@ class EnergyManagement(
                     genetic_seed = self.config.optimization.genetic.seed
 
                 # RL29 fork: input snapshot for later replays (before the optimizer runs).
-                if automatic_algorithm and self.config.optimization.snapshots.enabled:
+                if automatic_algorithm and _snapshots_enabled(self.config):
                     snapshot = _snapshot_before_run(
                         self.config,
                         cast(GeneticOptimizationParameters, genetic_parameters),
