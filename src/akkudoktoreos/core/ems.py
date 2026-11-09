@@ -110,6 +110,30 @@ async def ems_manage_energy() -> None:
     await ems.run()
 
 
+def _genetic_family_optimizer(
+    algorithm: OptimizationAlgorithm, verbose: bool, seed: Optional[int]
+) -> GeneticOptimization:
+    """Optimizer instance for GENETIC or MILP (MILP runs on the GENETIC machinery)."""
+    optimizer_class: type[GeneticOptimization] = GeneticOptimization
+    if algorithm == OptimizationAlgorithm.MILP:
+        from akkudoktoreos.optimization.milp.milpoptimization import MilpOptimization
+
+        optimizer_class = MilpOptimization
+    return optimizer_class(verbose=verbose, fixed_seed=seed)
+
+
+def _genetic_family_budget(
+    config: Any, algorithm: OptimizationAlgorithm
+) -> tuple[int, Optional[int]]:
+    """Configured generations and individuals of an automatic GENETIC or MILP run."""
+    if algorithm == OptimizationAlgorithm.MILP:
+        return (
+            config.optimization.milp.polish_generations,
+            config.optimization.milp.polish_individuals,
+        )
+    return config.optimization.genetic.generations, None
+
+
 def _automatic_algorithm(config: Any) -> OptimizationAlgorithm:
     """Configured algorithm, or today's one in A/B operation (RL29 fork)."""
     if not getattr(config.optimization, "alternate_algorithms", None):
@@ -334,6 +358,50 @@ class EnergyManagement(
                 EnergyManagement._stage = EnergyManagementStage.IDLE
         return True
 
+    def _schedule_shadow(
+        self,
+        algorithms: list[OptimizationAlgorithm],
+        parameters: Optional[GeneticOptimizationParameters],
+        active_algorithm: OptimizationAlgorithm,
+        active_solution: Optional[GeneticSolution],
+        active_duration_s: float,
+        start_hour: int,
+        seed: Optional[int],
+    ) -> None:
+        """Start the shadow comparison of this run in the background (RL29 fork)."""
+        from akkudoktoreos.core.shadow import ShadowRunner
+
+        config = self.config
+        verbose = bool(config.server.verbose)
+
+        def optimize(algorithm: OptimizationAlgorithm, params: Any) -> GeneticSolution:
+            generations, individuals = _genetic_family_budget(config, algorithm)
+            optimizer = _genetic_family_optimizer(algorithm, verbose, seed)
+            return optimizer.optimize_ems(
+                start_hour=start_hour,
+                parameters=params,
+                ngen=generations,
+                individuals=individuals,
+            )
+
+        async def store(result: Any) -> None:
+            from akkudoktoreos.core.historyrecorder import HistoryRecorder
+
+            await HistoryRecorder.instance().record_shadow(config, result)
+
+        try:
+            ShadowRunner.instance().schedule(
+                algorithms,
+                parameters,
+                active_algorithm,
+                active_solution,
+                active_duration_s,
+                optimize,
+                on_result=store,
+            )
+        except Exception as exc:  # never let the comparison break the run
+            logger.warning("Shadow comparison could not be started: {}", exc)
+
     async def run(
         self,
         start_datetime: Optional[DateTime] = None,
@@ -400,6 +468,12 @@ class EnergyManagement(
             through the solution getters after an aborted run.
         """
         async with EnergyManagement._run_lock:
+            # RL29 fork: a shadow comparison of the previous run shares the optimizer
+            # state (EMS start, caches, worker pool); let it finish first.
+            from akkudoktoreos.core.shadow import ShadowRunner
+
+            await ShadowRunner.instance().wait_idle()
+
             if mode is None:
                 mode = self.config.ems.mode
 
@@ -416,6 +490,10 @@ class EnergyManagement(
 
             # Remember/ set the start datetime of this energy management run.
             # None leads to current time as start datetime
+            # Shadow comparisons only for automatic runs on the server's own inputs.
+            automatic_algorithm = algorithm is None and genetic_parameters is None
+            shadow_algorithms: list[OptimizationAlgorithm] = []
+            shadow_parameters: Optional[GeneticOptimizationParameters] = None
             if algorithm is None:
                 algorithm = _automatic_algorithm(self.config)
             genetic_like = algorithm in (OptimizationAlgorithm.GENETIC, OptimizationAlgorithm.MILP)
@@ -504,21 +582,27 @@ class EnergyManagement(
                 if genetic_seed is None:
                     genetic_seed = self.config.optimization.genetic.seed
 
+                # RL29 fork: shadow comparison works on an untouched copy of the inputs.
+                from akkudoktoreos.core.shadow import shadow_algorithms_for
+
+                shadow_algorithms = (
+                    shadow_algorithms_for(self.config.optimization, algorithm)
+                    if automatic_algorithm
+                    else []
+                )
+                shadow_parameters = (
+                    cast(GeneticOptimizationParameters, genetic_parameters).model_copy(deep=True)
+                    if shadow_algorithms
+                    else None
+                )
+
                 if EnergyManagement._start_datetime is None:  # Make mypy happy - already set by us
                     raise RuntimeError(f"{algorithm}: Start datetime not set.")
 
                 # --- Optimization (CPU-bound → MUST offload) ---
                 try:
-                    optimizer_class: type[GeneticOptimization] = GeneticOptimization
-                    if algorithm == OptimizationAlgorithm.MILP:
-                        from akkudoktoreos.optimization.milp.milpoptimization import (
-                            MilpOptimization,
-                        )
-
-                        optimizer_class = MilpOptimization
-                    genetic_optimization = optimizer_class(
-                        verbose=bool(self.config.server.verbose),
-                        fixed_seed=genetic_seed,
+                    genetic_optimization = _genetic_family_optimizer(
+                        algorithm, bool(self.config.server.verbose), genetic_seed
                     )
 
                     loop = get_running_loop()
@@ -668,6 +752,21 @@ class EnergyManagement(
                     EnergyManagement._optimization_solution,
                     str(algorithm),
                     optimization_duration.total_seconds(),
+                )
+
+            # RL29 fork: shadow comparison on the same inputs (background, not published).
+            if (
+                algorithm in (OptimizationAlgorithm.GENETIC, OptimizationAlgorithm.MILP)
+                and shadow_algorithms
+            ):
+                self._schedule_shadow(
+                    shadow_algorithms,
+                    shadow_parameters,
+                    algorithm,
+                    EnergyManagement._genetic_solution,
+                    optimization_duration.total_seconds(),
+                    start_hour,
+                    genetic_seed,
                 )
 
             # --- Dispatch control by adapters ---

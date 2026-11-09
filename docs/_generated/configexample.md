@@ -784,6 +784,7 @@
                }
            },
            "alternate_algorithms": [],
+           "shadow_algorithms": [],
            "milp": {
                "time_limit_s": 10.0,
                "mip_rel_gap": 0.0001,

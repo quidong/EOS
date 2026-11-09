@@ -493,6 +493,20 @@ SCHEMA_SQL = [
     """,
     "CREATE INDEX IF NOT EXISTS eos_run_issued ON eos_run (issued_at DESC)",
     """
+    CREATE TABLE IF NOT EXISTS eos_shadow (
+        issued_at          TIMESTAMPTZ NOT NULL,
+        active_algorithm   TEXT NOT NULL,
+        shadow_algorithm   TEXT NOT NULL,
+        active_objective   DOUBLE PRECISION,
+        shadow_objective   DOUBLE PRECISION,
+        active_net_amt     DOUBLE PRECISION,
+        shadow_net_amt     DOUBLE PRECISION,
+        active_duration_s  DOUBLE PRECISION,
+        shadow_duration_s  DOUBLE PRECISION,
+        PRIMARY KEY (issued_at, shadow_algorithm)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS eos_forecast (
         target_time TIMESTAMPTZ NOT NULL,
         issued_at   TIMESTAMPTZ NOT NULL,
@@ -754,6 +768,59 @@ class HistoryStore:
             conn.commit()
         return run_id
 
+    def write_shadow(self, row: dict[str, Any]) -> None:
+        """Store one shadow comparison (see ``akkudoktoreos.core.shadow``)."""
+        self.ensure_schema()
+        with self.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO eos_shadow (issued_at, active_algorithm, shadow_algorithm, "
+                    "active_objective, shadow_objective, active_net_amt, shadow_net_amt, "
+                    "active_duration_s, shadow_duration_s) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                    "ON CONFLICT (issued_at, shadow_algorithm) DO NOTHING",
+                    (
+                        _utc(row["issued_at"]),
+                        row["active_algorithm"],
+                        row["shadow_algorithm"],
+                        _finite(row.get("active_objective")),
+                        _finite(row.get("shadow_objective")),
+                        _finite(row.get("active_net_amt")),
+                        _finite(row.get("shadow_net_amt")),
+                        _finite(row.get("active_duration_s")),
+                        _finite(row.get("shadow_duration_s")),
+                    ),
+                )
+            conn.commit()
+
+    def shadow_runs(self, start: datetime, end: datetime) -> list[dict[str, Any]]:
+        """Shadow comparisons in ``[start, end)`` with their delta (shadow - active)."""
+        self.ensure_schema()
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT issued_at, active_algorithm, shadow_algorithm, active_objective, "
+                "shadow_objective, active_net_amt, shadow_net_amt, active_duration_s, "
+                "shadow_duration_s FROM eos_shadow "
+                "WHERE issued_at >= %s AND issued_at < %s ORDER BY issued_at",
+                (_utc(start), _utc(end)),
+            )
+            keys = (
+                "issued_at",
+                "active_algorithm",
+                "shadow_algorithm",
+                "active_objective",
+                "shadow_objective",
+                "active_net_amt",
+                "shadow_net_amt",
+                "active_duration_s",
+                "shadow_duration_s",
+            )
+            rows = [dict(zip(keys, row)) for row in cur.fetchall()]
+        for row in rows:
+            active, shadow = row["active_objective"], row["shadow_objective"]
+            row["delta"] = None if active is None or shadow is None else shadow - active
+        return rows
+
     def write_actuals(self, rows: Sequence[tuple[datetime, str, float]]) -> int:
         """Upsert hourly actuals (hour, series, value)."""
         if not rows:
@@ -967,14 +1034,20 @@ def summary_from(
     accuracy_rows: Sequence[dict[str, Any]],
     runs: Sequence[dict[str, Any]],
     days: Sequence[dict[str, Any]],
+    shadow_rows: Sequence[dict[str, Any]] = (),
 ) -> dict[str, Any]:
     """Flat key figures for dashboards (Home Assistant REST sensor attributes).
 
     - ``kpi``: ``<name>_mae_<lead>h`` and ``<name>_bias_<lead>h`` per accuracy row,
     - ``plan``: the latest run (algorithm, duration, planned net costs, baseline, saving),
     - ``days``: realised net grid costs per local day with the planning algorithm,
-    - ``ab``: number of days and mean daily net costs per algorithm (A/B comparison).
+    - ``ab``: number of days and mean daily net costs per algorithm (A/B comparison),
+    - ``shadow``: per algorithm pair the number of shadow comparisons on identical
+      inputs, the mean objective delta (shadow - active; negative = shadow better)
+      and the share of runs the shadow would have planned cheaper.
     """
+    from akkudoktoreos.core.shadow import summarize
+
     kpi: dict[str, Any] = {}
     for row in accuracy_rows:
         lead = float(row.get("lead_h") or 0)
@@ -1007,4 +1080,10 @@ def summary_from(
             entry["sum"] += float(net)
     for entry in ab.values():
         entry["mean_net_amt"] = round(entry.pop("sum") / entry["days"], 4)
-    return {"kpi": kpi, "plan": plan, "days": day_rows, "ab": ab}
+    return {
+        "kpi": kpi,
+        "plan": plan,
+        "days": day_rows,
+        "ab": ab,
+        "shadow": summarize(list(shadow_rows)),
+    }

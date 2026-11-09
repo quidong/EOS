@@ -508,7 +508,7 @@ def test_summary_from_kpis_plan_days_and_ab():
         "GENETIC": {"days": 2, "mean_net_amt": 3.5},
         "MILP": {"days": 1, "mean_net_amt": 2.0},
     }
-    assert summary_from([], [], []) == {"kpi": {}, "plan": {}, "days": [], "ab": {}}
+    assert summary_from([], [], []) == {"kpi": {}, "plan": {}, "days": [], "ab": {}, "shadow": {}}
 
 
 @needs_pg

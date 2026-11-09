@@ -2039,8 +2039,14 @@ async def fastapi_energy_management_history_summary_get(days: int = 30) -> dict:
         "plan": {},
         "days": [],
         "ab": {},
+        "shadow": {},
     }
     store = recorder.store(settings)
+    if store is None:
+        from akkudoktoreos.core.shadow import ShadowRunner
+
+        # Without a history database the in-memory comparisons of this process.
+        result["shadow"] = ShadowRunner.instance().summary()
     if store is None:
         return result
     window = timedelta(days=max(1, min(days, 90)))
@@ -2050,7 +2056,8 @@ async def fastapi_energy_management_history_summary_get(days: int = 30) -> dict:
         daily = await asyncio.to_thread(
             store.daily_costs, now - window, now, get_config().general.timezone or "UTC"
         )
-        result.update(summary_from(accuracy, runs, daily))
+        shadow = await asyncio.to_thread(store.shadow_runs, now - window, now)
+        result.update(summary_from(accuracy, runs, daily, shadow))
     except Exception as exc:
         result["last_error"] = str(exc)
     return result

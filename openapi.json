@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2611091886636050"
+    "version": "v0.3.0.dev2611091995569522"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -18279,6 +18279,21 @@
               ]
             ]
           },
+          "shadow_algorithms": {
+            "items": {
+              "$ref": "#/components/schemas/OptimizationAlgorithm"
+            },
+            "type": "array",
+            "title": "Shadow Algorithms",
+            "description": "RL29 fork: shadow comparison - after every automatic GENETIC or MILP run, each listed algorithm other than the one that planned also optimizes the same prepared inputs in the background. Its plan is never published or executed; only its objective (the common fitness: costs, comfort and switching penalties) is logged and stored, so the algorithms can be compared on identical forecasts instead of on different days. GENETIC0 is not supported and ignored.",
+            "examples": [
+              [],
+              [
+                "GENETIC",
+                "MILP"
+              ]
+            ]
+          },
           "milp": {
             "$ref": "#/components/schemas/MilpCommonSettings",
             "description": "MILP optimization configuration (RL29 fork). MILP uses the GENETIC settings (slots, horizons, terminal value) and adds these.",
@@ -18349,6 +18364,21 @@
             "type": "array",
             "title": "Alternate Algorithms",
             "description": "RL29 fork: A/B operation - when set, the algorithm changes every local day in this order (day number modulo the list length) and `algorithm` is ignored for automatic runs. The history records which algorithm planned each run, so realised costs can be compared.",
+            "examples": [
+              [],
+              [
+                "GENETIC",
+                "MILP"
+              ]
+            ]
+          },
+          "shadow_algorithms": {
+            "items": {
+              "$ref": "#/components/schemas/OptimizationAlgorithm"
+            },
+            "type": "array",
+            "title": "Shadow Algorithms",
+            "description": "RL29 fork: shadow comparison - after every automatic GENETIC or MILP run, each listed algorithm other than the one that planned also optimizes the same prepared inputs in the background. Its plan is never published or executed; only its objective (the common fitness: costs, comfort and switching penalties) is logged and stored, so the algorithms can be compared on identical forecasts instead of on different days. GENETIC0 is not supported and ignored.",
             "examples": [
               [],
               [

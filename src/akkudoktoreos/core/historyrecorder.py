@@ -141,6 +141,19 @@ class HistoryRecorder:
         except Exception as exc:
             self._note_error(str(exc))
 
+    async def record_shadow(self, config: Any, result: Any) -> None:
+        """Store one shadow comparison; silently skipped without a history database."""
+        settings: HistorySettings = config.database.history
+        store = self.store(settings)
+        if store is None:
+            return
+        try:
+            await asyncio.to_thread(
+                store.write_shadow, result.as_dict() | {"issued_at": result.issued_at}
+            )
+        except Exception as exc:
+            self._note_error(f"shadow comparison not stored: {exc}")
+
     async def drain(self) -> None:
         """Wait for pending recordings (tests, shutdown)."""
         if self._tasks:

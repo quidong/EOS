@@ -122,6 +122,22 @@ class OptimizationCommonSettings(SettingsBaseModel):
         },
     )
 
+    shadow_algorithms: list[OptimizationAlgorithm] = Field(
+        default_factory=list,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: shadow comparison - after every automatic GENETIC or MILP run, "
+                "each listed algorithm other than the one that planned also optimizes the "
+                "same prepared inputs in the background. Its plan is never published or "
+                "executed; only its objective (the common fitness: costs, comfort and "
+                "switching penalties) is logged and stored, so the algorithms can be "
+                "compared on identical forecasts instead of on different days. GENETIC0 "
+                "is not supported and ignored."
+            ),
+            "examples": [[], ["GENETIC", "MILP"]],
+        },
+    )
+
     milp: MilpCommonSettings = Field(
         default_factory=MilpCommonSettings,
         json_schema_extra={

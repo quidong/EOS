@@ -49,6 +49,23 @@ a fifth of the time; a long GENETIC run after the MILP found practically no furt
 endpoints (see {doc}`history`) report the realised grid costs per day and algorithm. Days differ in weather and
 consumption, so compare over several weeks, then set `algorithm` to the winner and clear the list.
 
+## Shadow comparison
+
+`optimization.shadow_algorithms: ["GENETIC", "MILP"]` removes the weather noise of the A/B comparison: after
+every automatic GENETIC or MILP run, each listed algorithm other than the active one optimizes a copy of the
+*same* prepared inputs in the background. The shadow plan is never published or executed. Both plans are scored
+with the GENETIC fitness (grid costs minus revenues plus heat pump comfort, legionella and switching penalties
+minus the value of the stored heat; MILP polishes with the same evaluator), so the scores are comparable.
+
+- The log shows one `Shadow comparison:` line per run with both objectives and the delta (shadow - active;
+  negative means the shadow algorithm would have planned cheaper).
+- With the history database the results go to the table `eos_shadow`; `/v1/energy-management/history/summary`
+  (MCP `eos_kpis`) reports per algorithm pair the runs, the mean delta and the share of runs the shadow was
+  better (`shadow`).
+- The next energy management run waits until a running comparison has finished, because both share the
+  optimizer state. Keep the combined runtime well below the run interval.
+- Runs requested explicitly (REST with own parameters or a fixed algorithm) are not shadowed.
+
 ## Rolling horizon
 
 EOS re-plans every `ems.interval` seconds with fresh measurements. The fork adds:

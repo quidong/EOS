@@ -16,6 +16,7 @@
 | keys | | `list[str]` | `ro` | `N/A` | The keys of the solution. |
 | milp | `EOS_OPTIMIZATION__MILP` | `MilpCommonSettings` | `rw` | `required` | MILP optimization configuration (RL29 fork). MILP uses the GENETIC settings (slots, horizons, terminal value) and adds these. |
 | self_consumption_interpolator | `EOS_OPTIMIZATION__SELF_CONSUMPTION_INTERPOLATOR` | `<enum 'GridInterpolatorBackend'>` | `rw` | `scipy` | How the inverter's self-consumption probability table is evaluated [scipy | numpy]. 'scipy' (default) uses scipy.interpolate. 'numpy' gives the same values without importing SciPy, which saves about 35 MB RSS after the first optimization run (useful on devices with little RAM); a run takes about 2.5 % longer. |
+| shadow_algorithms | `EOS_OPTIMIZATION__SHADOW_ALGORITHMS` | `list[akkudoktoreos.optimization.optimization.OptimizationAlgorithm]` | `rw` | `required` | RL29 fork: shadow comparison - after every automatic GENETIC or MILP run, each listed algorithm other than the one that planned also optimizes the same prepared inputs in the background. Its plan is never published or executed; only its objective (the common fitness: costs, comfort and switching penalties) is logged and stored, so the algorithms can be compared on identical forecasts instead of on different days. GENETIC0 is not supported and ignored. |
 :::
 <!-- pyml enable line-length -->
 
@@ -56,6 +57,7 @@
                }
            },
            "alternate_algorithms": [],
+           "shadow_algorithms": [],
            "milp": {
                "time_limit_s": 10.0,
                "mip_rel_gap": 0.0001,
@@ -122,6 +124,7 @@
                "horizon": 24
            },
            "alternate_algorithms": [],
+           "shadow_algorithms": [],
            "milp": {
                "time_limit_s": 10.0,
                "mip_rel_gap": 0.0001,
