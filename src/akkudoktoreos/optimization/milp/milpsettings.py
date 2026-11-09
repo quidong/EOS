@@ -48,6 +48,41 @@ class MilpCommonSettings(SettingsBaseModel):
             "examples": [True],
         },
     )
+    joint_modes: bool = Field(
+        default=False,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: plan the heating modes inside the MILP. One binary per gene "
+                "period and mode selects the room target; the controller's heat for that "
+                "target (affine in room and screed temperature, clipped to zero and the "
+                "capacity) is modelled exactly with binaries. The resulting modes are one "
+                "more candidate for the exact simulation and the search, next to the "
+                "projected heat schedule. Needs thermal_model."
+            ),
+            "examples": [False, True],
+        },
+    )
+    joint_time_limit_s: float = Field(
+        default=30.0,
+        gt=0.0,
+        json_schema_extra={
+            "description": "Time limit of the joint mode MILP [s].",
+            "examples": [30.0, 90.0],
+        },
+    )
+    joint_window_hours: int = Field(
+        default=6,
+        ge=1,
+        le=48,
+        json_schema_extra={
+            "description": (
+                "Relax-and-fix window of the joint mode MILP [h]: the modes of one window "
+                "are decided with binaries while the later hours are relaxed, then fixed; "
+                "the time limit is shared between the windows."
+            ),
+            "examples": [6],
+        },
+    )
     seeds: int = Field(
         default=3,
         ge=1,

@@ -43,6 +43,22 @@ and the first `shared_slots` battery decisions are common, afterwards each scena
 battery, heat pump and washer the MILP reached the GENETIC result (300 individuals × 400 generations) in about
 a fifth of the time; a long GENETIC run after the MILP found practically no further improvement.
 
+## Joint mode model (experimental)
+
+`optimization.milp.joint_modes: true` plans the heating modes inside the MILP instead of projecting a free heat
+schedule onto modes afterwards. One binary per gene period and mode selects the room target; the controller's
+heat for that target is affine in room and screed temperature (feed-forward of the steady demand plus the
+screed correction, the comfort minimum as floor, FORCED at full capacity) and is clipped to zero and to the
+capacity left by a hot water charge with two binaries per slot. Battery, grid, appliances and hot water are
+optimised in the same model. Hard state bounds keep the big-M constants small; the coupling of the heat to the
+controller is soft (an expensive deviation), so every mode choice is feasible.
+
+The model is solved by relax-and-fix over windows of `joint_window_hours` (default 6 h) within
+`joint_time_limit_s` (default 30 s). Its modes are one more candidate next to the projected heat schedule and
+the heuristics; the exact simulation scores all of them. On the synthetic test day it clearly beats the status
+quo but not (yet) the projection, also with 120 s; compare it on real inputs with the snapshot replay before
+enabling it.
+
 ## A/B operation
 
 `optimization.alternate_algorithms: ["GENETIC", "MILP"]` switches the algorithm every local day. The history

@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2611092089358984"
+    "version": "v0.3.0.dev2611092120241826"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -17940,6 +17940,38 @@
             "default": true,
             "examples": [
               true
+            ]
+          },
+          "joint_modes": {
+            "type": "boolean",
+            "title": "Joint Modes",
+            "description": "RL29 fork: plan the heating modes inside the MILP. One binary per gene period and mode selects the room target; the controller's heat for that target (affine in room and screed temperature, clipped to zero and the capacity) is modelled exactly with binaries. The resulting modes are one more candidate for the exact simulation and the search, next to the projected heat schedule. Needs thermal_model.",
+            "default": false,
+            "examples": [
+              false,
+              true
+            ]
+          },
+          "joint_time_limit_s": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Joint Time Limit S",
+            "description": "Time limit of the joint mode MILP [s].",
+            "default": 30.0,
+            "examples": [
+              30.0,
+              90.0
+            ]
+          },
+          "joint_window_hours": {
+            "type": "integer",
+            "maximum": 48.0,
+            "minimum": 1.0,
+            "title": "Joint Window Hours",
+            "description": "Relax-and-fix window of the joint mode MILP [h]: the modes of one window are decided with binaries while the later hours are relaxed, then fixed; the time limit is shared between the windows.",
+            "default": 6,
+            "examples": [
+              6
             ]
           },
           "seeds": {

@@ -45,7 +45,51 @@ from akkudoktoreos.optimization.milp.dispatch import (
     solve_dispatch,
 )
 from akkudoktoreos.optimization.milp.milpsettings import MilpCommonSettings
-from akkudoktoreos.optimization.milp.thermal import project_modes, thermal_block
+from akkudoktoreos.optimization.milp.thermal import project_dhw, project_modes, thermal_block
+
+
+JOINT_MIP_GAP = 0.005
+"""Relative optimality gap of the joint mode MILP."""
+
+
+def solve_joint_modes(
+    data: DispatchInput, window_periods: int, time_limit_s: float
+) -> tuple[Optional[DispatchResult], int]:
+    """Relax-and-fix over the gene periods of the joint mode model.
+
+    Window by window, the modes (and the clipping binaries) of the window are integral
+    while the later periods are relaxed; the window's modes are then fixed. The time
+    limit is shared between the windows. Returns the last solve (all modes fixed) and
+    the number of solves.
+    """
+    blocks = [block for block in data.thermal if block.mode_control is not None]
+    if not blocks:
+        return None, 0
+    n_periods = max(block.mode_control.n_periods for block in blocks)  # type: ignore[union-attr]
+    starts = list(range(0, n_periods, max(1, window_periods)))
+    per_window = max(1.0, time_limit_s / len(starts))
+    fixed: list[dict[int, int]] = [{} for _ in blocks]
+    result: Optional[DispatchResult] = None
+    solves = 0
+    for start in starts:
+        window = set(range(start, min(n_periods, start + window_periods)))
+        for block, fixed_modes in zip(blocks, fixed):
+            mc = block.mode_control
+            if mc is None:  # pragma: no cover - filtered above
+                continue
+            mc.fixed_periods = dict(fixed_modes)
+            mc.integer_periods = window
+        data.time_limit_s = per_window
+        result = solve_dispatch(data)
+        solves += 1
+        if not result.success or not result.thermal:
+            return result, solves
+        for fixed_modes, traj in zip(fixed, result.thermal):
+            genes = traj.heating_genes or []
+            for period in window:
+                if period < len(genes):
+                    fixed_modes[period] = genes[period]
+    return result, solves
 
 
 def terminal_segments(
@@ -351,6 +395,61 @@ class MilpOptimization(GeneticOptimization):
             logger.warning("MILP: heat pump model failed ({}); mode search only.", exc)
             return []
 
+    def _joint_mode_candidates(self) -> list[list[int]]:
+        """Heating modes planned inside the MILP (``milp.joint_modes``, RL29 fork).
+
+        Mode binaries per gene period select the controller's room target; the space
+        heat follows exactly from the state (``thermal.ModeControl``). Battery, grid,
+        appliances and hot water are optimised in the same solve; the hot water options
+        are then projected for the chosen modes. The genes are one more candidate:
+        the exact simulation scores them like every other start.
+        """
+        layout = self._hp_layout()
+        self.joint_summary: dict[str, Any] = {}
+        if not layout or not self._milp.thermal_model or not self._milp.joint_modes:
+            return []
+        started = time.monotonic()
+        try:
+            blocks = [thermal_block(plan, joint_modes=True) for plan in layout.plans]
+            if any(block is None for block in blocks):
+                return []
+            data = self._dispatch_input(None)
+            data.thermal = [block for block in blocks if block is not None]
+            # The exact simulation decides between the candidates; a near-optimal
+            # mode schedule is enough and much faster to prove.
+            data.mip_rel_gap = max(self._milp.mip_rel_gap, JOINT_MIP_GAP)
+            window_slots = self._milp.joint_window_hours * max(1, int(self.slots_per_hour))
+            window_periods = max(1, round(window_slots / max(1, layout.plans[0].slots_per_gene)))
+            result, solves = solve_joint_modes(data, window_periods, self._milp.joint_time_limit_s)
+            self._milp_solves += solves
+            if result is None or not result.success or not result.thermal:
+                status = result.status if result is not None else "no solution"
+                logger.warning("MILP: joint mode model not solved ({}).", status)
+                self.joint_summary = {"status": status}
+                return []
+            genes: list[int] = []
+            for plan, traj in zip(layout.plans, result.thermal):
+                if traj.heating_genes is None:  # pragma: no cover - set with ModeControl
+                    return []
+                genes.extend(project_dhw(plan, traj, traj.heating_genes))
+            seconds = time.monotonic() - started
+            self.joint_summary = {
+                "seconds": round(seconds, 2),
+                "status": result.status,
+                "objective": round(result.objective, 4) if result.objective is not None else None,
+            }
+            logger.info(
+                "MILP: joint mode model solved in {:.1f} s (objective {:.3f}, {}).",
+                seconds,
+                result.objective if result.objective is not None else float("nan"),
+                result.status,
+            )
+            self._joint_keys.add(tuple(genes))
+            return [genes]
+        except Exception as exc:  # never lose the run because of the joint model
+            logger.warning("MILP: joint mode model failed ({}).", exc)
+            return []
+
     def _coordinate_search(
         self, best: list[int], best_score: float, deadline: float
     ) -> tuple[list[int], float]:
@@ -407,10 +506,11 @@ class MilpOptimization(GeneticOptimization):
 
         scored: list[tuple[float, list[int], DispatchResult]] = []
         self._thermal_keys = set()
+        self._joint_keys: set[tuple[int, ...]] = set()
         self._thermal_start = False
         if self._hp_layout():
             candidates = self._hp_candidates(parameters)
-            for genes in self._thermal_candidates():
+            for genes in self._thermal_candidates() + self._joint_mode_candidates():
                 if genes not in candidates:
                     candidates.append(genes)
             for genes in candidates:
@@ -424,11 +524,18 @@ class MilpOptimization(GeneticOptimization):
             status_quo = self._score(self._hp_layout().default_genes())[0]
             start_from_thermal = tuple(scored[0][1]) in self._thermal_keys
             self._thermal_start = start_from_thermal
+            start_from_joint = tuple(scored[0][1]) in self._joint_keys
+            joint_scores = [s for s, g, _ in scored if tuple(g) in self._joint_keys]
             logger.info(
-                "MILP: best heat pump start {} ({:.3f}; status quo {:.3f}).",
-                "from the heat pump model" if start_from_thermal else "from the heuristics",
+                "MILP: best heat pump start {} ({:.3f}; status quo {:.3f}{}).",
+                "from the joint mode model"
+                if start_from_joint
+                else "from the heat pump model"
+                if start_from_thermal
+                else "from the heuristics",
                 scored[0][0],
                 status_quo,
+                f"; joint mode model {joint_scores[0]:.3f}" if joint_scores else "",
             )
             # Local search from the best start of each family (heat pump model and
             # heuristics): they often end in different local optima. Time left over by
@@ -487,6 +594,7 @@ class MilpOptimization(GeneticOptimization):
         self.milp_summary = {
             "thermal": getattr(self, "thermal_summary", {}),
             "thermal_best_start": bool(getattr(self, "_thermal_start", False)),
+            "joint": getattr(self, "joint_summary", {}),
             "solves": self._milp_solves,
             "seconds": round(time.monotonic() - started, 2),
             "best_cost": round(best_score, 4),
