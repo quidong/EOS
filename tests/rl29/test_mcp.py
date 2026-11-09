@@ -274,6 +274,39 @@ def test_default_allow_list_covers_the_heating_zones():
     assert not write_allowed("devices/heat_pumps/wbb12/building", DEFAULT_WRITE_PATHS)
 
 
+def test_default_allow_list_covers_new_forecast_and_battery_settings():
+    """Snow model, PV calibration, adaptive PV and periodic full charge are tunable;
+    the plant geometry, the provider choice and the measurement wiring are not."""
+    from akkudoktoreos.rl29mcp.security import DEFAULT_WRITE_PATHS
+
+    allowed = [
+        "pvforecast/akkudoktor/snow_enabled",
+        "pvforecast/akkudoktor/snow_lookback_days",
+        "pvforecast/akkudoktor/snow_feedback_gain",
+        "pvforecast/akkudoktor/calibration_days",
+        "pvforecast/akkudoktor/calibration_outage_threshold",
+        "pvforecast/adaptive/learning_days",
+        "pvforecast/adaptive/correction_mode",
+        "devices/batteries/storage/full_charge_interval_days",
+        "devices/batteries/storage/full_charge_allow_grid",
+        "optimization/shadow_algorithms",
+        "optimization/milp/time_limit_s",
+    ]
+    for path in allowed:
+        assert write_allowed(path, DEFAULT_WRITE_PATHS), path
+    refused = [
+        "pvforecast/akkudoktor",  # the whole section would include weather models etc.
+        "pvforecast/akkudoktor/backend",
+        "pvforecast/akkudoktor/weather_models",
+        "pvforecast/planes",
+        "pvforecast/provider",
+        "devices/batteries/storage/capacity_wh",
+        "measurement/pv_production_emr_keys",
+    ]
+    for path in refused:
+        assert not write_allowed(path, DEFAULT_WRITE_PATHS), path
+
+
 @pytest.mark.asyncio
 async def test_logs_are_compact_masked_and_filtered():
     tools, fake = make_tools(allow_write=False)

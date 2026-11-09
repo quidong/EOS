@@ -58,9 +58,12 @@ Guards:
 - **Host header check** (`EOS_MCP_ALLOWED_HOSTS`) against DNS rebinding from browsers.
 - **Read-only by default**; writing needs `EOS_MCP_ALLOW_WRITE=true`.
 - **Allow-list** `EOS_MCP_WRITE_PATHS` (default: `ems`, `optimization`, `load/provider`, `load/loadml`,
-  `pvforecast/ensemble`, `elecprice/ml`, `database/history/{enabled,actuals,accuracy,min_store_interval_minutes}`,
-  `devices/heat_pumps/*/{comfort,optimization,dhw,away,zones,zone_setback}`, `devices/batteries/*/{min,max}_soc_percentage`,
-  `logging/file_level`).
+  `pvforecast/ensemble`, `pvforecast/adaptive`, the PV calibration and snow model leaves
+  `pvforecast/akkudoktor/{calibration_*,snow_*}`, `elecprice/ml`,
+  `database/history/{enabled,actuals,accuracy,min_store_interval_minutes}`,
+  `devices/heat_pumps/*/{comfort,optimization,dhw,away,zones,zone_setback}`,
+  `devices/batteries/*/{min,max}_soc_percentage`, `devices/batteries/*/full_charge_*`, `logging/file_level`).
+  The PV plant geometry, the forecast provider, the weather models and the measurement wiring stay read-only.
   Never: `adapter`, `server`, `general`, `logging` (except the single leaf `logging/file_level`), `cache`,
   `measurement` and anything that is a secret.
 - **Limits**: `EOS_MCP_MAX_WRITES_PER_MINUTE` (10), values ≤ 64 KB, paths `a/b/c` only.
