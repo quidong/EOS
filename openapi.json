@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2611091995569522"
+    "version": "v0.3.0.dev2611092089358984"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -18294,6 +18294,16 @@
               ]
             ]
           },
+          "snapshots": {
+            "$ref": "#/components/schemas/OptimizationSnapshotSettings",
+            "description": "RL29 fork: input snapshots of automatic runs for replays.",
+            "examples": [
+              {
+                "enabled": true,
+                "retention_days": 30
+              }
+            ]
+          },
           "milp": {
             "$ref": "#/components/schemas/MilpCommonSettings",
             "description": "MILP optimization configuration (RL29 fork). MILP uses the GENETIC settings (slots, horizons, terminal value) and adds these.",
@@ -18387,6 +18397,16 @@
               ]
             ]
           },
+          "snapshots": {
+            "$ref": "#/components/schemas/OptimizationSnapshotSettings",
+            "description": "RL29 fork: input snapshots of automatic runs for replays.",
+            "examples": [
+              {
+                "enabled": true,
+                "retention_days": 30
+              }
+            ]
+          },
           "milp": {
             "$ref": "#/components/schemas/MilpCommonSettings",
             "description": "MILP optimization configuration (RL29 fork). MILP uses the GENETIC settings (slots, horizons, terminal value) and adds these.",
@@ -18436,6 +18456,34 @@
         ],
         "title": "OptimizationCommonSettings",
         "description": "General Optimization Configuration."
+      },
+      "OptimizationSnapshotSettings": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Store the fully prepared inputs of every automatic GENETIC or MILP run (gzip JSON below <data_folder>/rl29/snapshots, about 20-40 KB per run) together with the configuration and the score of the executed plan. scripts/rl29/replay_snapshots.py optimizes them again with other algorithms or settings.",
+            "default": false,
+            "examples": [
+              false,
+              true
+            ]
+          },
+          "retention_days": {
+            "type": "integer",
+            "maximum": 365.0,
+            "minimum": 1.0,
+            "title": "Retention Days",
+            "description": "Snapshots older than this many days are deleted.",
+            "default": 30,
+            "examples": [
+              30
+            ]
+          }
+        },
+        "type": "object",
+        "title": "OptimizationSnapshotSettings",
+        "description": "Input snapshots of automatic runs for later replays (RL29 fork)."
       },
       "OptimizationSolution": {
         "properties": {

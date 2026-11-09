@@ -72,6 +72,33 @@ class GridConnectionSettings(SettingsBaseModel):
     )
 
 
+class OptimizationSnapshotSettings(SettingsBaseModel):
+    """Input snapshots of automatic runs for later replays (RL29 fork)."""
+
+    enabled: bool = Field(
+        default=False,
+        json_schema_extra={
+            "description": (
+                "Store the fully prepared inputs of every automatic GENETIC or MILP run "
+                "(gzip JSON below <data_folder>/rl29/snapshots, about 20-40 KB per run) "
+                "together with the configuration and the score of the executed plan. "
+                "scripts/rl29/replay_snapshots.py optimizes them again with other "
+                "algorithms or settings."
+            ),
+            "examples": [False, True],
+        },
+    )
+    retention_days: int = Field(
+        default=30,
+        ge=1,
+        le=365,
+        json_schema_extra={
+            "description": "Snapshots older than this many days are deleted.",
+            "examples": [30],
+        },
+    )
+
+
 class OptimizationCommonSettings(SettingsBaseModel):
     """General Optimization Configuration."""
 
@@ -135,6 +162,14 @@ class OptimizationCommonSettings(SettingsBaseModel):
                 "is not supported and ignored."
             ),
             "examples": [[], ["GENETIC", "MILP"]],
+        },
+    )
+
+    snapshots: OptimizationSnapshotSettings = Field(
+        default_factory=OptimizationSnapshotSettings,
+        json_schema_extra={
+            "description": "RL29 fork: input snapshots of automatic runs for replays.",
+            "examples": [{"enabled": True, "retention_days": 30}],
         },
     )
 

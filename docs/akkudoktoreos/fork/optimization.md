@@ -66,6 +66,27 @@ minus the value of the stored heat; MILP polishes with the same evaluator), so t
   optimizer state. Keep the combined runtime well below the run interval.
 - Runs requested explicitly (REST with own parameters or a fixed algorithm) are not shadowed.
 
+## Input snapshots and replay
+
+`optimization.snapshots.enabled: true` stores the fully prepared inputs of every automatic GENETIC or MILP run
+(forecasts, prices, device and heat pump states, warm start), the configuration at that moment (secrets masked)
+and the score of the executed plan as gzip JSON below `<data_folder>/rl29/snapshots/<day>/`
+(`retention_days`, default 30).
+
+`scripts/rl29/replay_snapshots.py` optimizes the snapshots again with other algorithms or settings and compares
+the scores (GENETIC fitness, lower is better) with the executed plans:
+
+```bash
+uv run python scripts/rl29/replay_snapshots.py --dir /data/rl29/snapshots --days 14 --every 4 \
+    --variant GENETIC \
+    --variant "MILP:optimization/milp/time_limit_s=60,optimization/milp/hp_search_seconds=120" \
+    --csv replay.csv
+```
+
+Replaying the executed algorithm with the stored seed reproduces the recorded score, so every difference comes
+from the algorithm or the settings, not from the inputs. The script runs CPU bound; on the EOS host run it at
+quiet times or copy the snapshot folder to another machine.
+
 ## Rolling horizon
 
 EOS re-plans every `ems.interval` seconds with fresh measurements. The fork adds:

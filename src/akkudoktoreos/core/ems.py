@@ -134,6 +134,53 @@ def _genetic_family_budget(
     return config.optimization.genetic.generations, None
 
 
+_snapshot_tasks: set[Any] = set()
+"""Pending snapshot writes (kept referenced until done)."""
+
+
+def _snapshot_before_run(
+    config: Any,
+    parameters: GeneticOptimizationParameters,
+    algorithm: OptimizationAlgorithm,
+    seed: Optional[int],
+) -> Optional[dict[str, Any]]:
+    """Snapshot of the prepared inputs (RL29 fork); None when it cannot be built."""
+    try:
+        from akkudoktoreos.core.snapshot import build_snapshot, config_payload
+
+        start = EnergyManagement._start_datetime
+        return build_snapshot(
+            issued_at=to_datetime().in_timezone("UTC"),
+            algorithm=str(algorithm),
+            start_hour=start.hour if start is not None else 0,
+            seed=seed,
+            parameters=parameters.model_dump(mode="json"),
+            config=config_payload(config),
+            start_datetime=start.isoformat() if start is not None else None,
+            start_timezone=start.timezone_name if start is not None else None,
+        )
+    except Exception as exc:
+        logger.warning("Optimization snapshot skipped: {}", exc)
+        return None
+
+
+def _schedule_snapshot(
+    config: Any, snapshot: dict[str, Any], solution: Any, duration_s: float
+) -> None:
+    """Add the executed plan's score and write the snapshot in the background."""
+    try:
+        import asyncio
+
+        from akkudoktoreos.core.snapshot import record_result, store_snapshot
+
+        record_result(snapshot, solution, duration_s)
+        task = asyncio.get_running_loop().create_task(store_snapshot(config, snapshot))
+        _snapshot_tasks.add(task)
+        task.add_done_callback(_snapshot_tasks.discard)
+    except Exception as exc:
+        logger.warning("Optimization snapshot not scheduled: {}", exc)
+
+
 def _automatic_algorithm(config: Any) -> OptimizationAlgorithm:
     """Configured algorithm, or today's one in A/B operation (RL29 fork)."""
     if not getattr(config.optimization, "alternate_algorithms", None):
@@ -494,6 +541,7 @@ class EnergyManagement(
             automatic_algorithm = algorithm is None and genetic_parameters is None
             shadow_algorithms: list[OptimizationAlgorithm] = []
             shadow_parameters: Optional[GeneticOptimizationParameters] = None
+            snapshot: Optional[dict[str, Any]] = None
             if algorithm is None:
                 algorithm = _automatic_algorithm(self.config)
             genetic_like = algorithm in (OptimizationAlgorithm.GENETIC, OptimizationAlgorithm.MILP)
@@ -581,6 +629,15 @@ class EnergyManagement(
                     genetic_generations = self.config.optimization.genetic.generations
                 if genetic_seed is None:
                     genetic_seed = self.config.optimization.genetic.seed
+
+                # RL29 fork: input snapshot for later replays (before the optimizer runs).
+                if automatic_algorithm and self.config.optimization.snapshots.enabled:
+                    snapshot = _snapshot_before_run(
+                        self.config,
+                        cast(GeneticOptimizationParameters, genetic_parameters),
+                        algorithm,
+                        genetic_seed,
+                    )
 
                 # RL29 fork: shadow comparison works on an untouched copy of the inputs.
                 from akkudoktoreos.core.shadow import shadow_algorithms_for
@@ -751,6 +808,18 @@ class EnergyManagement(
                     get_measurement(),
                     EnergyManagement._optimization_solution,
                     str(algorithm),
+                    optimization_duration.total_seconds(),
+                )
+
+            # RL29 fork: store the input snapshot with the executed plan's score.
+            if (
+                algorithm in (OptimizationAlgorithm.GENETIC, OptimizationAlgorithm.MILP)
+                and snapshot is not None
+            ):
+                _schedule_snapshot(
+                    self.config,
+                    snapshot,
+                    EnergyManagement._genetic_solution,
                     optimization_duration.total_seconds(),
                 )
 

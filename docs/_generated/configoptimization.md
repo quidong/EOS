@@ -17,6 +17,7 @@
 | milp | `EOS_OPTIMIZATION__MILP` | `MilpCommonSettings` | `rw` | `required` | MILP optimization configuration (RL29 fork). MILP uses the GENETIC settings (slots, horizons, terminal value) and adds these. |
 | self_consumption_interpolator | `EOS_OPTIMIZATION__SELF_CONSUMPTION_INTERPOLATOR` | `<enum 'GridInterpolatorBackend'>` | `rw` | `scipy` | How the inverter's self-consumption probability table is evaluated [scipy | numpy]. 'scipy' (default) uses scipy.interpolate. 'numpy' gives the same values without importing SciPy, which saves about 35 MB RSS after the first optimization run (useful on devices with little RAM); a run takes about 2.5 % longer. |
 | shadow_algorithms | `EOS_OPTIMIZATION__SHADOW_ALGORITHMS` | `list[akkudoktoreos.optimization.optimization.OptimizationAlgorithm]` | `rw` | `required` | RL29 fork: shadow comparison - after every automatic GENETIC or MILP run, each listed algorithm other than the one that planned also optimizes the same prepared inputs in the background. Its plan is never published or executed; only its objective (the common fitness: costs, comfort and switching penalties) is logged and stored, so the algorithms can be compared on identical forecasts instead of on different days. GENETIC0 is not supported and ignored. |
+| snapshots | `EOS_OPTIMIZATION__SNAPSHOTS` | `OptimizationSnapshotSettings` | `rw` | `required` | RL29 fork: input snapshots of automatic runs for replays. |
 :::
 <!-- pyml enable line-length -->
 
@@ -58,6 +59,10 @@
            },
            "alternate_algorithms": [],
            "shadow_algorithms": [],
+           "snapshots": {
+               "enabled": true,
+               "retention_days": 30
+           },
            "milp": {
                "time_limit_s": 10.0,
                "mip_rel_gap": 0.0001,
@@ -125,6 +130,10 @@
            },
            "alternate_algorithms": [],
            "shadow_algorithms": [],
+           "snapshots": {
+               "enabled": true,
+               "retention_days": 30
+           },
            "milp": {
                "time_limit_s": 10.0,
                "mip_rel_gap": 0.0001,
@@ -152,6 +161,37 @@
                "MILP"
            ],
            "keys": []
+       }
+   }
+```
+<!-- pyml enable line-length -->
+
+### Input snapshots of automatic runs for later replays (RL29 fork)
+
+<!-- pyml disable line-length -->
+:::{table} optimization::snapshots
+:widths: 10 10 5 5 30
+:align: left
+
+| Name | Type | Read-Only | Default | Description |
+| ---- | ---- | --------- | ------- | ----------- |
+| enabled | `bool` | `rw` | `False` | Store the fully prepared inputs of every automatic GENETIC or MILP run (gzip JSON below <data_folder>/rl29/snapshots, about 20-40 KB per run) together with the configuration and the score of the executed plan. scripts/rl29/replay_snapshots.py optimizes them again with other algorithms or settings. |
+| retention_days | `int` | `rw` | `30` | Snapshots older than this many days are deleted. |
+:::
+<!-- pyml enable line-length -->
+
+<!-- pyml disable no-emphasis-as-heading -->
+**Example Input/Output**
+<!-- pyml enable no-emphasis-as-heading -->
+
+<!-- pyml disable line-length -->
+```json
+   {
+       "optimization": {
+           "snapshots": {
+               "enabled": false,
+               "retention_days": 30
+           }
        }
    }
 ```
