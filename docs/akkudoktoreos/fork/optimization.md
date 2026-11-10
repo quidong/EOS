@@ -154,4 +154,9 @@ prices it relies on the price forecast (see {doc}`forecasts`).
   `max_hours` 48) with `<id>-warning-start-ts` / `<id>-warning-end-ts` (Unix times, 0 = none): the battery
   is kept at or above the reserve during the warning. The largest shortfall costs
   `genetic.penalties.battery_reserve_miss` (default 10) per percentage point. GENETIC only.
+- **Plausibility check:** `scripts/rl29/check_battery_plan.py --url http://<eos>:8503 --device <id>`
+  checks the battery part of the current plan (exit 0 = plausible, 1 = warning, 2 = implausible): one
+  operation mode per slot, state of charge within the limits, grid charging only when the price after
+  round-trip losses and storage cost is below a later price, no battery export, no blocked PV charging
+  while feeding in, and the first planned state of charge against the measured `<id>-soc-factor`.
 
