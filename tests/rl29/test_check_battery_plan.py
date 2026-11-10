@@ -193,3 +193,17 @@ def test_cli_reads_files(tmp_path, capsys):
     )
     assert code == 0
     assert "Status: PLAUSIBEL" in capsys.readouterr().out
+
+
+def test_grid_charge_while_disabled_fails():
+    config = json.loads(json.dumps(CONFIG))
+    config["devices"]["inverters"] = {
+        "fronius": {"battery_id": "byd", "max_ac_charge_power_w": 0.0}
+    }
+    modes = ["SELF_CONSUMPTION"] * 4 + ["FORCED_CHARGE"] * 4
+    sol = solution(modes, factors=[0.0] * 4 + [0.5] * 4, prices=[0.75] * 4 + [0.46] * 4)
+    report = script.check(sol, config, "byd", NOW)
+    assert report.exit_code == 2
+    assert "obwohl Laden aus dem Netz gesperrt ist" in report.failures[0]
+    config["devices"]["inverters"]["fronius"]["max_ac_charge_power_w"] = None
+    assert script.check(sol, config, "byd", NOW).exit_code != 2

@@ -14,6 +14,8 @@ Rules (limits from the battery configuration):
 - FAIL  planned state of charge below ``min_soc_percentage`` - 1 or above
   max(``max_soc_percentage``, ``full_charge_soc_percentage`` when a periodic
   full charge is configured) + 1 percentage points
+- FAIL  grid charging (GRID_SUPPORT_IMPORT / FORCED_CHARGE) although the inverter
+  of the battery has ``max_ac_charge_power_w`` = 0 (grid charging disabled)
 - WARN  grid charging (GRID_SUPPORT_IMPORT / FORCED_CHARGE) in a slot whose
   price, after the round-trip losses and the storage cost, is not below the
   highest price of the following ``--arbitrage-h`` hours (default 24): the
@@ -139,6 +141,17 @@ def battery_config(config: dict[str, Any], device: str) -> Optional[dict[str, An
     return batteries.get(device)
 
 
+def grid_charge_disabled(config: dict[str, Any], device: str) -> bool:
+    """True if the inverter of the battery may not charge from the grid."""
+    inverters = config.get("devices", {}).get("inverters") or {}
+    items = inverters if isinstance(inverters, list) else list(inverters.values())
+    for inverter in items:
+        if inverter.get("battery_id") == device:
+            limit = inverter.get("max_ac_charge_power_w")
+            return limit is not None and _float(limit, 1.0) <= 0.0
+    return False
+
+
 def soc_limits(battery: dict[str, Any]) -> tuple[float, float]:
     """(minimum, maximum) planned state of charge in percent."""
     low = _float(battery.get("min_soc_percentage"), 0.0)
@@ -241,6 +254,7 @@ def check(
     grid_wh = 0.0
     warned_hours: set[str] = set()
     max_charge_w = _float(battery.get("max_charge_power_w"), 0.0)
+    no_grid_charge = grid_charge_disabled(config, device)
     for i, (t, mode) in enumerate(zip(upcoming, modes)):
         stamp = datetime.fromisoformat(t).strftime("%H:%M")
         hour = datetime.fromisoformat(t).strftime("%H:00")
@@ -248,6 +262,12 @@ def check(
         if mode in GRID_CHARGE:
             factor = _float(values.get(f"{device}_{mode.lower()}_op_factor"))
             grid_wh += factor * max_charge_w * slot_h
+            if no_grid_charge and factor > 0.0 and hour not in warned_hours:
+                warned_hours.add(hour)
+                report.failures.append(
+                    f"{stamp} Netzladen geplant, obwohl Laden aus dem Netz gesperrt ist "
+                    "(max_ac_charge_power_w = 0)"
+                )
             price = prices[i]
             later = [p for p in prices[i + 1 : i + 1 + window] if p == p]
             if price == price and later:
