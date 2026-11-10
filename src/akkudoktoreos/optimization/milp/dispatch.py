@@ -26,7 +26,7 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass, field, replace
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
 import numpy as np
 
@@ -109,6 +109,12 @@ class DispatchResult:
     appliance_wh: list[float]
     solve_seconds: float
     thermal: list[ThermalTrajectory] = field(default_factory=list)
+    optimal: bool = False
+    """The solver proved the optimum (within ``mip_rel_gap``); False when it stopped at
+    the time limit with a feasible solution."""
+    mip_gap: Optional[float] = None
+    """Relative gap between the solution and the solver's bound when it stopped (0 for a
+    proven optimum, None for a pure LP or when the solver does not report it)."""
 
     def grid_cost(self, price: Sequence[float], feed_in: Sequence[float]) -> float:
         return float(
@@ -143,9 +149,7 @@ class _Builder:
         self.row_lb.append(lb)
         self.row_ub.append(ub)
 
-    def solve(
-        self, time_limit: float, gap: float
-    ) -> tuple[str, bool, Optional[np.ndarray], Optional[float]]:
+    def solve(self, time_limit: float, gap: float) -> "_SolveOutcome":
         from scipy.optimize import Bounds, LinearConstraint, milp
         from scipy.sparse import csr_array
 
@@ -169,13 +173,50 @@ class _Builder:
             constraints=constraints,
             options={"time_limit": float(time_limit), "mip_rel_gap": float(gap), "disp": False},
         )
-        ok = result.x is not None and result.status in (0, 1)  # optimal / limit with solution
-        return (
-            str(result.message),
-            ok,
-            result.x,
-            (float(result.fun) if result.fun is not None else None),
-        )
+        return _outcome(result)
+
+
+@dataclass
+class _SolveOutcome:
+    status: str
+    ok: bool
+    """A solution is available (proven optimal or stopped at a limit)."""
+    solution: Optional[np.ndarray]
+    objective: Optional[float]
+    optimal: bool
+    mip_gap: Optional[float]
+
+
+def _outcome(result: Any) -> _SolveOutcome:
+    """Translate a ``scipy.optimize.milp`` result (status 0 optimal, 1 limit)."""
+    ok = result.x is not None and result.status in (0, 1)
+    optimal = ok and result.status == 0
+    raw_gap = getattr(result, "mip_gap", None)
+    mip_gap: Optional[float]
+    if optimal:
+        # HiGHS reports the gap it stopped at (<= mip_rel_gap); proven is proven.
+        mip_gap = float(raw_gap) if raw_gap is not None and math.isfinite(raw_gap) else 0.0
+    elif raw_gap is not None and math.isfinite(float(raw_gap)):
+        mip_gap = float(raw_gap)
+    else:
+        mip_gap = None
+    return _SolveOutcome(
+        status=str(result.message),
+        ok=ok,
+        solution=result.x if ok else None,
+        objective=(float(result.fun) if ok and result.fun is not None else None),
+        optimal=optimal,
+        mip_gap=mip_gap,
+    )
+
+
+def describe_optimality(optimal: bool, mip_gap: Optional[float]) -> str:
+    """Short log text: ``optimal`` or ``NOT optimal (gap 3.2 %)``."""
+    if optimal:
+        return "optimal"
+    if mip_gap is None:
+        return "NOT optimal (gap unknown)"
+    return f"NOT optimal (gap {mip_gap * 100:.1f} %)"
 
 
 @dataclass
@@ -350,12 +391,13 @@ def solve_dispatch(data: DispatchInput) -> DispatchResult:
         first.soc,
     )
 
-    status, ok, solution, objective = b.solve(data.time_limit_s, data.mip_rel_gap)
+    outcome = b.solve(data.time_limit_s, data.mip_rel_gap)
+    status, objective = outcome.status, outcome.objective
     elapsed = time.perf_counter() - started
-    if not ok or solution is None:
+    if not outcome.ok or outcome.solution is None:
         return DispatchResult(status, False, None, [], [], [], [], [], [], [], [], elapsed)
 
-    sol: np.ndarray = solution
+    sol: np.ndarray = outcome.solution
 
     def values(ids: Sequence[Optional[int]]) -> list[float]:
         return [float(sol[i]) if i is not None else 0.0 for i in ids]
@@ -381,6 +423,8 @@ def solve_dispatch(data: DispatchInput) -> DispatchResult:
         appliance_wh=appliance_wh,
         solve_seconds=elapsed,
         thermal=[trajectory(sol, tv) for tv in thermal_vars],
+        optimal=outcome.optimal,
+        mip_gap=outcome.mip_gap,
     )
 
 

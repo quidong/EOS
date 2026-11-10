@@ -59,6 +59,26 @@ the heuristics; the exact simulation scores all of them. On the synthetic test d
 quo but not (yet) the projection, also with 120 s; compare it on real inputs with the snapshot replay before
 enabling it.
 
+## Optimality and convergence logs
+
+The logs show whether more computing time would pay:
+
+- `MILP: heat pump model solved in … (…, optimal)` or `(…, NOT optimal (gap 3.2 %))`: the heat pump model
+  proved its optimum, or stopped at `time_limit_s` with the given relative gap between its solution and the
+  solver's bound.
+- `MILP: joint mode model solved in … (objective …, 4 windows optimal 2/4, max gap 1.4 %; last: …)`: the
+  relax-and-fix windows that proved their optimum and the largest gap of the others. Even with all windows
+  optimal the result is a heuristic (later windows are relaxed while one window is solved).
+- `MILP: … dispatch solves in … (dispatch …, optimal), … seeds; schedule dispatch solves all 37 optimal.`:
+  the dispatch of the best candidate and of all scored heat pump schedules.
+- `Genetic convergence: fitness 12.8 -> 11.6 in 400 generations, 23 improvements, last at generation 351
+  (88%); last quarter improved 0.05 (4% of the gain); best at 25/50/75 %: …; 2 soft restarts.`: how the best
+  fitness developed. A small share of the gain in the last quarter means the search had settled; a large share
+  means more generations would likely still improve the plan.
+
+`milp_summary` (`thermal`, `joint.windows`, `best_optimal`, `dispatch`) and the genetic
+`adaptive_evolution.convergence` metrics carry the same figures.
+
 ## A/B operation
 
 `optimization.alternate_algorithms: ["GENETIC", "MILP"]` switches the algorithm every local day. The history

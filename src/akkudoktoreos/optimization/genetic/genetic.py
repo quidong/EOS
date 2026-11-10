@@ -1011,6 +1011,38 @@ class GeneticSimulation(PydanticBaseModel):
         return result
 
 
+def genetic_convergence(
+    best_by_generation: list[float], improvements: int, last_improvement_generation: int
+) -> dict[str, Any]:
+    """How the best fitness developed over the generations (RL29 fork).
+
+    ``best_by_generation[g]`` is the best fitness after generation ``g`` (index 0 = the
+    initial population; lower is better). The share of the gain made in the last quarter
+    of the generations tells whether more generations would likely pay: close to 0 %
+    means the search had settled, a large share means it was still improving.
+    """
+    ngen = len(best_by_generation) - 1
+    initial = best_by_generation[0]
+    final = best_by_generation[-1]
+    gain = initial - final
+
+    def at(fraction: float) -> float:
+        return best_by_generation[min(ngen, max(0, round(ngen * fraction)))]
+
+    last_quarter_gain = at(0.75) - final
+    return {
+        "generations": ngen,
+        "initial_fitness": initial,
+        "final_fitness": final,
+        "improvements": improvements,
+        "last_improvement_generation": last_improvement_generation,
+        "last_improvement_share": (last_improvement_generation / ngen if ngen else 0.0),
+        "last_quarter_gain": last_quarter_gain,
+        "last_quarter_share": (last_quarter_gain / gain if gain > 1e-12 else 0.0),
+        "best_at_quarters": [at(0.25), at(0.5), at(0.75)],
+    }
+
+
 class GeneticOptimization(OptimizationBase):
     """GENETIC algorithm to solve energy optimization."""
 
@@ -3530,6 +3562,10 @@ class GeneticOptimization(OptimizationBase):
         soft_restarts = 0
         total_immigrants = 0
         minimum_diversity = diversity
+        initial_fitness = best_fitness
+        best_by_generation = [best_fitness]
+        improvements = 0
+        last_improvement_generation = 0
         for generation in range(1, ngen + 1):
             diversity = self._population_diversity(population)
             soft_restart = (
@@ -3609,8 +3645,11 @@ class GeneticOptimization(OptimizationBase):
             if current_best < best_fitness - 1e-9:
                 best_fitness = current_best
                 stagnation = 0
+                improvements += 1
+                last_improvement_generation = generation
             elif not soft_restart:
                 stagnation += 1
+            best_by_generation.append(best_fitness)
 
             diversity = self._population_diversity(population)
             minimum_diversity = min(minimum_diversity, diversity)
@@ -3627,13 +3666,32 @@ class GeneticOptimization(OptimizationBase):
             if self.verbose:
                 print(logbook.stream)
 
+        convergence = genetic_convergence(
+            best_by_generation, improvements, last_improvement_generation
+        )
         self._adaptive_evolution_metrics = {
             "soft_restarts": soft_restarts,
             "immigrants": total_immigrants,
             "minimum_diversity": minimum_diversity,
             "final_diversity": self._population_diversity(population),
             "final_stagnation": stagnation,
+            "convergence": convergence,
         }
+        logger.info(
+            "Genetic convergence: fitness {:.4f} -> {:.4f} in {} generations, {} improvements, "
+            "last at generation {} ({:.0%}); last quarter improved {:.4f} ({:.0%} of the gain); "
+            "best at 25/50/75 %: {:.4f}/{:.4f}/{:.4f}; {} soft restarts.",
+            initial_fitness,
+            best_fitness,
+            ngen,
+            improvements,
+            last_improvement_generation,
+            convergence["last_improvement_share"],
+            convergence["last_quarter_gain"],
+            convergence["last_quarter_share"],
+            *convergence["best_at_quarters"],
+            soft_restarts,
+        )
         return population, logbook
 
     def setup_deap_environment(self, opti_param: dict[str, Any], start_hour: int) -> None:

@@ -41,6 +41,7 @@ from akkudoktoreos.optimization.milp.dispatch import (
     BatteryModel,
     DispatchInput,
     DispatchResult,
+    describe_optimality,
     battery_states,
     solve_dispatch,
 )
@@ -52,15 +53,41 @@ JOINT_MIP_GAP = 0.005
 """Relative optimality gap of the joint mode MILP."""
 
 
+def optimality_report(results: list[DispatchResult]) -> dict[str, Any]:
+    """Optimality of several solves: proven optima and the largest remaining gap."""
+    solved = [r for r in results if r.success]
+    gaps = [r.mip_gap for r in solved if not r.optimal and r.mip_gap is not None]
+    unknown = any(not r.optimal and r.mip_gap is None for r in solved)
+    return {
+        "solves": len(results),
+        "optimal": sum(1 for r in solved if r.optimal),
+        "max_gap": (max(gaps) if gaps else (None if unknown else 0.0)),
+    }
+
+
+def describe_report(report: dict[str, Any]) -> str:
+    """``all 4 optimal`` or ``optimal 3/4, max gap 2.1 %``."""
+    solves, optimal = report["solves"], report["optimal"]
+    if solves and optimal == solves:
+        return f"all {solves} optimal" if solves > 1 else "optimal"
+    gap = report["max_gap"]
+    gap_text = "gap unknown" if gap is None else f"max gap {gap * 100:.1f} %"
+    return f"optimal {optimal}/{solves}, {gap_text}"
+
+
 def solve_joint_modes(
-    data: DispatchInput, window_periods: int, time_limit_s: float
+    data: DispatchInput,
+    window_periods: int,
+    time_limit_s: float,
+    window_results: Optional[list[DispatchResult]] = None,
 ) -> tuple[Optional[DispatchResult], int]:
     """Relax-and-fix over the gene periods of the joint mode model.
 
     Window by window, the modes (and the clipping binaries) of the window are integral
     while the later periods are relaxed; the window's modes are then fixed. The time
     limit is shared between the windows. Returns the last solve (all modes fixed) and
-    the number of solves.
+    the number of solves. ``window_results`` (if given) receives every window's solve,
+    for the optimality report.
     """
     blocks = [block for block in data.thermal if block.mode_control is not None]
     if not blocks:
@@ -82,6 +109,8 @@ def solve_joint_modes(
         data.time_limit_s = per_window
         result = solve_dispatch(data)
         solves += 1
+        if window_results is not None:
+            window_results.append(result)
         if not result.success or not result.thermal:
             return result, solves
         for fixed_modes, traj in zip(fixed, result.thermal):
@@ -270,6 +299,7 @@ class MilpOptimization(GeneticOptimization):
             if result.success and result.objective is not None
             else float("inf")
         )
+        self._dispatch_results.append(result)
         self._milp_cache[key] = (score, result)
         return score, result
 
@@ -380,13 +410,16 @@ class MilpOptimization(GeneticOptimization):
                 "objective": round(result.objective, 4) if result.objective is not None else None,
                 "heat_pump_wh": round(sum(sum(t.electric_wh) for t in result.thermal), 1),
                 "candidates": len(variants),
+                "optimal": result.optimal,
+                "mip_gap": result.mip_gap,
             }
             logger.info(
-                "MILP: heat pump model solved in {:.1f} s (objective {:.3f}, heat pump {:.1f} kWh), "
-                "{} mode candidate(s).",
+                "MILP: heat pump model solved in {:.1f} s (objective {:.3f}, heat pump {:.1f} kWh, "
+                "{}), {} mode candidate(s).",
                 seconds,
                 result.objective if result.objective is not None else float("nan"),
                 self.thermal_summary["heat_pump_wh"] / 1000.0,
+                describe_optimality(result.optimal, result.mip_gap),
                 len(variants),
             )
             self._thermal_keys.update(tuple(v) for v in variants)
@@ -420,12 +453,20 @@ class MilpOptimization(GeneticOptimization):
             data.mip_rel_gap = max(self._milp.mip_rel_gap, JOINT_MIP_GAP)
             window_slots = self._milp.joint_window_hours * max(1, int(self.slots_per_hour))
             window_periods = max(1, round(window_slots / max(1, layout.plans[0].slots_per_gene)))
-            result, solves = solve_joint_modes(data, window_periods, self._milp.joint_time_limit_s)
+            windows: list[DispatchResult] = []
+            result, solves = solve_joint_modes(
+                data, window_periods, self._milp.joint_time_limit_s, windows
+            )
             self._milp_solves += solves
+            report = optimality_report(windows)
             if result is None or not result.success or not result.thermal:
                 status = result.status if result is not None else "no solution"
-                logger.warning("MILP: joint mode model not solved ({}).", status)
-                self.joint_summary = {"status": status}
+                logger.warning(
+                    "MILP: joint mode model not solved ({}; windows {}).",
+                    status,
+                    describe_report(report),
+                )
+                self.joint_summary = {"status": status, "windows": report}
                 return []
             genes: list[int] = []
             for plan, traj in zip(layout.plans, result.thermal):
@@ -437,11 +478,15 @@ class MilpOptimization(GeneticOptimization):
                 "seconds": round(seconds, 2),
                 "status": result.status,
                 "objective": round(result.objective, 4) if result.objective is not None else None,
+                "windows": report,
             }
             logger.info(
-                "MILP: joint mode model solved in {:.1f} s (objective {:.3f}, {}).",
+                "MILP: joint mode model solved in {:.1f} s (objective {:.3f}, {} windows {}; "
+                "last: {}).",
                 seconds,
                 result.objective if result.objective is not None else float("nan"),
+                report["solves"],
+                describe_report(report),
                 result.status,
             )
             self._joint_keys.add(tuple(genes))
@@ -491,6 +536,7 @@ class MilpOptimization(GeneticOptimization):
         self._milp_cache: dict[tuple[int, ...], tuple[float, Optional[DispatchResult]]] = {}
         self._ignore_import_limit = False
         self._milp_solves = 0
+        self._dispatch_results: list[DispatchResult] = []
         warm = parameters.start_solution
         self._warm_hp_genes = None
         if warm is not None and self._hp_layout():
@@ -583,13 +629,17 @@ class MilpOptimization(GeneticOptimization):
             if len(seeds) >= self._milp.seeds:
                 break
         best_score, _, best_result = scored[0]
+        dispatch_report = optimality_report(self._dispatch_results)
         logger.info(
-            "MILP: {} dispatch solves in {:.1f} s, best cost {:.3f} (dispatch {:.3f}), {} seeds.",
+            "MILP: {} dispatch solves in {:.1f} s, best cost {:.3f} (dispatch {:.3f}, {}), "
+            "{} seeds; schedule dispatch solves {}.",
             self._milp_solves,
             time.monotonic() - started,
             best_score,
             best_result.objective if best_result.objective is not None else float("nan"),
+            describe_optimality(best_result.optimal, best_result.mip_gap),
             len(seeds),
+            describe_report(dispatch_report),
         )
         self.milp_summary = {
             "thermal": getattr(self, "thermal_summary", {}),
@@ -599,5 +649,8 @@ class MilpOptimization(GeneticOptimization):
             "seconds": round(time.monotonic() - started, 2),
             "best_cost": round(best_score, 4),
             "seeds": len(seeds),
+            "best_optimal": best_result.optimal,
+            "best_mip_gap": best_result.mip_gap,
+            "dispatch": dispatch_report,
         }
         return seeds
