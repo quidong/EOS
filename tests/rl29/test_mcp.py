@@ -289,6 +289,7 @@ def test_default_allow_list_covers_new_forecast_and_battery_settings():
         "pvforecast/adaptive/correction_mode",
         "devices/batteries/storage/full_charge_interval_days",
         "devices/batteries/storage/full_charge_allow_grid",
+        "devices/inverters/fronius/max_ac_charge_power_w",
         "optimization/shadow_algorithms",
         "optimization/milp/time_limit_s",
     ]

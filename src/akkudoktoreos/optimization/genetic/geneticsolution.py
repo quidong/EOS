@@ -708,6 +708,12 @@ class GeneticSolution(ConfigMixin, GeneticParametersBaseModel):
                     if inv_list and inv_list[0].max_ac_charge_power_w is not None
                     else float(bat.max_charge_power_w)
                 )
+                # Fork: max_ac_charge_power_w = 0 (or no AC-to-DC path) disables grid
+                # charging. The simulation ignores the AC charge genes then
+                # (Inverter.ac_charge_factor); without this the plan would show a grid
+                # charge the simulation never made, and the controller would execute it.
+                if ac_to_dc_eff <= 0.0 or max_ac_cp_w <= 0.0:
+                    effective_ac = 0.0
                 # Energy storable in one optimization slot, not per hour: scale the
                 # power [W] by the slot duration (1.0 hourly, 0.25 at 15 min).
                 slot_duration_h = float(self.interval_seconds) / 3600.0

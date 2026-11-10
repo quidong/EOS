@@ -69,6 +69,7 @@ DEFAULT_WRITE_PATHS = (
     "devices/batteries/*/full_charge_soc_percentage",
     "devices/batteries/*/full_charge_detect_percentage",
     "devices/batteries/*/full_charge_allow_grid",
+    "devices/inverters/*/max_ac_charge_power_w",
     "logging/file_level",
 )
 """Configuration sections the MCP may change (``*`` = any one segment)."""
@@ -98,6 +99,8 @@ def _list(value: str | None) -> list[str]:
 
 @dataclass
 class McpSettings:
+    """Settings of the MCP server (token, EOS address, write allow-list, limits)."""
+
     token: str
     eos_url: str = "http://eos:8503"
     host: str = "0.0.0.0"  # noqa: S104 - the container port is published on the LAN only

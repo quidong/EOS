@@ -154,6 +154,10 @@ prices it relies on the price forecast (see {doc}`forecasts`).
   `max_hours` 48) with `<id>-warning-start-ts` / `<id>-warning-end-ts` (Unix times, 0 = none): the battery
   is kept at or above the reserve during the warning. The largest shortfall costs
   `genetic.penalties.battery_reserve_miss` (default 10) per percentage point. GENETIC only.
+- **No grid charging:** `devices.inverters.<id>.max_ac_charge_power_w: 0` disables charging from the
+  grid. The simulation ignores the AC charge genes then, and the battery modes of the plan say the same
+  (no `GRID_SUPPORT_IMPORT` / `FORCED_CHARGE`; such slots become `NON_EXPORT` or `IDLE`), so a
+  controller that executes the plan never charges from the grid.
 - **Plausibility check:** `scripts/rl29/check_battery_plan.py --url http://<eos>:8503 --device <id>`
   checks the battery part of the current plan (exit 0 = plausible, 1 = warning, 2 = implausible): one
   operation mode per slot, state of charge within the limits, grid charging only when the price after
