@@ -143,7 +143,8 @@ There are two URLs that are used:
 | base_url | `Optional[str]` | `rw` | `None` | Base URL of the Home Assistant instance for a direct connection, e.g. when EOS runs as a standalone container. Leave empty when EOS runs as a Home Assistant add-on (the Supervisor API is used). |
 | config_entity_ids | `Optional[dict[str, str]]` | `rw` | `None` | Mapping of EOS config keys to Home Assistant entity IDs.
 The config key has to be given by a ‘/’-separated path
-e.g. devices/batteries/0/capacity_wh |
+e.g. devices/batteries/battery1/capacity_wh
+Devices are addressed by their device_id. The setting must exist. |
 | device_instruction_entity_ids | `Optional[list[str]]` | `rw` | `None` | Entity IDs for device (resource) instructions to be updated by EOS.
 The device ids (resource ids) have to be prepended by 'sensor.eos_' to build the entity_id.
 E.g. The instruction for device id 'battery1' becomes the entity_id 'sensor.eos_battery1'. |
@@ -175,7 +176,7 @@ E.g. solution key 'battery1_idle_op_mode' becomes the entity_id 'sensor.eos_batt
                "base_url": null,
                "token": null,
                "config_entity_ids": {
-                   "devices/batteries/0/capacity_wh": "sensor.battery1_capacity"
+                   "devices/batteries/battery1/capacity_wh": "sensor.battery1_capacity"
                },
                "load_emr_entity_ids": [
                    "sensor.load_energy_total_kwh"
@@ -220,7 +221,7 @@ E.g. solution key 'battery1_idle_op_mode' becomes the entity_id 'sensor.eos_batt
                "base_url": null,
                "token": null,
                "config_entity_ids": {
-                   "devices/batteries/0/capacity_wh": "sensor.battery1_capacity"
+                   "devices/batteries/battery1/capacity_wh": "sensor.battery1_capacity"
                },
                "load_emr_entity_ids": [
                    "sensor.load_energy_total_kwh"
