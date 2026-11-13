@@ -253,7 +253,7 @@ def test_version_dev_precision_8(monkeypatch):
     hash_value = int(fake_hash, 16)
     expected_hash_digits = str(hash_value % (10 ** 8)).zfill(8)
 
-    expected_date_digits = to_datetime(fake_date, as_string="YYMMDDHH")
+    expected_date_digits = to_datetime(fake_date, as_string="YYMMDDHH", in_timezone="UTC")
 
     expected = f"0.2.0.dev{expected_date_digits}{expected_hash_digits}"
 
@@ -279,7 +279,7 @@ def test_version_dev_precision_8_different_hash(monkeypatch):
     hash_value = int(fake_hash, 16)
     expected_hash_digits = str(hash_value % (10 ** 8)).zfill(8)
 
-    expected_date_digits = to_datetime(fake_date, as_string="YYMMDDHH")
+    expected_date_digits = to_datetime(fake_date, as_string="YYMMDDHH", in_timezone="UTC")
 
     expected = f"0.2.0.dev{expected_date_digits}{expected_hash_digits}"
 

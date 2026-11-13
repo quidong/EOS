@@ -1,7 +1,7 @@
 """Home Assistant adapter."""
 
-import math
 import difflib
+import math
 import os
 import re
 from typing import Iterable, Optional, Union
