@@ -9,6 +9,8 @@ Per slot ``t`` (energies in Wh, prices per Wh)::
     pv[t] + imp[t] + dis[t] = load[t] + appliance[t] + chg_pv[t] + chg_grid[t] + exp[t]
     soc[t+1] = soc[t] + eta_c * (chg_pv[t] + chg_grid[t]) - dis[t] / eta_d
     min_soc <= soc <= max_soc,  chg_pv + chg_grid <= max_charge,  dis <= max_discharge
+    chg_grid[t] <= grid_charge_max[t]            (inverter AC limit, full charge window)
+    soc[k] + shortfall >= full_charge_target     (due full charge, shortfall penalised)
     chg_pv[t] <= pv[t] - load[t],  exp[t] <= pv[t]  (surplus charging; only PV is fed in)
     dis[t] <= load[t] + appliance[t]              (the battery serves the house only)
     appliance[t] = sum_k x[g,k] * profile_g[t - start_k],  sum_k x[g,k] = 1,  x binary
@@ -55,6 +57,15 @@ class BatteryModel:
     lcos_per_wh: float = 0.0
     """Levelized cost of storage per delivered AC Wh."""
     allow_grid_charge: bool = True
+    grid_charge_max_wh: Optional[list[float]] = None
+    """Per-slot limit of grid charging [AC Wh] (inverter AC charge power, end of a
+    full charge exception); None = only ``max_charge_wh``. Slots beyond the list are 0."""
+    target_soc_wh: Optional[float] = None
+    """Fork: state of charge a due full charge has to reach [Wh]; None = none due."""
+    target_slot: Optional[int] = None
+    """Slot at whose start ``target_soc_wh`` is checked (capped to the horizon end)."""
+    target_shortfall_per_wh: float = 0.0
+    """Penalty per Wh the full charge stays below its target."""
 
 
 @dataclass
@@ -262,7 +273,11 @@ def _add_scenario(
             # PV charging only from the surplus over the fixed load, as in the simulation
             # (idle and self-consumption states charge from surplus only).
             c_pv = b.var(0.0, min(max(pv[t] - load[t], 0.0), bat.max_charge_wh))
-            c_grid = b.var(0.0, bat.max_charge_wh if bat.allow_grid_charge else 0.0, 1e-9)
+            grid_cap = bat.max_charge_wh if bat.allow_grid_charge else 0.0
+            if bat.grid_charge_max_wh is not None:
+                slot_cap = bat.grid_charge_max_wh[t] if t < len(bat.grid_charge_max_wh) else 0.0
+                grid_cap = min(grid_cap, max(slot_cap, 0.0))
+            c_grid = b.var(0.0, grid_cap, 1e-9)
             d = b.var(0.0, bat.max_discharge_wh, weight * bat.lcos_per_wh)
             chg_pv[t], chg_grid[t], dis[t] = c_pv, c_grid, d
             soc.append(b.var(low, max(bat.max_soc_wh, start_soc)))
@@ -280,6 +295,12 @@ def _add_scenario(
                 0.0,
                 0.0,
             )
+        # Fork: a due full charge (soft): soc[k] + shortfall >= target, shortfall penalised.
+        if bat.target_soc_wh is not None and bat.target_slot is not None:
+            k = min(max(int(bat.target_slot), 0), n)
+            target_wh = min(bat.target_soc_wh, bat.capacity_wh)
+            shortfall = b.var(0.0, max(target_wh, 0.0), weight * bat.target_shortfall_per_wh)
+            b.row({soc[k]: 1.0, shortfall: 1.0}, target_wh, inf)
         # Terminal credit: sum of segment energies equals the AC value of the end SoC.
         if data.terminal_segments:
             seg_vars = [

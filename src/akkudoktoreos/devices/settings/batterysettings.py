@@ -319,6 +319,22 @@ class BatteriesCommonSettings(DevicesBaseSettings):
             "examples": [False, True],
         },
     )
+    full_charge_grid_power_w: Optional[float] = Field(
+        default=None,
+        gt=0,
+        json_schema_extra={
+            "x-scope": [str(ConfigScope.GENETIC)],
+            "description": (
+                "Fork: grid charging power for an enforced full charge [W, AC], used "
+                "when the inverter otherwise does not charge from the grid "
+                "('max_ac_charge_power_w' = 0). Only while a full charge is due within "
+                "the horizon and 'full_charge_allow_grid' is true, and only up to its "
+                "deadline; grid charging stays disabled at all other times. None keeps "
+                "the inverter limit."
+            ),
+            "examples": [None, 3000],
+        },
+    )
 
     def to_genetic_pv_bat_param(self) -> "SolarPanelBatteryParameters":
         """Return SolarPanelBatteryParameters for the GENETIC optimizer."""

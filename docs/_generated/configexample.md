@@ -97,7 +97,8 @@
                    "full_charge_interval_days": null,
                    "full_charge_soc_percentage": 100,
                    "full_charge_detect_percentage": 99,
-                   "full_charge_allow_grid": false
+                   "full_charge_allow_grid": false,
+                   "full_charge_grid_power_w": null
                }
            },
            "max_batteries": 1,
@@ -144,7 +145,8 @@
                    "full_charge_interval_days": null,
                    "full_charge_soc_percentage": 100,
                    "full_charge_detect_percentage": 99,
-                   "full_charge_allow_grid": false
+                   "full_charge_allow_grid": false,
+                   "full_charge_grid_power_w": null
                }
            },
            "max_electric_vehicles": 1,

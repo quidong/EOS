@@ -15,7 +15,9 @@ Rules (limits from the battery configuration):
   max(``max_soc_percentage``, ``full_charge_soc_percentage`` when a periodic
   full charge is configured) + 1 percentage points
 - FAIL  grid charging (GRID_SUPPORT_IMPORT / FORCED_CHARGE) although the inverter
-  of the battery has ``max_ac_charge_power_w`` = 0 (grid charging disabled)
+  of the battery has ``max_ac_charge_power_w`` = 0 (grid charging disabled).
+  Exception: with ``full_charge_allow_grid`` and ``full_charge_grid_power_w`` a due
+  full charge may charge from the grid up to that power (INFO); more is a FAIL
 - WARN  grid charging (GRID_SUPPORT_IMPORT / FORCED_CHARGE) in a slot whose
   price, after the round-trip losses and the storage cost, is not below the
   highest price of the following ``--arbitrage-h`` hours (default 24): the
@@ -152,6 +154,17 @@ def grid_charge_disabled(config: dict[str, Any], device: str) -> bool:
     return False
 
 
+def full_charge_grid_power_w(battery: dict[str, Any]) -> Optional[float]:
+    """Grid charging power allowed for a due full charge [W], None = no exception."""
+    if not battery.get("full_charge_allow_grid") or not battery.get("full_charge_interval_days"):
+        return None
+    power = battery.get("full_charge_grid_power_w")
+    if power is None:
+        return None
+    value = _float(power, 0.0)
+    return value if value > 0.0 else None
+
+
 def soc_limits(battery: dict[str, Any]) -> tuple[float, float]:
     """(minimum, maximum) planned state of charge in percent."""
     low = _float(battery.get("min_soc_percentage"), 0.0)
@@ -255,6 +268,8 @@ def check(
     warned_hours: set[str] = set()
     max_charge_w = _float(battery.get("max_charge_power_w"), 0.0)
     no_grid_charge = grid_charge_disabled(config, device)
+    full_charge_w = full_charge_grid_power_w(battery) if no_grid_charge else None
+    full_charge_wh = 0.0
     for i, (t, mode) in enumerate(zip(upcoming, modes)):
         stamp = datetime.fromisoformat(t).strftime("%H:%M")
         hour = datetime.fromisoformat(t).strftime("%H:00")
@@ -262,6 +277,19 @@ def check(
         if mode in GRID_CHARGE:
             factor = _float(values.get(f"{device}_{mode.lower()}_op_factor"))
             grid_wh += factor * max_charge_w * slot_h
+            if full_charge_w is not None and factor > 0.0:
+                # Due full charge: grid charging up to the configured power is allowed.
+                power_w = factor * max_charge_w
+                if power_w <= full_charge_w * 1.1 + 50.0:
+                    full_charge_wh += power_w * slot_h
+                    continue
+                if hour not in warned_hours:
+                    warned_hours.add(hour)
+                    report.failures.append(
+                        f"{stamp} Netzladen mit {power_w:.0f} W über der Freigabe für die "
+                        f"Vollladung ({full_charge_w:.0f} W)"
+                    )
+                continue
             if no_grid_charge and factor > 0.0 and hour not in warned_hours:
                 warned_hours.add(hour)
                 report.failures.append(
@@ -300,6 +328,10 @@ def check(
     report.info.append(f"Betriebsarten: {_mode_changes(upcoming, modes)}")
     if grid_wh > 0:
         report.info.append(f"Netzladen geplant: {grid_wh / 1000.0:.1f} kWh")
+    if full_charge_wh > 0:
+        report.info.append(
+            f"davon für die Vollladung freigegeben: {full_charge_wh / 1000.0:.1f} kWh"
+        )
     return report
 
 

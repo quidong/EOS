@@ -426,6 +426,15 @@ class GeneticSimulation(PydanticBaseModel):
     ac_charge_hours: Optional[NDArray[Shape["*"], float]] = Field(
         default=None, json_schema_extra={"description": "TBD"}
     )
+    ac_charge_until_slot: Optional[int] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "Fork: first slot without grid charging, None = no limit. Set while grid "
+                "charging is only allowed for a due full charge (until its deadline)."
+            )
+        },
+    )
     dc_charge_hours: Optional[NDArray[Shape["*"], float]] = Field(
         default=None, json_schema_extra={"description": "TBD"}
     )
@@ -665,6 +674,9 @@ class GeneticSimulation(PydanticBaseModel):
             # acting on them would grid-charge the battery unplanned.
             if not ac_charging_possible:
                 ac_charge_hours_fast[:] = 0.0
+            elif self.ac_charge_until_slot is not None:
+                # Fork: grid charging only for a due full charge, up to its deadline.
+                ac_charge_hours_fast[max(self.ac_charge_until_slot, 0) :] = 0.0
 
             # Fill the charge array of the battery
             dc_charge_hours_fast[0:start_hour] = 0
@@ -1197,6 +1209,7 @@ class GeneticOptimization(OptimizationBase):
         # Slot by which a due periodic full charge of the stationary battery has
         # to have happened. None means no full charge is enforced in this run.
         self._full_charge_deadline_slot: Optional[int] = None
+        self._ac_charge_until_slot: Optional[int] = None
         self._full_charge_target_soc: Optional[int] = None
         # Value of the energy left in the battery at the end of the
         # horizon. None means the fixed scalar terminal value is used instead.
@@ -1645,9 +1658,18 @@ class GeneticOptimization(OptimizationBase):
                     else 0
                 ),
             )
+            tail_inverter = inverter
+            if getattr(self, "_ac_charge_until_slot", None) is not None:
+                # Fork: the grid charging exception of a due full charge ends at its
+                # deadline; beyond the horizon the battery charges from PV only.
+                tail_inverter = Inverter(
+                    inverter.parameters.model_copy(update={"max_ac_charge_power_w": 0.0}),
+                    battery=inverter.battery,
+                    slot_duration_h=inverter.slot_duration_h,
+                )
             return build_tail_value_curve(
                 battery=battery,
-                inverter=inverter,
+                inverter=tail_inverter,
                 prices_euro_per_wh=prices[tail],
                 load_wh=loads[tail],
                 pv_wh=pv[tail],
@@ -4743,6 +4765,15 @@ class GeneticOptimization(OptimizationBase):
             if self._full_charge_deadline_slot is not None and parameters.pv_battery
             else None
         )
+        # Fork: grid charging allowed only for this full charge, until its deadline.
+        self._ac_charge_until_slot = (
+            self._full_charge_deadline_slot
+            if self._full_charge_deadline_slot is not None
+            and parameters.pv_battery is not None
+            and parameters.pv_battery.full_charge_grid_power_w is not None
+            else None
+        )
+        self.simulation.ac_charge_until_slot = self._ac_charge_until_slot
         if self._full_charge_deadline_slot is not None:
             logger.debug(
                 "Battery full charge required by slot {}.", self._full_charge_deadline_slot
@@ -4888,7 +4919,9 @@ class GeneticOptimization(OptimizationBase):
                 )
                 # RL29 fork: remember the announced airing slot of the day.
                 if plan.device_id in getattr(self, "_hp_record_ventilation_ids", set()):
-                    from akkudoktoreos.devices.heatpumpventilation import record_ventilation
+                    from akkudoktoreos.devices.heatpumpventilation import (
+                        record_ventilation,
+                    )
 
                     record_ventilation(
                         plan.device_id,

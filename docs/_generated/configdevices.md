@@ -77,7 +77,8 @@ config path from ``self.device_id`` without needing an external index.
                    "full_charge_interval_days": null,
                    "full_charge_soc_percentage": 100,
                    "full_charge_detect_percentage": 99,
-                   "full_charge_allow_grid": false
+                   "full_charge_allow_grid": false,
+                   "full_charge_grid_power_w": null
                }
            },
            "max_batteries": 1,
@@ -124,7 +125,8 @@ config path from ``self.device_id`` without needing an external index.
                    "full_charge_interval_days": null,
                    "full_charge_soc_percentage": 100,
                    "full_charge_detect_percentage": 99,
-                   "full_charge_allow_grid": false
+                   "full_charge_allow_grid": false,
+                   "full_charge_grid_power_w": null
                }
            },
            "max_electric_vehicles": 1,
@@ -593,6 +595,7 @@ config path from ``self.device_id`` without needing an external index.
                    "full_charge_soc_percentage": 100,
                    "full_charge_detect_percentage": 99,
                    "full_charge_allow_grid": false,
+                   "full_charge_grid_power_w": null,
                    "measurement_key_soc_factor": "bat0-soc-factor",
                    "measurement_key_power_l1_w": "bat0-power-l1-w",
                    "measurement_key_power_l2_w": "bat0-power-l2-w",
@@ -656,6 +659,7 @@ config path from ``self.device_id`` without needing an external index.
                    "full_charge_soc_percentage": 100,
                    "full_charge_detect_percentage": 99,
                    "full_charge_allow_grid": false,
+                   "full_charge_grid_power_w": null,
                    "measurement_key_soc_factor": "ev0-soc-factor",
                    "measurement_key_power_l1_w": "ev0-power-l1-w",
                    "measurement_key_power_l2_w": "ev0-power-l2-w",

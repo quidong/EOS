@@ -69,6 +69,7 @@ DEFAULT_WRITE_PATHS = (
     "devices/batteries/*/full_charge_soc_percentage",
     "devices/batteries/*/full_charge_detect_percentage",
     "devices/batteries/*/full_charge_allow_grid",
+    "devices/batteries/*/full_charge_grid_power_w",
     "devices/inverters/*/max_ac_charge_power_w",
     "logging/file_level",
 )

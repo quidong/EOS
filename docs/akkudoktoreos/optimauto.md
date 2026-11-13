@@ -411,6 +411,13 @@ The feature is off by default. It is enabled per stationary battery with
   charge while the full charge is due, so that PV surplus can fill the battery; the target is not
   enforced. With `true`, the optimizer has to reach the target and charges from the grid if
   needed, at the cheapest time before the deadline.
+- `full_charge_grid_power_w` (fork, default `null`): grid charging power [W, AC] for an enforced
+  full charge when the inverter otherwise does not charge from the grid
+  (`max_ac_charge_power_w` = 0). Only while a full charge is due within the horizon and
+  `full_charge_allow_grid` is `true`, and only up to its deadline; grid charging stays disabled
+  at all other times. MILP plans the full charge itself (soft target with the same penalty as
+  the GENETIC fitness, `battery_full_charge_miss` per percent) instead of leaving it to the
+  GENETIC polish.
 - `cell_chemistry` (`LFP`, `NMC`, `NCA`, `LTO` or `null`): informational only, it does not
   enable anything.
 

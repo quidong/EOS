@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2611092120241826"
+    "version": "v0.3.0.dev2611132105770820"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -3930,6 +3930,26 @@
             "x-scope": [
               "GENETIC"
             ]
+          },
+          "full_charge_grid_power_w": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Charge Grid Power W",
+            "description": "Fork: grid charging power for an enforced full charge [W, AC], used when the inverter otherwise does not charge from the grid ('max_ac_charge_power_w' = 0). Only while a full charge is due within the horizon and 'full_charge_allow_grid' is true, and only up to its deadline; grid charging stays disabled at all other times. None keeps the inverter limit.",
+            "examples": [
+              null,
+              3000
+            ],
+            "x-scope": [
+              "GENETIC"
+            ]
           }
         },
         "type": "object",
@@ -4263,6 +4283,26 @@
             "examples": [
               false,
               true
+            ],
+            "x-scope": [
+              "GENETIC"
+            ]
+          },
+          "full_charge_grid_power_w": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Charge Grid Power W",
+            "description": "Fork: grid charging power for an enforced full charge [W, AC], used when the inverter otherwise does not charge from the grid ('max_ac_charge_power_w' = 0). Only while a full charge is due within the horizon and 'full_charge_allow_grid' is true, and only up to its deadline; grid charging stays disabled at all other times. None keeps the inverter limit.",
+            "examples": [
+              null,
+              3000
             ],
             "x-scope": [
               "GENETIC"
@@ -21948,6 +21988,23 @@
             "examples": [
               null,
               "2026-11-20T07:00:00+01:00"
+            ]
+          },
+          "full_charge_grid_power_w": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Charge Grid Power W",
+            "description": "Fork: AC power the inverter may draw from the grid for this full charge although grid charging is otherwise disabled [W]. Set by the config request only for an enforced full charge; grid charging then ends at 'full_charge_deadline_datetime'. None means no such exception.",
+            "examples": [
+              null,
+              3000
             ]
           }
         },

@@ -41,13 +41,16 @@ from akkudoktoreos.optimization.milp.dispatch import (
     BatteryModel,
     DispatchInput,
     DispatchResult,
-    describe_optimality,
     battery_states,
+    describe_optimality,
     solve_dispatch,
 )
 from akkudoktoreos.optimization.milp.milpsettings import MilpCommonSettings
-from akkudoktoreos.optimization.milp.thermal import project_dhw, project_modes, thermal_block
-
+from akkudoktoreos.optimization.milp.thermal import (
+    project_dhw,
+    project_modes,
+    thermal_block,
+)
 
 JOINT_MIP_GAP = 0.005
 """Relative optimality gap of the joint mode MILP."""
@@ -181,6 +184,9 @@ class MilpOptimization(GeneticOptimization):
             max_charge = float(bat.max_charge_power_w) * self.slot_duration_h
             max_ac = getattr(inverter, "max_ac_charge_power_w", None) if inverter else None
             allow_grid = ac_to_dc > 0 and (max_ac is None or max_ac > 0)
+            grid_cap, target_wh, target_slot, shortfall_per_wh = self._full_charge_terms(
+                n, max_ac, float(bat.capacity_wh)
+            )
             battery_model = BatteryModel(
                 capacity_wh=float(bat.capacity_wh),
                 soc_wh=float(bat.soc_wh),
@@ -192,6 +198,10 @@ class MilpOptimization(GeneticOptimization):
                 discharge_efficiency=float(bat.discharging_efficiency) * float(dc_to_ac),
                 lcos_per_wh=float(bat.levelized_cost_of_storage_kwh or 0.0) / 1000.0,
                 allow_grid_charge=bool(allow_grid and self.bat_possible_charge_values),
+                grid_charge_max_wh=grid_cap,
+                target_soc_wh=target_wh,
+                target_slot=target_slot,
+                target_shortfall_per_wh=shortfall_per_wh,
             )
             segments = terminal_segments(
                 getattr(self, "_terminal_value_curve", None),
@@ -242,6 +252,43 @@ class MilpOptimization(GeneticOptimization):
             terminal_dc_to_ac=float(dc_to_ac),
             time_limit_s=self._milp.time_limit_s,
             mip_rel_gap=self._milp.mip_rel_gap,
+        )
+
+    def _full_charge_terms(
+        self, n: int, max_ac_charge_power_w: Optional[float], capacity_wh: float
+    ) -> tuple[Optional[list[float]], Optional[float], Optional[int], float]:
+        """Grid charge limits and full charge target of the dispatch model (fork).
+
+        Args:
+            n: Number of control slots.
+            max_ac_charge_power_w: AC charge limit of the inverter in this run [W]
+                (raised for a full charge exception), None = no limit.
+            capacity_wh: Battery capacity [Wh].
+
+        Returns:
+            Per-slot grid charge limit [AC Wh] or None, full charge target [Wh] or
+            None, its slot or None, and the penalty per Wh of shortfall. The penalty
+            matches the GENETIC fitness (``battery_full_charge_miss`` per percent).
+        """
+        grid_cap: Optional[list[float]] = None
+        if max_ac_charge_power_w is not None and max_ac_charge_power_w > 0:
+            grid_cap = [float(max_ac_charge_power_w) * self.slot_duration_h] * n
+        until = getattr(self, "_ac_charge_until_slot", None)
+        if until is not None and grid_cap is not None:
+            grid_cap = [cap if t < until else 0.0 for t, cap in enumerate(grid_cap)]
+        target_pct = getattr(self, "_full_charge_target_soc", None)
+        target_slot = getattr(self, "_full_charge_deadline_slot", None)
+        if target_pct is None or target_slot is None or capacity_wh <= 0:
+            return grid_cap, None, None, 0.0
+        try:
+            per_percent = float(self._genetic_cfg.penalties["battery_full_charge_miss"])
+        except Exception:
+            per_percent = 10.0
+        return (
+            grid_cap,
+            float(target_pct) / 100.0 * capacity_wh,
+            int(target_slot),
+            per_percent * 100.0 / capacity_wh,
         )
 
     _ignore_import_limit: bool = False

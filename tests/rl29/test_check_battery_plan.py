@@ -207,3 +207,39 @@ def test_grid_charge_while_disabled_fails():
     assert "obwohl Laden aus dem Netz gesperrt ist" in report.failures[0]
     config["devices"]["inverters"]["fronius"]["max_ac_charge_power_w"] = None
     assert script.check(sol, config, "byd", NOW).exit_code != 2
+
+
+def _full_charge_config(power_w: float | None) -> dict[str, Any]:
+    config = json.loads(json.dumps(CONFIG))
+    config["devices"]["inverters"] = {
+        "fronius": {"battery_id": "byd", "max_ac_charge_power_w": 0.0}
+    }
+    battery = config["devices"]["batteries"]["byd"]
+    battery["full_charge_allow_grid"] = True
+    battery["full_charge_grid_power_w"] = power_w
+    return config
+
+
+def test_grid_charge_for_full_charge_within_power_is_allowed():
+    """3 kW of 10.2 kW (factor 0.3) is within the full charge exception of 3 kW."""
+    modes = ["SELF_CONSUMPTION"] * 4 + ["FORCED_CHARGE"] * 4
+    sol = solution(modes, factors=[0.0] * 4 + [0.29] * 4, prices=[0.75] * 4 + [0.46] * 4)
+    report = script.check(sol, _full_charge_config(3000.0), "byd", NOW)
+    assert report.exit_code == 0, report.lines()
+    assert any("für die Vollladung freigegeben" in line for line in report.info)
+
+
+def test_grid_charge_for_full_charge_above_power_fails():
+    modes = ["SELF_CONSUMPTION"] * 4 + ["FORCED_CHARGE"] * 4
+    sol = solution(modes, factors=[0.0] * 4 + [0.8] * 4)
+    report = script.check(sol, _full_charge_config(3000.0), "byd", NOW)
+    assert report.exit_code == 2
+    assert "über der Freigabe für die Vollladung" in report.failures[0]
+
+
+def test_grid_charge_without_full_charge_power_still_fails():
+    modes = ["SELF_CONSUMPTION"] * 4 + ["FORCED_CHARGE"] * 4
+    sol = solution(modes, factors=[0.0] * 4 + [0.29] * 4)
+    report = script.check(sol, _full_charge_config(None), "byd", NOW)
+    assert report.exit_code == 2
+    assert "obwohl Laden aus dem Netz gesperrt ist" in report.failures[0]

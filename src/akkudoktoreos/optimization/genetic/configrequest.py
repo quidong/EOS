@@ -243,8 +243,10 @@ class ConfigOptimizationRequest(
             return deadline
 
         battery = None
+        battery_device: Optional[BatteriesCommonSettings] = None
         if groups["batteries"]:
             device = groups["batteries"][0]
+            battery_device = device
             battery = device.to_genetic_pv_bat_param()
             battery.initial_soc_percentage = await state(device)
             await self._grid_control(device, battery, observation_time)
@@ -288,6 +290,8 @@ class ConfigOptimizationRequest(
             inverter = device.to_genetic_param()
         if inverter is None:
             raise ValueError("Configure an inverter to model PV and grid energy flows.")
+        if battery is not None and battery_device is not None:
+            self._full_charge_grid_exception(battery_device, battery, inverter)
         requested_devices = []
         for device in groups["home_appliances"]:
             resolved = await self._appliance_request(device, observation_time)
@@ -473,6 +477,42 @@ class ConfigOptimizationRequest(
         if all(value is None for value in temperatures):
             return None
         return temperatures
+
+    @staticmethod
+    def _full_charge_grid_exception(
+        device: BatteriesCommonSettings, battery: Any, inverter: Any
+    ) -> None:
+        """Allow grid charging for an enforced full charge although it is disabled (fork).
+
+        With ``full_charge_grid_power_w`` set, an enforced full charge (due within the
+        horizon, ``full_charge_allow_grid``) may draw this AC power from the grid even
+        if the inverter has ``max_ac_charge_power_w`` = 0. Only the parameters of this
+        run change; the optimizer ends grid charging at the full charge deadline.
+
+        Args:
+            device: Battery settings.
+            battery: Battery parameters of this run (full charge already resolved).
+            inverter: Inverter parameters of this run; its AC charge limit is raised.
+        """
+        power_w = device.full_charge_grid_power_w
+        if (
+            power_w is None
+            or battery.full_charge_soc_percentage is None
+            or battery.full_charge_deadline_datetime is None
+        ):
+            return
+        current = inverter.max_ac_charge_power_w
+        if current is not None and current > 0:
+            # Grid charging is allowed anyway; the inverter limit stays.
+            return
+        inverter.max_ac_charge_power_w = float(power_w)
+        battery.full_charge_grid_power_w = float(power_w)
+        logger.info(
+            "Grid charging of {} allowed up to {} W for the full charge until {}.",
+            device.device_id,
+            power_w,
+            battery.full_charge_deadline_datetime,
+        )
 
     async def _grid_control(self, device: Any, params: Any, observation_time: DateTime) -> None:
         """§14a dimming and weather reserve of a battery or EV from measurements (fork)."""

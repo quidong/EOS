@@ -168,6 +168,19 @@ class SolarPanelBatteryParameters(BaseBatteryParameters, _GridControlFields):
             "examples": [None, "2026-11-20T07:00:00+01:00"],
         },
     )
+    full_charge_grid_power_w: Optional[float] = Field(
+        default=None,
+        gt=0,
+        json_schema_extra={
+            "description": (
+                "Fork: AC power the inverter may draw from the grid for this full charge "
+                "although grid charging is otherwise disabled [W]. Set by the config "
+                "request only for an enforced full charge; grid charging then ends at "
+                "'full_charge_deadline_datetime'. None means no such exception."
+            ),
+            "examples": [None, 3000],
+        },
+    )
 
     @field_validator("full_charge_deadline_datetime", mode="before")
     @classmethod
