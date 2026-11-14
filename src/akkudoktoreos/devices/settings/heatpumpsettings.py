@@ -1438,6 +1438,17 @@ class HeatPumpSlabEstimateSettings(SettingsBaseModel):
             "description": "Oldest return, flow and heat measurement for the correction [s]."
         },
     )
+    max_correction_k: float = Field(
+        default=5.0,
+        gt=0,
+        json_schema_extra={
+            "description": (
+                "A return-based screed further than this from the carried one is not used "
+                "(e.g. a hot water charge without '<id>-dhw-heat-power') [K]. A flow above "
+                "unit.max_flow_c also counts as a hot water charge."
+            )
+        },
+    )
 
 
 class HeatPumpZoneSettings(SettingsBaseModel):

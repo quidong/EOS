@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2611141392146470"
+    "version": "v0.3.0.dev2611141590995341"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -13533,6 +13533,13 @@
             "title": "Measurement Max Age Seconds",
             "description": "Oldest return, flow and heat measurement for the correction [s].",
             "default": 900.0
+          },
+          "max_correction_k": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Max Correction K",
+            "description": "A return-based screed further than this from the carried one is not used (e.g. a hot water charge without '<id>-dhw-heat-power') [K]. A flow above unit.max_flow_c also counts as a hot water charge.",
+            "default": 5.0
           }
         },
         "type": "object",

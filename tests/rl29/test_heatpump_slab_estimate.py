@@ -196,3 +196,30 @@ async def test_old_plan_is_not_carried(monkeypatch: pytest.MonkeyPatch):
     measurements(monkeypatch, {})
     settings = device(slab_estimate={"enabled": True, "max_age_hours": 3})
     assert await request()._slab_estimate(settings, START, 21.0) == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_hot_water_flow_without_its_heat_measurement_does_not_correct(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    previous_plan(monkeypatch)
+    # no <id>-dhw-heat-power: the flow above unit.max_flow_c gives the charge away
+    measurements(
+        monkeypatch,
+        {"hp1-return-temperature": 44.0, "hp1-flow-temperature": 52.0, "hp1-heat-power": 2800.0},
+    )
+    settings = device(unit={"max_flow_c": 45.0}, slab_estimate={"enabled": True})
+    slab, _ = await request()._slab_estimate(settings, START.add(minutes=30), 21.0)
+    assert slab == pytest.approx(26.4)
+
+
+@pytest.mark.asyncio
+async def test_implausible_return_value_is_not_used(monkeypatch: pytest.MonkeyPatch):
+    previous_plan(monkeypatch)
+    measurements(
+        monkeypatch,
+        {"hp1-return-temperature": 40.0, "hp1-flow-temperature": 44.0, "hp1-heat-power": 1500.0},
+    )
+    settings = device(unit={"max_flow_c": 55.0}, slab_estimate={"enabled": True})
+    slab, _ = await request()._slab_estimate(settings, START.add(minutes=30), 21.0)
+    assert slab == pytest.approx(26.4)  # 40.5 degC is 14 K away from the carried 26.4

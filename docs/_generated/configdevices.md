@@ -543,7 +543,8 @@ config path from ``self.device_id`` without needing an external index.
                        "max_age_hours": 3.0,
                        "return_gain": 0.5,
                        "min_heat_w": 1000.0,
-                       "measurement_max_age_seconds": 900.0
+                       "measurement_max_age_seconds": 900.0,
+                       "max_correction_k": 5.0
                    },
                    "power_limit_w": null
                }
@@ -1112,7 +1113,8 @@ config path from ``self.device_id`` without needing an external index.
                        "max_age_hours": 3.0,
                        "return_gain": 0.5,
                        "min_heat_w": 1000.0,
-                       "measurement_max_age_seconds": 900.0
+                       "measurement_max_age_seconds": 900.0,
+                       "max_correction_k": 5.0
                    },
                    "power_limit_w": null,
                    "measurement_key_room_temperature": "wbb12-room-temperature",

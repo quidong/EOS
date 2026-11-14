@@ -884,6 +884,10 @@ class ConfigOptimizationRequest(
             space_w = None if heat_w is None else heat_w - max(0.0, dhw_heat_w or 0.0)
             if dhw_heat_w is not None and dhw_heat_w > 100.0:
                 space_w = None  # hot water charge: the return comes from the tank
+            if flow_c is not None and flow_c > device.unit.max_flow_c:
+                # Above the highest space heating flow: a hot water charge (also
+                # without a hot water heat measurement).
+                space_w = None
             measured = slab_from_return_c(
                 return_c,
                 space_w,
@@ -892,6 +896,19 @@ class ConfigOptimizationRequest(
                 flow_c=flow_c,
                 min_heat_w=cfg.min_heat_w,
             )
+        if (
+            measured is not None
+            and carried is not None
+            and abs(measured - carried) > cfg.max_correction_k
+        ):
+            logger.info(
+                "Heat pump {}: return-based screed {:.1f} degC too far from the carried {:.1f} "
+                "degC; not used.",
+                device.device_id,
+                measured,
+                carried,
+            )
+            measured = None
         slab, zones = estimate_slabs(
             carried,
             carried_zones,
