@@ -13,8 +13,11 @@ Rules (thresholds from the heat pump configuration, overridable):
   (``<device>_away`` = 1) the lower bound is min(holiday floor, holiday room
   temperature) - 1 K instead (measurements ``<device>-away-min-temperature`` /
   ``<device>-away-room-temperature``, else ``away.standby_min_c`` / ``away.room_c``)
-- FAIL  strong heating (PREHEAT/FORCED) for more than ``--max-active-h``
-  consecutive hours (default 6)
+- WARN  strong heating (PREHEAT/FORCED) for more than ``--max-active-h``
+  consecutive hours (default 6) only if the planned room leaves the band
+  (comfort minimum .. comfort max + forced overshoot) during the block; a long
+  block inside the band is reported as information (the optimizer has no
+  maximum duration: charging the screed for a cold night is intended)
 - WARN  active heating incl. RAISED for more than ``--max-raised-h`` consecutive
   hours (default 8); RAISED alone (+1 K, no forced valves) is no emergency
 - WARN  active heating in an hour without PV surplus and with a price above
@@ -31,7 +34,8 @@ Rules (thresholds from the heat pump configuration, overridable):
   FAIL  planned zone temperature below the zone minimum - 1 K (the zone
   minimum is min(comfort minimum, ``setback_room_c`` of the zone if it has
   set-back windows)) or above comfort max + forced overshoot + 0.5 K;
-  FAIL  PREHEAT/FORCED of the zone for more than ``--max-active-h`` hours;
+  WARN  PREHEAT/FORCED of the zone for more than ``--max-active-h`` hours
+  with the zone leaving the band during the block (otherwise information);
   WARN  planned zone temperature below the comfort minimum at the start of
   the plan (the zone is already too cold and the plan does not heat it in
   the first hour)
@@ -114,6 +118,48 @@ def _runs(flags: list[bool]) -> int:
         current = current + 1 if flag else 0
         best = max(best, current)
     return best
+
+
+def _long_blocks(flags: list[bool], min_slots: float) -> list[tuple[int, int]]:
+    """(start, end) of every run of True longer than ``min_slots`` (end exclusive)."""
+    blocks: list[tuple[int, int]] = []
+    start: Optional[int] = None
+    for i, flag in enumerate(list(flags) + [False]):
+        if flag and start is None:
+            start = i
+        elif not flag and start is not None:
+            if i - start > min_slots:
+                blocks.append((start, i))
+            start = None
+    return blocks
+
+
+def check_strong_blocks(
+    report: Report,
+    label: str,
+    modes: list[int],
+    rooms: list[float],
+    lows: list[float],
+    high: float,
+    slot_h: float,
+    max_active_h: float,
+) -> None:
+    """Long PREHEAT/FORCED blocks: a warning only if the room leaves the band."""
+    for start, end in _long_blocks([m in STRONG for m in modes], max_active_h / slot_h):
+        hours = (end - start) * slot_h
+        block = list(zip(rooms[start:end], lows[start:end]))
+        too_cold = [r for r, low in block if r < low]
+        too_warm = [r for r, _ in block if r > high]
+        text = f"{label}{_h(hours)} h am Stück Vorheizen/Forciert (> {_h(max_active_h)} h)"
+        if too_cold or too_warm:
+            out = []
+            if too_warm:
+                out.append(f"bis {max(too_warm):.1f} °C > {high:.1f} °C")
+            if too_cold:
+                out.append(f"bis {min(too_cold):.1f} °C unter dem Minimum")
+            report.warnings.append(f"{text}, Raum verlässt das Band ({', '.join(out)})")
+        else:
+            report.info.append(f"{text}, Raum bleibt im Band")
 
 
 def slot_hours(times: list[str]) -> float:
@@ -202,7 +248,7 @@ def check_zones(
     low: float,
     high: float,
     slot_h: float,
-    max_active_h: int,
+    max_active_h: float,
     away: list[bool],
 ) -> None:
     """Rules per heating zone (multi-zone model)."""
@@ -228,11 +274,10 @@ def check_zones(
             report.failures.append(
                 f"Zone {zone_id}: geplant {min(cold):.1f} °C < {floor - 1.0:.1f} °C"
             )
-        strong = _runs([m in STRONG for m in modes]) * slot_h
-        if strong > max_active_h:
-            report.failures.append(
-                f"Zone {zone_id}: {_h(strong)} h am Stück Vorheizen/Forciert (> {max_active_h} h)"
-            )
+        zone_lows = [-1e9 if a else floor for a in away]
+        check_strong_blocks(
+            report, f"Zone {zone_id}: ", modes, rooms, zone_lows, high, slot_h, max_active_h
+        )
         first_hour = max(1, round(1.0 / slot_h))
         if not away[0] and rooms[0] < floor and not any(m >= 1 for m in modes[:first_hour]):
             report.warnings.append(
@@ -291,7 +336,7 @@ def check(
     device: str = "wbb12",
     now: Optional[datetime] = None,
     max_age_min: float = 45.0,
-    max_active_h: int = 6,
+    max_active_h: float = 6,
     max_raised_h: int = 8,
     max_reduced_h: int = 6,
     away_room_c: Optional[float] = None,
@@ -359,11 +404,16 @@ def check(
         )
 
     # Durations in hours, independent of the plan resolution (1 h or 15 min).
-    strong_run = _runs([m in STRONG for m in modes]) * slot_h
-    if strong_run > max_active_h:
-        report.failures.append(
-            f"{_h(strong_run)} h am Stück Vorheizen/Forciert (> {max_active_h} h)"
-        )
+    check_strong_blocks(
+        report,
+        "",
+        modes,
+        rooms,
+        [low_away if a else low for a in away],
+        high,
+        slot_h,
+        max_active_h,
+    )
     active_run = _runs([m in ACTIVE for m in modes]) * slot_h
     if active_run > max_raised_h:
         report.warnings.append(
@@ -407,7 +457,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--device", default="wbb12")
     parser.add_argument("--max-age-min", type=float, default=45.0)
     parser.add_argument(
-        "--max-active-h", type=int, default=6, help="Fail above this many PREHEAT/FORCED hours"
+        "--max-active-h",
+        type=float,
+        default=6,
+        help="Check PREHEAT/FORCED blocks longer than this many hours against the band",
     )
     parser.add_argument(
         "--max-raised-h", type=int, default=8, help="Warn above this many active hours incl. RAISED"

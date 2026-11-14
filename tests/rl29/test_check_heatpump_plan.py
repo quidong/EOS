@@ -110,10 +110,20 @@ def test_long_raise_only_warns():
     assert "9 h am Stück aktiv geheizt inkl. Angehoben" in report.warnings[0]
 
 
-def test_long_preheat_or_forced_fails():
+def test_long_preheat_or_forced_inside_the_band_is_information():
+    """The optimizer has no maximum duration: charging the screed is intended."""
     report = run(solution([1] * 4 + [3] * 4 + [4] * 3 + [1] * 13))
-    assert report.exit_code == 2
-    assert "7 h am Stück Vorheizen/Forciert" in report.failures[0]
+    assert report.exit_code == 0, report.lines()
+    assert any("7 h am Stück Vorheizen/Forciert" in m and "im Band" in m for m in report.info)
+
+
+def test_long_preheat_or_forced_leaving_the_band_warns():
+    rooms = [21.0] * 4 + [21.5, 22.0, 22.4, 22.8, 23.1, 23.2, 23.2] + [22.5] * 13
+    report = run(solution([1] * 4 + [3] * 4 + [4] * 3 + [1] * 13, rooms=rooms))
+    assert report.exit_code == 1, report.lines()
+    assert "7 h am Stück Vorheizen/Forciert" in report.warnings[0]
+    assert "23.2 °C > 23.0 °C" in report.warnings[0]
+    assert not report.failures
 
 
 def test_cli_passes_all_limits(tmp_path, capsys):
@@ -323,11 +333,11 @@ def test_two_hours_preheat_in_quarters_is_plausible():
     assert any("Raster 15 min" in m for m in report.info)
 
 
-def test_long_preheat_in_quarters_fails_with_hours():
+def test_long_preheat_in_quarters_is_reported_in_hours():
     modes = quarters([1] * 4 + [3] * 4 + [4] * 3 + [1] * 13)
     report = run(solution(modes, step=Q))
-    assert report.exit_code == 2
-    assert "7 h am Stück Vorheizen/Forciert" in report.failures[0]
+    assert report.exit_code == 0, report.lines()
+    assert any("7 h am Stück Vorheizen/Forciert" in m for m in report.info)
 
 
 def test_partial_hours_are_reported():
@@ -440,9 +450,16 @@ def test_hot_zone_fails():
     assert any("Zone og: geplant 23.8" in m for m in report.failures)
 
 
-def test_long_forced_zone_fails():
+def test_long_forced_zone_inside_the_band_is_information():
     report = run_zones(zone_solution([4] * 8 + [1] * 16, [21.0] * 24), max_active_h=6)
-    assert any("Zone og: 8 h am Stück" in m for m in report.failures)
+    assert any("Zone og: 8 h am Stück" in m and "im Band" in m for m in report.info)
+    assert not any("Zone og: 8 h am Stück" in m for m in report.failures + report.warnings)
+
+
+def test_long_forced_zone_leaving_the_band_warns():
+    rooms = [21.0] * 6 + [23.2, 23.3] + [22.0] * 16
+    report = run_zones(zone_solution([4] * 8 + [1] * 16, rooms), max_active_h=6)
+    assert any("Zone og: 8 h am Stück" in m and "verlässt" in m for m in report.warnings)
 
 
 def test_cold_zone_left_reduced_warns():
