@@ -1111,6 +1111,8 @@ class GeneticOptimization(OptimizationBase):
     # decode_charge_discharge() per battery state of the current layout.
     _decode_table: Any = None
     _run_genetic_cfg: Any = None
+    _stop_event: Any = None
+    """RL29 fork: ``threading.Event``; once set, the generation loop stops (shadow)."""
     _run_prediction_hours: Optional[float] = None
     # control_end_slot of the frozen configuration. It is read several hundred
     # thousand times per run and cannot change while the snapshot is in place.

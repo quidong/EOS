@@ -229,7 +229,10 @@
                        "dhw_heat_w": 5000.0,
                        "dhw_flow_overshoot_k": 7.0,
                        "max_dhw_c": 60.0,
-                       "forced_overshoot_k": 1.0
+                       "forced_overshoot_k": 1.0,
+                       "raised_flow_offset_k": null,
+                       "forced_flow_offset_k": null,
+                       "preheat_valves_forced": false
                    },
                    "dhw": {
                        "volume_l": 190.0,
@@ -377,6 +380,7 @@
                        "fit_draw_profile": true,
                        "draw_min_days": 14,
                        "draw_quantile": null,
+                       "fit_zones": false,
                        "fit_ventilation_profile": true,
                        "weather_from_prediction": true,
                        "min_days": 5,
@@ -553,6 +557,13 @@
                        "raise_room_k": 1.0,
                        "dhw_min_c": 50.0,
                        "max_hours": 48.0
+                   },
+                   "slab_estimate": {
+                       "enabled": false,
+                       "max_age_hours": 3.0,
+                       "return_gain": 0.5,
+                       "min_heat_w": 1000.0,
+                       "measurement_max_age_seconds": 900.0
                    },
                    "power_limit_w": null
                }
@@ -764,6 +775,9 @@
                "individuals": 400,
                "generations": 400,
                "seed": null,
+               "battery_change_penalty_amt": 0.0,
+               "battery_min_hold_minutes": 0.0,
+               "battery_hold_penalty_amt": 0.5,
                "fitness_cache_max_entries": null,
                "workers": null,
                "pin_workers": true,

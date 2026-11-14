@@ -171,7 +171,7 @@ def _column(frame: Any, name: str) -> list[float]:
     return [(_finite(v) or 0.0) for v in frame[name].tolist()]
 
 
-def battery_baseline_parameters(config: Any, solution_frame: Any) -> dict[str, float]:
+def battery_baseline_parameters(config: Any, solution_frame: Any) -> dict[str, Any]:
     """Battery figures for the baseline from the first configured battery."""
     batteries = getattr(config.devices, "batteries", None) or {}
     for battery in batteries.values() if isinstance(batteries, dict) else batteries:

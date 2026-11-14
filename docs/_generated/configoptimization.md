@@ -36,6 +36,9 @@
                "individuals": 400,
                "generations": 400,
                "seed": null,
+               "battery_change_penalty_amt": 0.0,
+               "battery_min_hold_minutes": 0.0,
+               "battery_hold_penalty_amt": 0.5,
                "fitness_cache_max_entries": null,
                "workers": null,
                "pin_workers": true,
@@ -107,6 +110,9 @@
                "individuals": 400,
                "generations": 400,
                "seed": null,
+               "battery_change_penalty_amt": 0.0,
+               "battery_min_hold_minutes": 0.0,
+               "battery_hold_penalty_amt": 0.5,
                "fitness_cache_max_entries": null,
                "workers": null,
                "pin_workers": true,
@@ -378,6 +384,9 @@ optimizer spreads charging and loads.
 
 | Name | Type | Read-Only | Default | Description |
 | ---- | ---- | --------- | ------- | ----------- |
+| battery_change_penalty_amt | `float` | `rw` | `0.0` | RL29 fork: cost of every change of the battery operating mode (charge from the grid, discharge allowed, PV charge allowed, export) between two slots [currency]. A change must save at least this much; small values (1-2 ct) remove switching that changes almost nothing. 0 = off. |
+| battery_hold_penalty_amt | `float` | `rw` | `0.5` | RL29 fork: cost of a battery operating mode shorter than battery_min_hold_minutes [currency]. |
+| battery_min_hold_minutes | `float` | `rw` | `0.0` | RL29 fork: least time a battery operating mode stays before the next change [min]; a shorter mode costs battery_hold_penalty_amt. 0 = off. |
 | fitness_cache_max_entries | `Optional[int]` | `rw` | `None` | Maximum number of keys in the per-run fitness cache. None = unbounded (default), 0 = cache disabled, N > 0 = keep at most N keys and evict the oldest first. Every cached evaluation takes one or two keys. The cache only saves repeated evaluations; the result for a fixed seed is the same with any value. Limit it to cap memory on small devices. |
 | generations | `Optional[int]` | `rw` | `400` | Number of generations to evolve [>= 10]. Defaults to 400. |
 | horizon | `int` | `ro` | `N/A` | Number of optimization steps. |
@@ -410,6 +419,9 @@ optimizer spreads charging and loads.
                "individuals": 300,
                "generations": 400,
                "seed": null,
+               "battery_change_penalty_amt": 0.0,
+               "battery_min_hold_minutes": 0.0,
+               "battery_hold_penalty_amt": 0.5,
                "fitness_cache_max_entries": null,
                "workers": null,
                "pin_workers": true,
@@ -441,6 +453,9 @@ optimizer spreads charging and loads.
                "individuals": 300,
                "generations": 400,
                "seed": null,
+               "battery_change_penalty_amt": 0.0,
+               "battery_min_hold_minutes": 0.0,
+               "battery_hold_penalty_amt": 0.5,
                "fitness_cache_max_entries": null,
                "workers": null,
                "pin_workers": true,

@@ -363,7 +363,11 @@ async def test_a_live_run_stops_the_comparison_and_drops_its_result():
     assert len(runner.results) == 0
     # the next comparison starts with a fresh stop flag
     assert runner.schedule(
-        [OptimizationAlgorithm.MILP], object(), "GENETIC", fake_solution(2.0), 1.0,
+        [OptimizationAlgorithm.MILP],
+        object(),
+        "GENETIC",
+        fake_solution(2.0),
+        1.0,
         lambda a, p: fake_solution(1.0),
     )
     await runner.wait_idle()

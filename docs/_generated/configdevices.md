@@ -209,7 +209,10 @@ config path from ``self.device_id`` without needing an external index.
                        "dhw_heat_w": 5000.0,
                        "dhw_flow_overshoot_k": 7.0,
                        "max_dhw_c": 60.0,
-                       "forced_overshoot_k": 1.0
+                       "forced_overshoot_k": 1.0,
+                       "raised_flow_offset_k": null,
+                       "forced_flow_offset_k": null,
+                       "preheat_valves_forced": false
                    },
                    "dhw": {
                        "volume_l": 190.0,
@@ -357,6 +360,7 @@ config path from ``self.device_id`` without needing an external index.
                        "fit_draw_profile": true,
                        "draw_min_days": 14,
                        "draw_quantile": null,
+                       "fit_zones": false,
                        "fit_ventilation_profile": true,
                        "weather_from_prediction": true,
                        "min_days": 5,
@@ -533,6 +537,13 @@ config path from ``self.device_id`` without needing an external index.
                        "raise_room_k": 1.0,
                        "dhw_min_c": 50.0,
                        "max_hours": 48.0
+                   },
+                   "slab_estimate": {
+                       "enabled": false,
+                       "max_age_hours": 3.0,
+                       "return_gain": 0.5,
+                       "min_heat_w": 1000.0,
+                       "measurement_max_age_seconds": 900.0
                    },
                    "power_limit_w": null
                }
@@ -767,7 +778,10 @@ config path from ``self.device_id`` without needing an external index.
                        "dhw_heat_w": 5000.0,
                        "dhw_flow_overshoot_k": 7.0,
                        "max_dhw_c": 60.0,
-                       "forced_overshoot_k": 1.0
+                       "forced_overshoot_k": 1.0,
+                       "raised_flow_offset_k": null,
+                       "forced_flow_offset_k": null,
+                       "preheat_valves_forced": false
                    },
                    "dhw": {
                        "volume_l": 190.0,
@@ -915,6 +929,7 @@ config path from ``self.device_id`` without needing an external index.
                        "fit_draw_profile": true,
                        "draw_min_days": 14,
                        "draw_quantile": null,
+                       "fit_zones": false,
                        "fit_ventilation_profile": true,
                        "weather_from_prediction": true,
                        "min_days": 5,
@@ -1092,6 +1107,13 @@ config path from ``self.device_id`` without needing an external index.
                        "dhw_min_c": 50.0,
                        "max_hours": 48.0
                    },
+                   "slab_estimate": {
+                       "enabled": false,
+                       "max_age_hours": 3.0,
+                       "return_gain": 0.5,
+                       "min_heat_w": 1000.0,
+                       "measurement_max_age_seconds": 900.0
+                   },
                    "power_limit_w": null,
                    "measurement_key_room_temperature": "wbb12-room-temperature",
                    "measurement_key_slab_temperature": "wbb12-slab-temperature",
@@ -1110,6 +1132,7 @@ config path from ``self.device_id`` without needing an external index.
                        "wbb12-away-min-temperature",
                        "wbb12-reduce-lock-until-ts"
                    ],
+                   "measurement_key_return_temperature": "wbb12-return-temperature",
                    "calibration_measurement_keys": {
                        "outdoor_c": "wbb12-outdoor-temperature",
                        "room_c": "wbb12-room-temperature",

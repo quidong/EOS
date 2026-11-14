@@ -467,7 +467,7 @@ class EnergyManagement(
             optimizer = _genetic_family_optimizer(algorithm, verbose, seed)
             # RL29 fork: the next live run may start meanwhile; the shadow keeps the
             # start time and previous solution of its own run and stops on request.
-            optimizer.ems = frozen  # type: ignore[misc]
+            optimizer.ems = frozen
             optimizer._stop_event = runner.stop_event
             return optimizer.optimize_ems(
                 start_hour=start_hour,

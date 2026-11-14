@@ -7,6 +7,8 @@ they are skipped.
 
 from __future__ import annotations
 
+from typing import Any
+
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -704,7 +706,7 @@ def test_run_payload_baseline_equals_plan_without_flexibility():
 
 def test_baseline_charges_lcos_on_delivered_dc_energy():
     """The plan pays LCOS on battery-delivered DC energy; the baseline must too."""
-    common = dict(
+    common: dict[str, Any] = dict(
         pv_wh=[0.0],
         load_wh=[960.0],
         price_amt_kwh=[0.40],

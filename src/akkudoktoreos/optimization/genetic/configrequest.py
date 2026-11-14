@@ -338,7 +338,8 @@ class ConfigOptimizationRequest(
         interval = to_duration(settings.interval_sec)
         # RL29 fork: an energy management run has just updated the predictions; a
         # second update in the same run only repeats every provider's work.
-        updated = bool(get_ems().predictions_updated_in_run())
+        updated_in_run = getattr(get_ems(), "predictions_updated_in_run", None)
+        updated = callable(updated_in_run) and updated_in_run() is True
 
         async def forecast(
             supplied: Optional[list[float]], key: str, energy: bool = False

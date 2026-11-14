@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2611132105770820"
+    "version": "v0.3.0.dev2611141392146470"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -10054,6 +10054,35 @@
               42
             ]
           },
+          "battery_change_penalty_amt": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Battery Change Penalty Amt",
+            "description": "RL29 fork: cost of every change of the battery operating mode (charge from the grid, discharge allowed, PV charge allowed, export) between two slots [currency]. A change must save at least this much; small values (1-2 ct) remove switching that changes almost nothing. 0 = off.",
+            "default": 0.0,
+            "examples": [
+              0.0,
+              0.015
+            ]
+          },
+          "battery_min_hold_minutes": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Battery Min Hold Minutes",
+            "description": "RL29 fork: least time a battery operating mode stays before the next change [min]; a shorter mode costs battery_hold_penalty_amt. 0 = off.",
+            "default": 0.0,
+            "examples": [
+              0.0,
+              45.0
+            ]
+          },
+          "battery_hold_penalty_amt": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Battery Hold Penalty Amt",
+            "description": "RL29 fork: cost of a battery operating mode shorter than battery_min_hold_minutes [currency].",
+            "default": 0.5
+          },
           "fitness_cache_max_entries": {
             "anyOf": [
               {
@@ -10247,6 +10276,35 @@
               null,
               42
             ]
+          },
+          "battery_change_penalty_amt": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Battery Change Penalty Amt",
+            "description": "RL29 fork: cost of every change of the battery operating mode (charge from the grid, discharge allowed, PV charge allowed, export) between two slots [currency]. A change must save at least this much; small values (1-2 ct) remove switching that changes almost nothing. 0 = off.",
+            "default": 0.0,
+            "examples": [
+              0.0,
+              0.015
+            ]
+          },
+          "battery_min_hold_minutes": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Battery Min Hold Minutes",
+            "description": "RL29 fork: least time a battery operating mode stays before the next change [min]; a shorter mode costs battery_hold_penalty_amt. 0 = off.",
+            "default": 0.0,
+            "examples": [
+              0.0,
+              45.0
+            ]
+          },
+          "battery_hold_penalty_amt": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Battery Hold Penalty Amt",
+            "description": "RL29 fork: cost of a battery operating mode shorter than battery_min_hold_minutes [currency].",
+            "default": 0.5
           },
           "fitness_cache_max_entries": {
             "anyOf": [
@@ -10525,6 +10583,21 @@
             ],
             "title": "Initial Slab C",
             "description": "Measured screed temperature [degC]; None = steady state estimate."
+          },
+          "initial_zone_slab_c": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Zone Slab C",
+            "description": "Screed temperature per zone [degC] (RL29 fork, slab estimate); a missing zone starts from its steady state."
           },
           "initial_dhw_c": {
             "anyOf": [
@@ -12361,6 +12434,12 @@
               0.5
             ]
           },
+          "fit_zones": {
+            "type": "boolean",
+            "title": "Fit Zones",
+            "description": "Carry the fitted house values (loss, emitter, solar aperture, internal gains) to zones with their own building: each quantity is scaled so the zones add up to the fitted house value times their shares, keeping the configured split between the zones. Zones without their own building follow the house anyway.",
+            "default": false
+          },
           "fit_ventilation_profile": {
             "type": "boolean",
             "title": "Fit Ventilation Profile",
@@ -12491,7 +12570,7 @@
           "fixed_room_setpoints": {
             "type": "boolean",
             "title": "Fixed Room Setpoints",
-            "description": "RL29 fork: the room controllers keep their setpoint (nothing changes it per mode). RAISED then only raises the flow temperature, and with zones a single zone cannot be reduced on its own (REDUCED needs SG Ready 'reduced' for all zones). PREHEAT/FORCED act through forced valve positions.",
+            "description": "RL29 fork: the room controllers keep their setpoint (nothing changes it per mode). RAISED then only raises the flow temperature, and with zones a single zone cannot be reduced on its own (REDUCED needs SG Ready 'reduced' for all zones). FORCED acts through forced valve positions; PREHEAT stops at the setpoint unless unit.preheat_valves_forced.",
             "default": false
           }
         },
@@ -12527,7 +12606,7 @@
           "fixed_room_setpoints": {
             "type": "boolean",
             "title": "Fixed Room Setpoints",
-            "description": "RL29 fork: the room controllers keep their setpoint (nothing changes it per mode). RAISED then only raises the flow temperature, and with zones a single zone cannot be reduced on its own (REDUCED needs SG Ready 'reduced' for all zones). PREHEAT/FORCED act through forced valve positions.",
+            "description": "RL29 fork: the room controllers keep their setpoint (nothing changes it per mode). RAISED then only raises the flow temperature, and with zones a single zone cannot be reduced on its own (REDUCED needs SG Ready 'reduced' for all zones). FORCED acts through forced valve positions; PREHEAT stops at the setpoint unless unit.preheat_valves_forced.",
             "default": false
           }
         },
@@ -12589,6 +12668,9 @@
           },
           "weather_warning": {
             "$ref": "#/components/schemas/HeatPumpWeatherWarningSettings"
+          },
+          "slab_estimate": {
+            "$ref": "#/components/schemas/HeatPumpSlabEstimateSettings"
           },
           "power_limit_w": {
             "anyOf": [
@@ -12673,6 +12755,9 @@
           "weather_warning": {
             "$ref": "#/components/schemas/HeatPumpWeatherWarningSettings"
           },
+          "slab_estimate": {
+            "$ref": "#/components/schemas/HeatPumpSlabEstimateSettings"
+          },
           "power_limit_w": {
             "anyOf": [
               {
@@ -12727,6 +12812,12 @@
             },
             "type": "array",
             "title": "Measurement Keys",
+            "readOnly": true
+          },
+          "measurement_key_return_temperature": {
+            "type": "string",
+            "title": "Measurement Key Return Temperature",
+            "description": "Return temperature of the heating circuit [degC] (fork, slab estimate).",
             "readOnly": true
           },
           "calibration_measurement_keys": {
@@ -12843,6 +12934,7 @@
           "measurement_key_dhw_setpoint",
           "measurement_key_power_limited",
           "measurement_keys",
+          "measurement_key_return_temperature",
           "calibration_measurement_keys",
           "measurement_key_cooling_season",
           "measurement_key_away",
@@ -13405,6 +13497,48 @@
         "title": "HeatPumpRoomLimitsSettings",
         "description": "Per-room limits reported by the controller (fork).\n\nEOS models one room node, the mean of all rooms. Single rooms can be colder or\nwarmer than the mean. The controller knows the rooms and their own limits and\nreports two margins (rooms with open windows or just aired left out):\n\n- ``<device_id>-room-min-margin``: smallest ``room - lower limit of the room`` [K];\n- ``<device_id>-room-max-margin``: smallest ``upper limit of the room - room`` [K].\n\nFor the first ``horizon_hours`` the rooms are assumed to move with the mean: the\ncomfort minimum of the mean becomes at least ``room now - min margin`` (at most\n``max_raise_k`` above the band and not above the NORMAL setpoint), the comfort\nmaximum and the RAISED target at most ``room now + max margin`` (not below the\nNORMAL setpoint). Both measurements are optional."
       },
+      "HeatPumpSlabEstimateSettings": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Carry the screed temperature.",
+            "default": false
+          },
+          "max_age_hours": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Max Age Hours",
+            "description": "Oldest previous plan whose screed is carried forward [h].",
+            "default": 3.0
+          },
+          "return_gain": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Return Gain",
+            "description": "Share of the difference between the return-based and the carried screed that corrects the estimate per run (0 = no correction, 1 = return only).",
+            "default": 0.5
+          },
+          "min_heat_w": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Min Heat W",
+            "description": "Least space heat (heat output minus hot water) for a return correction [W]; below it the return says little about the screed.",
+            "default": 1000.0
+          },
+          "measurement_max_age_seconds": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Measurement Max Age Seconds",
+            "description": "Oldest return, flow and heat measurement for the correction [s].",
+            "default": 900.0
+          }
+        },
+        "type": "object",
+        "title": "HeatPumpSlabEstimateSettings",
+        "description": "Screed temperature carried from plan to plan (RL29 fork).\n\nWithout a screed sensor every run started from the steady state of the room,\nso heat stored by PREHEAT/FORCED vanished from the model at the next run. With\nthis enabled the run starts from the screed the previous plan predicted for now\n(per zone too) and corrects it with the measured return temperature while the\nheat pump heats the floor (``<id>-return-temperature``, optionally with\n``<id>-flow-temperature``, ``<id>-heat-power`` and ``<id>-dhw-heat-power``).\nA measured screed (``<id>-slab-temperature``) still wins."
+      },
       "HeatPumpUnitSettings": {
         "properties": {
           "cop_points": {
@@ -13511,6 +13645,48 @@
             "title": "Forced Overshoot K",
             "description": "FORCED mode (SG Ready 4) heats until comfort.max_c + this offset [K].",
             "default": 1.0
+          },
+          "raised_flow_offset_k": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 15.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raised Flow Offset K",
+            "description": "Heating curve shift of SG Ready 3 (RAISED, PREHEAT) [K]. None: the mode only moves the room target (with fixed room setpoints RAISED then has no effect). A value: while the room controllers keep their valves open the flow is this much above the normal heating curve, so the screed takes building.emitter_w_per_k * offset more heat. Read it off the flow setpoint of the heat pump before and after switching to SG Ready 3.",
+            "examples": [
+              null,
+              3.0
+            ]
+          },
+          "forced_flow_offset_k": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 15.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forced Flow Offset K",
+            "description": "Heating curve shift of SG Ready 4 (FORCED) [K]. None: FORCED runs at full capacity until comfort.max_c + forced_overshoot_k. A value: the valves are forced open and the screed takes emitter_w_per_k * (curve + offset - screed), limited by capacity and max_flow_c, until the same room limit.",
+            "examples": [
+              null,
+              0.5
+            ]
+          },
+          "preheat_valves_forced": {
+            "type": "boolean",
+            "title": "Preheat Valves Forced",
+            "description": "PREHEAT also forces the valves open (e.g. KNX forced positions): it heats at the curve + raised_flow_offset_k until comfort.max_c + forced_overshoot_k instead of stopping at the room target.",
+            "default": false
           }
         },
         "type": "object",

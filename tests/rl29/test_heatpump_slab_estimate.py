@@ -109,6 +109,7 @@ def test_zone_screeds_reach_the_run_plan():
     )
     starts = [START.add(hours=i) for i in range(4)]
     plan = build_run_plan(params, starts, 1.0, [5.0] * 4, [0.0] * 4, [0.0003] * 4)
+    assert plan.zone_initial is not None
     assert plan.zone_initial.slabs == pytest.approx([27.5, 25.0])
 
 
