@@ -55,6 +55,7 @@ HEAT_PUMP_SOLUTION_COLUMNS: list[tuple[str, str, Any]] = [
     ("dhw_mode", "dhw_mode", _mode_value),
     ("rod_target_c", "rod_target_c", float),
     ("energy_wh", "electric_wh", float),
+    ("baseline_energy_wh", "baseline_electric_wh", float),
     ("rod_energy_wh", "rod_electric_wh", float),
     ("room_temperature_c", "room_c", float),
     ("slab_temperature_c", "slab_c", float),

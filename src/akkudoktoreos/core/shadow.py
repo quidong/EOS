@@ -129,6 +129,33 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     return pairs
 
 
+def shadow_parameters(parameters: Any, own_start: Optional[tuple[Any, Any]]) -> Any:
+    """Parameter copy for a shadow run, warm-started from the shadow's own last plan.
+
+    The prepared parameters carry the active algorithm's published plan as warm
+    start. A shadow GENETIC run seeded with the active MILP plan can hardly end up
+    worse than it, which biases the comparison towards a zero delta. Each shadow
+    algorithm therefore continues from its own previous solution, or starts cold
+    when it has none yet (RL29 fork).
+
+    Args:
+        parameters: Prepared GeneticOptimizationParameters of the active run.
+        own_start: ``(start_solution, start_solution_datetime)`` of the shadow
+            algorithm's last solution, or None.
+
+    Returns:
+        A copy of ``parameters`` with the warm start replaced.
+    """
+    try:
+        params = parameters.model_copy(deep=True)
+    except AttributeError:
+        return parameters
+    start, start_time = own_start if own_start is not None else (None, None)
+    params.start_solution = list(start) if start is not None else None
+    params.start_solution_datetime = start_time if start is not None else None
+    return params
+
+
 OptimizeFn = Callable[[OptimizationAlgorithm, Any], Any]
 """Runs one algorithm on a parameter copy and returns its GeneticSolution (blocking)."""
 
@@ -142,6 +169,9 @@ class ShadowRunner:
         self._task: Optional[asyncio.Task] = None
         self.results: deque[ShadowResult] = deque(maxlen=MAX_RESULTS)
         self.last_error: Optional[str] = None
+        # Last solution of each shadow algorithm: its own warm start for the next
+        # comparison (see ``shadow_parameters``).
+        self._own_starts: dict[str, tuple[Any, Any]] = {}
 
     @classmethod
     def instance(cls) -> "ShadowRunner":
@@ -208,13 +238,21 @@ class ShadowRunner:
         loop = asyncio.get_running_loop()
         for algorithm in algorithms:
             started = time.monotonic()
+            own = self._own_starts.get(str(algorithm))
+            params = shadow_parameters(parameters, own)
             try:
-                solution = await loop.run_in_executor(None, optimize, algorithm, parameters)
+                solution = await loop.run_in_executor(None, optimize, algorithm, params)
             except Exception as exc:
                 self.last_error = f"{algorithm}: {exc}"
                 logger.warning("Shadow comparison {} failed: {}", algorithm, exc)
                 continue
             duration = time.monotonic() - started
+            start = getattr(solution, "start_solution", None)
+            if start is not None:
+                self._own_starts[str(algorithm)] = (
+                    list(start),
+                    getattr(solution, "start_solution_datetime", None),
+                )
             objective, net = solution_objective(solution)
             result = ShadowResult(
                 issued_at=issued,

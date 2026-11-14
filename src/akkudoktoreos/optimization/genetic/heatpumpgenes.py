@@ -1888,6 +1888,15 @@ def plan_result(plan: HeatPumpRunPlan, genes: Sequence[int]) -> dict[str, Any]:
         "electric_wh": float(sum(outcome.electric_wh)),
         "away_slots": int(plan.away_slots),
     }
+    # RL29 fork: consumption of the status quo (NORMAL heating, hot water by the
+    # controller) for the self-consumption baseline, so the saving of shifting
+    # the heat pump becomes visible there.
+    try:
+        status_quo = plan.evaluate(plan.default_genes())
+        result["baseline_electric_wh"] = [float(v) for v in status_quo.electric_wh]
+        result["summary"]["baseline_electric_wh"] = float(sum(status_quo.electric_wh))
+    except Exception as exc:  # diagnostics only, never break the solution
+        logger.debug("Heat pump {}: no status quo consumption: {}", plan.device_id, exc)
     for key, values in list(result.items()):
         if isinstance(values, list):
             result[key] = [float(v) if isinstance(v, float) else v for v in values]

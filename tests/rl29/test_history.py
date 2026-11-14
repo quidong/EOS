@@ -695,3 +695,132 @@ def test_run_payload_baseline_equals_plan_without_flexibility():
     meta = payload["meta"]
     assert meta["baseline"]["intra_slot_model"] is True
     assert meta["saving_vs_baseline_amt"] == pytest.approx(0.0, abs=1e-3)
+
+
+# --------------------------------------------------------------------------------------
+# Baseline on equal terms with the plan (RL29 fork, measure 9)
+# --------------------------------------------------------------------------------------
+
+
+def test_baseline_charges_lcos_on_delivered_dc_energy():
+    """The plan pays LCOS on battery-delivered DC energy; the baseline must too."""
+    common = dict(
+        pv_wh=[0.0],
+        load_wh=[960.0],
+        price_amt_kwh=[0.40],
+        feed_in_amt_kwh=[0.08],
+        battery_capacity_wh=10000,
+        battery_soc_wh=5000,
+        max_charge_wh=5000,
+        max_discharge_wh=5000,
+        charge_eff=1.0,
+        discharge_eff=0.96,
+    )
+    without = baseline_self_consumption_cost(**common)
+    with_lcos = baseline_self_consumption_cost(**common, lcos_amt_kwh=0.03)
+    assert without["grid_import_wh"] == 0
+    assert with_lcos["lcos_amt"] == pytest.approx(0.96 * 0.03, abs=1e-4)
+    assert with_lcos["net_amt"] == pytest.approx(without["net_amt"] + 0.0288, abs=1e-4)
+    # 960 Wh DC delivered at 0.96 -> 1000 Wh taken from the battery.
+    assert with_lcos["end_soc_wh"] == pytest.approx(4000.0, abs=0.5)
+
+
+def test_baseline_uses_inverter_efficiency_curve_at_slot_load():
+    """Small loads are served at the low end of the inverter curve, as in the plan."""
+    curve = [(0.02, 0.89), (0.1, 0.97), (1.0, 0.97)]
+    result = baseline_self_consumption_cost(
+        pv_wh=[0.0],
+        load_wh=[100.0],
+        price_amt_kwh=[0.40],
+        feed_in_amt_kwh=[0.08],
+        battery_capacity_wh=10000,
+        battery_soc_wh=5000,
+        max_charge_wh=5000,
+        max_discharge_wh=5000,
+        charge_eff=1.0,
+        discharge_eff=1.0,
+        dc_to_ac_efficiency_curve=curve,
+        inverter_max_wh=5000.0,  # 100 Wh = 2 % load -> efficiency 0.89
+    )
+    assert result["grid_import_wh"] == 0
+    assert result["end_soc_wh"] == pytest.approx(5000 - 100 / 0.89, abs=0.5)
+
+
+def test_baseline_discharge_limited_by_battery_content_with_inverter_loss():
+    result = baseline_self_consumption_cost(
+        pv_wh=[0.0],
+        load_wh=[1000.0],
+        price_amt_kwh=[0.40],
+        feed_in_amt_kwh=[0.08],
+        battery_capacity_wh=10000,
+        battery_soc_wh=600,
+        min_soc_wh=100,
+        max_charge_wh=5000,
+        max_discharge_wh=5000,
+        charge_eff=1.0,
+        discharge_eff=1.0,
+        dc_to_ac_efficiency=0.9,
+    )
+    # 500 Wh above the reserve -> 450 Wh AC, the rest from the grid.
+    assert result["grid_import_wh"] == pytest.approx(550.0, abs=0.5)
+    assert result["end_soc_wh"] == pytest.approx(100.0, abs=0.5)
+
+
+def heat_pump_config(history: HistorySettings):
+    config = fake_config(history, battery=True)
+    config.devices.heat_pumps = {"hp1": SimpleNamespace(device_id="hp1")}
+    config.devices.batteries["battery1"].levelized_cost_of_storage_amt_kwh = 0.03
+    config.devices.inverters = {
+        "inv1": SimpleNamespace(
+            battery_id="battery1",
+            dc_to_ac_efficiency=1.0,
+            dc_to_ac_efficiency_curve=[(0.02, 0.89), (0.1, 0.97), (1.0, 0.97)],
+            max_power_w=20000.0,
+        )
+    }
+    return config
+
+
+def test_baseline_load_replaces_planned_heat_pump_by_status_quo():
+    from akkudoktoreos.core.historyrecorder import baseline_load_wh
+
+    index = pd.date_range(T0, periods=4, freq="15min", tz="UTC")
+    plan = pd.DataFrame(
+        {
+            "load_energy_wh": [500.0, 500.0, 200.0, 200.0],
+            "hp1_energy_wh": [400.0, 400.0, 100.0, 100.0],
+            "hp1_baseline_energy_wh": [250.0, 250.0, 250.0, 250.0],
+        },
+        index=index,
+    )
+    load, applied = baseline_load_wh(heat_pump_config(HistorySettings()), plan)
+    assert applied is True
+    assert load == [350.0, 350.0, 350.0, 350.0]
+
+
+def test_baseline_load_without_status_quo_column_is_the_plan_load():
+    from akkudoktoreos.core.historyrecorder import baseline_load_wh
+
+    index = pd.date_range(T0, periods=2, freq="15min", tz="UTC")
+    plan = pd.DataFrame(
+        {"load_energy_wh": [500.0, 200.0], "hp1_energy_wh": [400.0, 100.0]}, index=index
+    )
+    load, applied = baseline_load_wh(heat_pump_config(HistorySettings()), plan)
+    assert applied is False
+    assert load == [500.0, 200.0]
+
+
+def test_run_payload_baseline_with_lcos_curve_heat_pump_and_end_soc():
+    issued = T0
+    solution = fake_solution(issued)
+    plan = solution.solution.to_dataframe()
+    plan["hp1_energy_wh"] = [100.0] * 8
+    plan["hp1_baseline_energy_wh"] = [150.0] * 8
+    payload = run_payload(heat_pump_config(HistorySettings()), solution, "GENETIC", 1.0, 48)
+    meta = payload["meta"]
+    assert meta["baseline"]["heat_pump_status_quo"] is True
+    assert "lcos_amt" in meta["baseline"] and "end_soc_wh" in meta["baseline"]
+    assert meta["plan_end_soc_wh"] == pytest.approx(5000.0)
+    assert meta["end_soc_delta_wh"] == pytest.approx(
+        5000.0 - meta["baseline"]["end_soc_wh"], abs=0.2
+    )

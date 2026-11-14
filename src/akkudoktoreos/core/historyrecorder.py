@@ -184,7 +184,7 @@ def battery_baseline_parameters(config: Any, solution_frame: Any) -> dict[str, f
         min_soc = float(getattr(battery, "min_soc_percentage", 0) or 0) / 100.0
         charge_w = float(getattr(battery, "max_charge_power_w", 0) or 0)
         discharge_w = float(getattr(battery, "max_discharge_power_w", None) or charge_w)
-        return {
+        result: dict[str, Any] = {
             "battery_capacity_wh": capacity,
             "battery_soc_wh": soc_factor * capacity,
             "max_charge_w": charge_w,
@@ -192,8 +192,68 @@ def battery_baseline_parameters(config: Any, solution_frame: Any) -> dict[str, f
             "charge_eff": float(getattr(battery, "charging_efficiency", 0.95) or 0.95),
             "discharge_eff": float(getattr(battery, "discharging_efficiency", 0.95) or 0.95),
             "min_soc_wh": min_soc * capacity,
+            "lcos_amt_kwh": float(getattr(battery, "levelized_cost_of_storage_amt_kwh", 0) or 0),
         }
+        # RL29 fork: the inverter of this battery converts the discharge to AC,
+        # as in the plan simulation (constant efficiency or curve).
+        inverters = getattr(config.devices, "inverters", None) or {}
+        for inverter in inverters.values() if isinstance(inverters, dict) else inverters:
+            if getattr(inverter, "battery_id", None) != battery.device_id:
+                continue
+            result["dc_to_ac_efficiency"] = float(
+                getattr(inverter, "dc_to_ac_efficiency", 1.0) or 1.0
+            )
+            curve = getattr(inverter, "dc_to_ac_efficiency_curve", None)
+            if curve:
+                result["dc_to_ac_efficiency_curve"] = [(float(f), float(e)) for f, e in curve]
+            result["inverter_max_w"] = float(getattr(inverter, "max_power_w", 0) or 0)
+            break
+        return result
     return {}
+
+
+def baseline_load_wh(config: Any, plan: Any) -> tuple[list[float], bool]:
+    """Consumption for the baseline: the plan's load with heat pumps at status quo.
+
+    The plan's ``load_energy_wh`` contains the heat pump consumption as optimized.
+    Comparing against the same load hides what shifting the heat pump earns. Each
+    heat pump with a ``<device>_baseline_energy_wh`` column (status quo NORMAL
+    heating, hot water by the controller) gets its planned consumption replaced
+    by that status quo (RL29 fork).
+
+    Returns:
+        The load per slot [Wh] and whether a heat pump status quo was applied.
+    """
+    load = _column(plan, "load_energy_wh")
+    applied = False
+    heat_pumps = getattr(config.devices, "heat_pumps", None) or {}
+    for device in heat_pumps.values() if isinstance(heat_pumps, dict) else heat_pumps:
+        device_id = getattr(device, "device_id", None)
+        planned = _column(plan, f"{device_id}_energy_wh")
+        status_quo = _column(plan, f"{device_id}_baseline_energy_wh")
+        if not planned or not status_quo:
+            continue
+        n = min(len(load), len(planned), len(status_quo))
+        load = [
+            max(load[i] - planned[i] + status_quo[i], 0.0) if i < n else load[i]
+            for i in range(len(load))
+        ]
+        applied = True
+    return load, applied
+
+
+def _plan_end_soc_wh(config: Any, plan: Any, n: int) -> Optional[float]:
+    """Battery content of the plan at the end of the compared horizon [Wh]."""
+    batteries = getattr(config.devices, "batteries", None) or {}
+    for battery in batteries.values() if isinstance(batteries, dict) else batteries:
+        capacity = float(getattr(battery, "capacity_wh", 0) or 0)
+        values = _column(plan, f"{battery.device_id}_soc_factor")
+        if capacity <= 0 or not values or n <= 0:
+            continue
+        # The SoC column holds the state at each slot start; the slot after the
+        # horizon is not in the plan, so the last slot start is the best estimate.
+        return values[min(n, len(values)) - 1] * capacity
+    return None
 
 
 def run_payload(
@@ -210,7 +270,7 @@ def run_payload(
     # grid strategy differs), PV and prices as forecast.
     baseline = None
     pv = _column(prediction, "pvforecast_ac_energy_wh") or _column(prediction, "pv_energy_wh")
-    load = _column(plan, "load_energy_wh")
+    load, heat_pump_status_quo = baseline_load_wh(config, plan)
     price = _column(prediction, "elec_price_amt_kwh")
     feed_in = _column(prediction, "feed_in_tariff_amt_kwh")
     n = min(len(pv), len(load), len(price), len(feed_in), len(plan))
@@ -237,8 +297,13 @@ def run_payload(
             discharge_eff=battery.get("discharge_eff", 0.95),
             min_soc_wh=battery.get("min_soc_wh", 0.0),
             direct_wh=direct,
+            lcos_amt_kwh=battery.get("lcos_amt_kwh", 0.0),
+            dc_to_ac_efficiency=battery.get("dc_to_ac_efficiency", 1.0),
+            dc_to_ac_efficiency_curve=battery.get("dc_to_ac_efficiency_curve"),
+            inverter_max_wh=battery.get("inverter_max_w", 0.0) * slot_h,
         )
         baseline["intra_slot_model"] = direct is not None
+        baseline["heat_pump_status_quo"] = heat_pump_status_quo
     plan_costs = sum(_column(plan, "costs_amt")[:n]) if n else None
     plan_revenue = sum(_column(plan, "revenue_amt")[:n]) if n else None
     meta: dict[str, Any] = {
@@ -250,6 +315,12 @@ def run_payload(
         meta["baseline"] = baseline
         meta["plan_net_amt"] = round(plan_costs - plan_revenue, 4)
         meta["saving_vs_baseline_amt"] = round(baseline["net_amt"] - (plan_costs - plan_revenue), 4)
+        # RL29 fork: what each side leaves in the battery at the horizon end, so a
+        # saving bought by emptying the battery is visible.
+        plan_end_soc = _plan_end_soc_wh(config, plan, n)
+        if plan_end_soc is not None:
+            meta["plan_end_soc_wh"] = round(plan_end_soc, 1)
+            meta["end_soc_delta_wh"] = round(plan_end_soc - baseline.get("end_soc_wh", 0.0), 1)
     return {
         "issued_at": issued,
         "algorithm": algorithm,

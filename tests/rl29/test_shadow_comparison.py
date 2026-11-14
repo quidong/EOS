@@ -266,3 +266,67 @@ async def test_automatic_ems_run_shadows_the_other_algorithm(configured_request,
     )
     await runner.wait_idle()
     assert len(runner.results) == 1
+
+
+# --------------------------------------------------------------------------------------
+# Own warm start per shadow algorithm (RL29 fork, measure 9)
+# --------------------------------------------------------------------------------------
+
+
+class FakeParameters:
+    """Stands in for GeneticOptimizationParameters (model_copy, warm start fields)."""
+
+    def __init__(self, start: Any = None, start_time: Any = None) -> None:
+        self.start_solution = start
+        self.start_solution_datetime = start_time
+
+    def model_copy(self, deep: bool = False) -> "FakeParameters":
+        return FakeParameters(
+            list(self.start_solution) if self.start_solution is not None else None,
+            self.start_solution_datetime,
+        )
+
+
+def test_shadow_parameters_drop_the_active_warm_start_without_own_plan():
+    from akkudoktoreos.core.shadow import shadow_parameters
+
+    active = FakeParameters([1, 2, 3], "t0")
+    params = shadow_parameters(active, None)
+    assert params is not active
+    assert params.start_solution is None and params.start_solution_datetime is None
+    # The active run's parameters stay untouched.
+    assert active.start_solution == [1, 2, 3]
+
+
+def test_shadow_parameters_use_the_shadow_algorithms_own_last_plan():
+    from akkudoktoreos.core.shadow import shadow_parameters
+
+    params = shadow_parameters(FakeParameters([1, 2, 3], "t0"), ([7, 8], "t1"))
+    assert params.start_solution == [7, 8]
+    assert params.start_solution_datetime == "t1"
+
+
+@pytest.mark.asyncio
+async def test_runner_warm_starts_each_shadow_from_its_own_previous_solution():
+    runner = ShadowRunner()
+    seen: list[Any] = []
+
+    def optimize(algorithm: OptimizationAlgorithm, parameters: Any) -> Any:
+        seen.append(parameters.start_solution)
+        solution = fake_solution(9.0)
+        solution.start_solution = [len(seen)] * 3
+        solution.start_solution_datetime = f"run{len(seen)}"
+        return solution
+
+    for _ in range(2):
+        assert runner.schedule(
+            [OptimizationAlgorithm.MILP],
+            FakeParameters([0, 0, 0], "active"),
+            OptimizationAlgorithm.GENETIC,
+            fake_solution(9.5),
+            30.0,
+            optimize,
+        )
+        await runner.wait_idle()
+    # First comparison cold, second from the shadow's own first solution.
+    assert seen == [None, [1, 1, 1]]

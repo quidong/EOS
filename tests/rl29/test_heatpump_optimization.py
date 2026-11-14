@@ -320,6 +320,19 @@ class TestSeedsAndMutation:
         assert len(result["room_c"]) == 4
         assert result["summary"]["electric_wh"] == pytest.approx(sum(result["electric_wh"]))
 
+    def test_plan_result_reports_status_quo_consumption_for_the_baseline(self):
+        """Measure 9: the baseline replaces the planned heat pump by the status quo."""
+        plan = make_plan(n_slots=6, rod_w=0.0)
+        n = plan.n_periods
+        raised = plan.genes_for_modes([HeatingMode.FORCED] * n, [DhwMode.HOLD] * n)
+        result = plan_result(plan, raised)
+        status_quo = plan.evaluate(plan.default_genes())
+        assert result["baseline_electric_wh"] == pytest.approx(list(status_quo.electric_wh))
+        assert result["summary"]["baseline_electric_wh"] == pytest.approx(
+            sum(status_quo.electric_wh)
+        )
+        assert sum(result["electric_wh"]) > sum(result["baseline_electric_wh"])
+
 
 class TestGenericConfiguration:
     """Nothing is specific to one installation: modes, signals and targets are set per device."""

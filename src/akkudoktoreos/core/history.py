@@ -394,6 +394,10 @@ def baseline_self_consumption_cost(
     discharge_eff: float = 0.95,
     min_soc_wh: float = 0.0,
     direct_wh: Optional[Sequence[float]] = None,
+    lcos_amt_kwh: float = 0.0,
+    dc_to_ac_efficiency: float = 1.0,
+    dc_to_ac_efficiency_curve: Optional[Sequence[tuple[float, float]]] = None,
+    inverter_max_wh: float = 0.0,
 ) -> dict[str, float]:
     """Costs of the plain self-consumption strategy for the same forecasts.
 
@@ -409,9 +413,25 @@ def baseline_self_consumption_cost(
             expectation here (see ``expected_direct_pv_wh``) so the baseline is
             simulated like the plan. ``None`` nets each slot perfectly, which makes
             the baseline look better than any plan can be.
+        lcos_amt_kwh: Levelized cost of storage per kWh of battery-delivered DC
+            energy, charged like the plan simulation does (RL29 fork). Without it
+            the plan pays battery wear and the baseline does not, so the saving
+            looks negative on every day without arbitrage.
+        dc_to_ac_efficiency: Constant DC-to-AC efficiency of the inverter on
+            discharge, used when no curve is given.
+        dc_to_ac_efficiency_curve: Inverter efficiency over the load fraction
+            ``(fraction, efficiency)``, as in the inverter settings. Taken at the
+            AC energy requested from the battery in the slot.
+        inverter_max_wh: Rated inverter energy per slot [Wh], the reference of the
+            curve's load fraction.
+
+    Returns:
+        Costs (grid import plus battery LCOS), revenue, net amount, grid energies,
+        the LCOS share and the battery content at the end of the horizon.
     """
     soc = max(min(battery_soc_wh, battery_capacity_wh), 0.0)
-    costs = revenue = grid_import = grid_export = 0.0
+    costs = revenue = grid_import = grid_export = lcos_amt = 0.0
+    curve = [(float(f), float(e)) for f, e in dc_to_ac_efficiency_curve or []]
     for i in range(min(len(pv_wh), len(load_wh), len(price_amt_kwh), len(feed_in_amt_kwh))):
         pv = max(_finite(pv_wh[i]) or 0.0, 0.0)
         load = max(_finite(load_wh[i]) or 0.0, 0.0)
@@ -425,9 +445,15 @@ def baseline_self_consumption_cost(
         deficit = load - direct
         surplus = pv - direct
         if deficit > 0:
-            available = max(soc - min_soc_wh, 0.0) * discharge_eff
-            from_battery = min(deficit, max_discharge_wh, available)
-            soc -= from_battery / max(discharge_eff, 1e-9)
+            inverter_eff = _inverter_efficiency(
+                deficit, dc_to_ac_efficiency, curve, inverter_max_wh
+            )
+            # DC the battery can deliver in this slot (power and content limits).
+            deliverable_dc = min(max(soc - min_soc_wh, 0.0), max_discharge_wh) * discharge_eff
+            delivered_dc = min(deficit / inverter_eff, deliverable_dc)
+            from_battery = delivered_dc * inverter_eff
+            soc -= delivered_dc / max(discharge_eff, 1e-9)
+            lcos_amt += delivered_dc / 1000.0 * lcos_amt_kwh
             imported = deficit - from_battery
             grid_import += imported
             costs += imported / 1000.0 * price
@@ -438,13 +464,32 @@ def baseline_self_consumption_cost(
             export = surplus - into_battery
             grid_export += export
             revenue += export / 1000.0 * tariff
+    costs += lcos_amt
     return {
         "costs_amt": round(costs, 4),
         "revenue_amt": round(revenue, 4),
         "net_amt": round(costs - revenue, 4),
         "grid_import_wh": round(grid_import, 1),
         "grid_export_wh": round(grid_export, 1),
+        "lcos_amt": round(lcos_amt, 4),
+        "end_soc_wh": round(soc, 1),
     }
+
+
+def _inverter_efficiency(
+    ac_wh: float,
+    constant: float,
+    curve: Sequence[tuple[float, float]],
+    max_wh: float,
+) -> float:
+    """DC-to-AC efficiency for ``ac_wh`` in one slot (constant or curve)."""
+    if curve and max_wh > 0:
+        from akkudoktoreos.devices.devicesabc import interpolate_efficiency_curve
+
+        efficiency = interpolate_efficiency_curve(list(curve), ac_wh / max_wh)
+    else:
+        efficiency = constant
+    return efficiency if efficiency > 1e-9 else 1.0
 
 
 def expected_direct_pv_wh(
