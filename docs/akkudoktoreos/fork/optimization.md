@@ -178,6 +178,11 @@ prices it relies on the price forecast (see {doc}`forecasts`).
   grid. The simulation ignores the AC charge genes then, and the battery modes of the plan say the same
   (no `GRID_SUPPORT_IMPORT` / `FORCED_CHARGE`; such slots become `NON_EXPORT` or `IDLE`), so a
   controller that executes the plan never charges from the grid.
+- **Fewer battery switches:** `genetic.battery_change_penalty_amt` charges every change of the battery
+  operating mode (grid charge, discharge allowed, PV charge allowed, export) between two slots, so a change
+  has to save at least that much; `genetic.battery_min_hold_minutes` with `battery_hold_penalty_amt`
+  (default 0.5) charges modes shorter than the hold time. Both default to off. They are part of the
+  GENETIC fitness, so the MILP's candidates get them in the polish step.
 - **Plausibility check:** `scripts/rl29/check_battery_plan.py --url http://<eos>:8503 --device <id>`
   checks the battery part of the current plan (exit 0 = plausible, 1 = warning, 2 = implausible): one
   operation mode per slot, state of charge within the limits, grid charging only when the price after

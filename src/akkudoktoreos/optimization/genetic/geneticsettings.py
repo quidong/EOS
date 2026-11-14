@@ -108,6 +108,41 @@ class GeneticCommonSettings(SettingsBaseModel):
         },
     )
 
+    battery_change_penalty_amt: float = Field(
+        default=0.0,
+        ge=0,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: cost of every change of the battery operating mode (charge from "
+                "the grid, discharge allowed, PV charge allowed, export) between two slots "
+                "[currency]. A change must save at least this much; small values (1-2 ct) "
+                "remove switching that changes almost nothing. 0 = off."
+            ),
+            "examples": [0.0, 0.015],
+        },
+    )
+    battery_min_hold_minutes: float = Field(
+        default=0.0,
+        ge=0,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: least time a battery operating mode stays before the next change "
+                "[min]; a shorter mode costs battery_hold_penalty_amt. 0 = off."
+            ),
+            "examples": [0.0, 45.0],
+        },
+    )
+    battery_hold_penalty_amt: float = Field(
+        default=0.5,
+        ge=0,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: cost of a battery operating mode shorter than "
+                "battery_min_hold_minutes [currency]."
+            )
+        },
+    )
+
     fitness_cache_max_entries: Optional[int] = Field(
         default=None,
         ge=0,

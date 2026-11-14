@@ -61,7 +61,7 @@ Guards:
   `pvforecast/ensemble`, `pvforecast/adaptive`, the PV calibration and snow model leaves
   `pvforecast/akkudoktor/{calibration_*,snow_*}`, `elecprice/ml`,
   `database/history/{enabled,actuals,accuracy,min_store_interval_minutes}`,
-  `devices/heat_pumps/*/{comfort,optimization,dhw,away,zones,zone_setback}`,
+  `devices/heat_pumps/*/{comfort,optimization,dhw,away,zones,zone_setback,unit,ventilation,calibration,slab_estimate}`,
   `devices/batteries/*/{min,max}_soc_percentage`, `devices/batteries/*/full_charge_*`,
   `devices/inverters/*/max_ac_charge_power_w`, `logging/file_level`).
   The PV plant geometry, the forecast provider, the weather models and the measurement wiring stay read-only.

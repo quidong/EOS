@@ -13,6 +13,7 @@ import sys
 import time
 from array import array
 from collections import OrderedDict, defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -4108,6 +4109,45 @@ class GeneticOptimization(OptimizationBase):
             penalty = 10.0
         return shortfall * penalty
 
+    def battery_mode_signature(self, individual: Sequence[Any]) -> np.ndarray:
+        """Operating mode of the battery per control slot (RL29 fork).
+
+        One integer per slot from what the controller switches: grid charge,
+        discharge allowed, PV charge allowed, export. Equal numbers = no change.
+        """
+        genes = np.asarray(list(individual[: self.control_end_slot]), dtype=int)
+        if genes.size == 0:
+            return genes
+        ac, discharge, dc, export = self.decode_charge_discharge(genes)
+        return (
+            (np.asarray(ac) > 0).astype(int)
+            + 2 * (np.asarray(discharge) > 0).astype(int)
+            + 4 * (np.asarray(dc) > 0).astype(int)
+            + 8 * (np.asarray(export) > 0).astype(int)
+        )
+
+    def _battery_switch_penalty(self, individual: Sequence[Any]) -> float:
+        """Cost of battery mode changes and of modes shorter than the hold time (fork)."""
+        try:
+            cfg = self._genetic_cfg
+            per_change = float(cfg.battery_change_penalty_amt)
+            hold_minutes = float(cfg.battery_min_hold_minutes)
+            hold_cost = float(cfg.battery_hold_penalty_amt)
+        except Exception:
+            return 0.0
+        if (per_change <= 0 and hold_minutes <= 0) or not self.simulation.battery:
+            return 0.0
+        signature = self.battery_mode_signature(individual)
+        if signature.size < 2:
+            return 0.0
+        changes = np.nonzero(signature[1:] != signature[:-1])[0] + 1
+        penalty = per_change * len(changes)
+        if hold_minutes > 0 and hold_cost > 0 and len(changes) > 1:
+            hold_slots = math.ceil(hold_minutes / (self.slot_duration_h * 60.0) - 1e-9)
+            short = int(np.count_nonzero(np.diff(changes) < hold_slots))
+            penalty += short * hold_cost
+        return penalty
+
     def _evaluate_uncached(
         self,
         individual: list[int],
@@ -4167,6 +4207,8 @@ class GeneticOptimization(OptimizationBase):
         gesamtbilanz += float(simulation_result.get("grid_limit_penalty_amt", 0.0))
         # Charge reserve during a weather warning (fork).
         gesamtbilanz += self._reserve_penalty(simulation_result, start_hour)
+        # Battery mode changes: minimum saving and hold time (fork).
+        gesamtbilanz += self._battery_switch_penalty(individual)
 
         # New check: Activate discharge when battery SoC is 0
         # battery_soc_per_hour = np.array(
