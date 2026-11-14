@@ -41,6 +41,7 @@ from akkudoktoreos.optimization.genetic.heatpumpgenes import (
     HeatPumpGeneLayout,
     build_run_plan,
     plan_result,
+    tail_electric_wh,
 )
 from akkudoktoreos.optimization.genetic.tailvalue import (
     TailValueCurve,
@@ -1296,6 +1297,7 @@ class GeneticOptimization(OptimizationBase):
     def _build_heat_pump_layout(self, parameters: GeneticOptimizationParameters) -> None:
         """Prepare the thermal model of every heat pump for this run."""
         heat_pumps = parameters.heat_pumps or []
+        self._hp_outlook_wh: Optional[np.ndarray] = None
         if not heat_pumps:
             self.heat_pump_layout = HeatPumpGeneLayout()
             return
@@ -1329,12 +1331,70 @@ class GeneticOptimization(OptimizationBase):
             ]
         feed_in_array = self.simulation.elect_revenue_per_hour_arr
         feed_in = [float(v) for v in feed_in_array[:n_slots]] if feed_in_array is not None else None
+        # RL29 fork: the day after the horizon values the heat left at its end and
+        # adds the heat pump to the battery outlook beyond the horizon.
+        tail_n = 24 * self.slots_per_hour
+        tail_end = n_slots + tail_n
+        temperature = parameters.temperature_forecast or []
+        tail_outdoor: list[Optional[float]] = []
+        for value in list(temperature)[n_slots:tail_end]:
+            number = None if value is None else float(value)
+            tail_outdoor.append(number if number is not None and math.isfinite(number) else None)
+        tail_prices = (
+            [float(v) for v in price_array[n_slots:tail_end]] if price_array is not None else []
+        )
+        tail_surplus: Optional[list[float]] = None
+        if pv_array is not None and load_array is not None:
+            tail_surplus = [
+                (float(pv_array[i]) - float(load_array[i])) / self.slot_duration_h
+                for i in range(n_slots, min(tail_end, len(pv_array), len(load_array)))
+            ]
+        tail_feed_in = (
+            [float(v) for v in feed_in_array[n_slots:tail_end]]
+            if feed_in_array is not None
+            else None
+        )
+        battery = parameters.pv_battery
+        absorb_wh = (
+            battery.capacity_wh
+            * max(0, battery.max_soc_percentage - battery.min_soc_percentage)
+            / 100.0
+            if battery is not None
+            else 0.0
+        )
         plans = [
             build_run_plan(
-                device, starts, self.slot_duration_h, outdoor, ghi, prices, surplus_w, feed_in
+                device,
+                starts,
+                self.slot_duration_h,
+                outdoor,
+                ghi,
+                prices,
+                surplus_w,
+                feed_in,
+                tail_outdoor_c=tail_outdoor or None,
+                tail_price_per_wh=tail_prices or None,
+                tail_pv_surplus_w=tail_surplus,
+                tail_feed_in_per_wh=tail_feed_in,
+                battery_absorb_wh=absorb_wh,
             )
             for device in heat_pumps
         ]
+        # Heat pump load for the battery outlook (status quo in the horizon, steady
+        # demand after it); only the terminal value curves use it.
+        if load_array is not None and not any(p.load_includes_heat_pump for p in plans):
+            outlook = np.zeros(len(load_array))
+            tail_starts = [slot0.add(seconds=interval_s * i) for i in range(n_slots, len(outlook))]
+            tail_temps = list(temperature)[n_slots : len(outlook)]
+            for plan, device in zip(plans, heat_pumps):
+                baseline = plan.evaluate(plan.default_genes()).electric_wh
+                for slot, energy in enumerate(baseline[: min(n_slots, len(outlook))]):
+                    outlook[slot] += energy
+                after = tail_electric_wh(
+                    plan, device.settings, tail_starts, tail_temps, self.slot_duration_h
+                )
+                outlook[n_slots : n_slots + len(after)] += after
+            self._hp_outlook_wh = outlook
         self.heat_pump_layout = HeatPumpGeneLayout(plans)
         # RL29 fork: plans of calibrated heat pumps are recorded for plan vs actual.
         self._hp_record_plan_ids = {
@@ -1609,11 +1669,16 @@ class GeneticOptimization(OptimizationBase):
         window_slots = max(int(window_hours) * self.slots_per_hour, 1)
         end_slot = self.control_end_slot + getattr(self, "_effective_tail_slots", 0)
 
+        outlook_load = self.simulation.load_energy_array
+        hp_outlook = getattr(self, "_hp_outlook_wh", None)
+        if outlook_load is not None and hp_outlook is not None:
+            # RL29 fork: the heat pump draws from the battery after the horizon too.
+            outlook_load = outlook_load + hp_outlook[: len(outlook_load)]
         curve = build_terminal_value_curve(
             prices_euro_per_wh=trailing_window(
                 self.simulation.elect_price_hourly, end_slot, window_slots
             ),
-            load_wh=trailing_window(self.simulation.load_energy_array, end_slot, window_slots),
+            load_wh=trailing_window(outlook_load, end_slot, window_slots),
             pv_wh=trailing_window(self.simulation.pv_prediction_wh, end_slot, window_slots),
             feed_in_euro_per_wh=trailing_window(
                 self.simulation.elect_revenue_per_hour_arr, end_slot, window_slots
@@ -1628,7 +1693,7 @@ class GeneticOptimization(OptimizationBase):
         if self.tail_slots and inverter is not None:
             tail = slice(self.control_end_slot, end_slot)
             prices = self.simulation.elect_price_hourly
-            loads = self.simulation.load_energy_array
+            loads = outlook_load
             pv = self.simulation.pv_prediction_wh
             tariffs = self.simulation.elect_revenue_per_hour_arr
             if prices is None or loads is None or pv is None or tariffs is None:

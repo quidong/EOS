@@ -82,6 +82,13 @@ overheating, hot water below its minimum, a missed legionella run, mode changes 
 previous plan set for now, see plan stability) and active modes without effect, and the **value of the heat stored at the horizon end** (it replaces heat produced later in the
 cheapest hours: mean of the cheapest `stored_heat_price_quantile` of the marginal prices, divided by the COP).
 
+The stored heat is used after the horizon, so with at least 6 h of forecast beyond it the value
+takes the outdoor temperature (COP) and prices of the next 24 h: a cold next day makes heat kept
+today worth more, a mild one less. PV surplus counts as free heat only after the house battery
+is full (its usable capacity takes the first surplus of every day). The battery outlook beyond
+the horizon (terminal value curve, tail) includes the heat pump: the status quo consumption in
+the horizon and the steady demand at the setpoint plus the typical hot water draw after it.
+
 ## Interface to the controller
 
 Solution keys (Home Assistant: `sensor.eos_<key>`), per slot:

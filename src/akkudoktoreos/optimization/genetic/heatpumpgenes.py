@@ -1170,12 +1170,18 @@ TANK_DWELL_HOURS = 12.0
 on tank heat above the heat pump setpoint at the end of the horizon."""
 
 
+TAIL_VALUE_MIN_HOURS = 6.0
+"""RL29 fork: shortest forecast after the horizon that values the stored heat."""
+
+
 def terminal_price_per_wh(
     prices: Sequence[Optional[float]],
     quantile: float,
     pv_surplus_w: Optional[Sequence[float]] = None,
     feed_in_per_wh: Optional[Sequence[Optional[float]]] = None,
     surplus_needed_w: float = 0.0,
+    battery_absorb_wh: float = 0.0,
+    slot_hours: float = 1.0,
 ) -> float:
     """Marginal price the stored heat is valued at [currency/Wh].
 
@@ -1184,9 +1190,17 @@ def terminal_price_per_wh(
     mean of the cheapest ``quantile`` share of the horizon's marginal prices.
     Hours whose PV surplus covers the heat pump (``surplus_needed_w``) count with
     the feed-in tariff: there the heat pump would run on surplus anyway.
+
+    RL29 fork: a house battery takes the first ``battery_absorb_wh`` of the
+    surplus of every 24 h; those hours are no free heat (the battery stores the
+    energy for the evening), only the surplus beyond it counts at the tariff.
     """
+    slots_per_day = max(1, round(24.0 / slot_hours)) if slot_hours > 0 else 24
+    budget = 0.0
     marginal: list[float] = []
     for i, price in enumerate(prices):
+        if i % slots_per_day == 0:
+            budget = max(0.0, battery_absorb_wh)
         if price is None or not math.isfinite(price):
             continue
         value = float(price)
@@ -1199,7 +1213,12 @@ def terminal_price_per_wh(
             and math.isfinite(float(feed_in_per_wh[i]))  # type: ignore[arg-type]
             and float(pv_surplus_w[i]) >= surplus_needed_w
         ):
-            value = min(value, float(feed_in_per_wh[i]))  # type: ignore[arg-type]
+            surplus_wh = float(pv_surplus_w[i]) * slot_hours
+            if budget >= surplus_wh:
+                budget -= surplus_wh  # the battery takes this hour's surplus
+            else:
+                budget = 0.0
+                value = min(value, float(feed_in_per_wh[i]))  # type: ignore[arg-type]
         marginal.append(value)
     if not marginal:
         return 0.0
@@ -1207,6 +1226,46 @@ def terminal_price_per_wh(
     count = max(1, math.ceil(len(marginal) * min(1.0, max(0.0, quantile))))
     cheapest = marginal[:count]
     return sum(cheapest) / len(cheapest)
+
+
+def tail_electric_wh(
+    plan: "HeatPumpRunPlan",
+    settings: HeatPumpCommonSettings,
+    tail_starts: Sequence[Any],
+    tail_outdoor_c: Sequence[Optional[float]],
+    slot_hours: float,
+) -> list[float]:
+    """Expected heat pump consumption after the horizon per slot [Wh] (RL29 fork).
+
+    The battery outlook beyond the horizon needs the heat pump's load too, or a
+    winter night looks cheaper than it is. Steady space heat at the setpoint over
+    the space COP, the typical hot water draw over the hot water COP, plus standby.
+    """
+    system = plan.system
+    setpoint = settings.comfort.setpoint_c
+    known = [float(t) for t in tail_outdoor_c if t is not None and math.isfinite(t)]
+    fallback = known[0] if known else (plan.inputs[-1].outdoor_c if plan.inputs else 10.0)
+    cop_dhw_flow = system.dhw.setpoint_c + system.hp.dhw_flow_overshoot_k
+    result: list[float] = []
+    last = fallback
+    for i, start in enumerate(tail_starts):
+        value = tail_outdoor_c[i] if i < len(tail_outdoor_c) else None
+        if value is not None and math.isfinite(value):
+            last = float(value)
+        outdoor = last
+        if plan.inputs and plan.inputs[-1].cooling_season:
+            result.append(system.hp.standby_w * slot_hours)
+            continue
+        heat = system.building.steady_heat_w(setpoint, outdoor, system.building.gains_w(0.0))
+        slab = system.building.steady_slab_c(setpoint, outdoor, system.building.gains_w(0.0))
+        flow = system.building.flow_temperature_c(slab, heat, system.hp.flow_spread_k)
+        cop = system.cop.cop(outdoor, flow)
+        space = heat * slot_hours / cop if cop > 0 else 0.0
+        draw = settings.dhw.draw_wh(start, slot_hours)
+        cop_dhw = system.cop.cop(outdoor, cop_dhw_flow)
+        dhw = draw / cop_dhw if cop_dhw > 0 else 0.0
+        result.append(space + dhw + system.hp.standby_w * slot_hours)
+    return result
 
 
 def build_run_plan(
@@ -1218,6 +1277,11 @@ def build_run_plan(
     price_per_wh: Sequence[float],
     pv_surplus_w: Optional[Sequence[float]] = None,
     feed_in_per_wh: Optional[Sequence[Optional[float]]] = None,
+    tail_outdoor_c: Optional[Sequence[Optional[float]]] = None,
+    tail_price_per_wh: Optional[Sequence[float]] = None,
+    tail_pv_surplus_w: Optional[Sequence[float]] = None,
+    tail_feed_in_per_wh: Optional[Sequence[Optional[float]]] = None,
+    battery_absorb_wh: float = 0.0,
 ) -> HeatPumpRunPlan:
     """Prepare one heat pump for a run over ``slot_starts`` (the control slots).
 
@@ -1233,6 +1297,13 @@ def build_run_plan(
             cooling season with ``cooling.pv_only`` it is the cooling budget and
             otherwise marks the hours whose heat would come from surplus.
         feed_in_per_wh: Feed-in tariff per slot, the marginal price in surplus hours.
+        tail_outdoor_c: Outdoor temperature of the hours after the horizon (RL29
+            fork): the stored heat is used there, so its COP and need decide its value.
+        tail_price_per_wh: Import prices after the horizon; with them the stored
+            heat is valued at the prices of the hours that use it.
+        tail_pv_surplus_w: PV surplus after the horizon [W].
+        tail_feed_in_per_wh: Feed-in tariff after the horizon.
+        battery_absorb_wh: Usable battery capacity that takes PV surplus first [Wh].
     """
     settings = parameters.settings
     system = settings.to_system(slot_hours, dhw_setpoint_c=parameters.dhw_setpoint_c)
@@ -1419,6 +1490,11 @@ def build_run_plan(
     # hours at the feed-in tariff) divided by the COP the heat pump would need
     # to deliver the heat later.
     mean_outdoor = sum(i.outdoor_c for i in inputs) / len(inputs)
+    # RL29 fork: the heat left at the end is used after the horizon; a cold next
+    # day (low COP) makes it worth more, a mild one less.
+    tail_known = [float(t) for t in (tail_outdoor_c or []) if t is not None and math.isfinite(t)]
+    if tail_known:
+        mean_outdoor = sum(tail_known) / len(tail_known)
     gains_mean = system.building.gains_w(0.0)
     steady = system.building.steady_heat_w(settings.comfort.setpoint_c, mean_outdoor, gains_mean)
     slab_ref = system.building.steady_slab_c(settings.comfort.setpoint_c, mean_outdoor, gains_mean)
@@ -1426,13 +1502,28 @@ def build_run_plan(
     cop_space = system.cop.cop(mean_outdoor, flow_ref)
     cop_dhw = system.cop.cop(mean_outdoor, system.dhw.setpoint_c + system.hp.dhw_flow_overshoot_k)
     price_source = separate_prices if separate_prices is not None else price_per_wh[: len(inputs)]
+    value_surplus = pv_surplus_w
+    value_feed_in = feed_in_per_wh
+    tail_prices = [p for p in (tail_price_per_wh or []) if p is not None and math.isfinite(p)]
+    if (
+        separate_prices is None
+        and tail_prices
+        and len(tail_prices) == len(tail_price_per_wh or [])
+        and len(tail_prices) * slot_hours >= TAIL_VALUE_MIN_HOURS
+    ):
+        # RL29 fork: valued at the prices of the hours after the horizon.
+        price_source = list(tail_price_per_wh or [])
+        value_surplus = tail_pv_surplus_w
+        value_feed_in = tail_feed_in_per_wh
     mean_price = terminal_price_per_wh(
         list(price_source),
         opt.stored_heat_price_quantile,
         # Module 2 (own meter) cannot use PV surplus.
-        pv_surplus_w if separate_prices is None else None,
-        feed_in_per_wh,
+        value_surplus if separate_prices is None else None,
+        value_feed_in,
         surplus_needed_w=(steady / cop_space if cop_space > 0 else 0.0) + system.hp.standby_w,
+        battery_absorb_wh=battery_absorb_wh,
+        slot_hours=slot_hours,
     )
     # Hot water above the heat pump setpoint loses more until it is tapped.
     tank_params = system.tank.params
