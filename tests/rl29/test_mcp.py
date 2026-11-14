@@ -274,6 +274,24 @@ def test_default_allow_list_covers_the_heating_zones():
     assert not write_allowed("devices/heat_pumps/wbb12/building", DEFAULT_WRITE_PATHS)
 
 
+def test_default_allow_list_covers_heat_pump_model_tuning():
+    """Flow offsets, airing profile, calibration and the screed estimate are tunable;
+    the building model and the measurement keys are not."""
+    from akkudoktoreos.rl29mcp.security import DEFAULT_WRITE_PATHS
+
+    for path in (
+        "devices/heat_pumps/wbb12/unit/raised_flow_offset_k",
+        "devices/heat_pumps/wbb12/ventilation/profile",
+        "devices/heat_pumps/wbb12/calibration/fit_ventilation_profile",
+        "devices/heat_pumps/wbb12/slab_estimate/enabled",
+    ):
+        assert write_allowed(path, DEFAULT_WRITE_PATHS), path
+    assert not write_allowed("devices/heat_pumps/wbb12/building/loss_w_per_k", DEFAULT_WRITE_PATHS)
+    assert not write_allowed(
+        "devices/heat_pumps/wbb12/measurement_key_room_temperature", DEFAULT_WRITE_PATHS
+    )
+
+
 def test_default_allow_list_covers_new_forecast_and_battery_settings():
     """Snow model, PV calibration, adaptive PV and periodic full charge are tunable;
     the plant geometry, the provider choice and the measurement wiring are not."""
