@@ -227,6 +227,70 @@ def test_calibrated_applies_fits_and_leaves_the_configuration_alone():
     assert device.calibrated(CalibrationResult(fitted_at=result.fitted_at)) is device
 
 
+def _zoned_device(fit_zones: bool) -> HeatPumpCommonSettings:
+    zone = {
+        "slab_capacity_wh_per_k": 2000.0,
+        "room_capacity_wh_per_k": 3000.0,
+        "slab_room_w_per_k": 500.0,
+        "solar_aperture_m2": 0.0,
+        "internal_gains_w": 0.0,
+    }
+    return HeatPumpCommonSettings(
+        device_id="wbb12",
+        building={"loss_w_per_k": 180.0, "emitter_w_per_k": 1000.0},
+        calibration={"fit_zones": fit_zones},
+        zones={
+            "enabled": True,
+            "zones": [
+                {
+                    "zone_id": "og",
+                    "share": 0.33,
+                    "building": {**zone, "loss_w_per_k": 80.0, "emitter_w_per_k": 330.0},
+                },
+                {
+                    "zone_id": "eg",
+                    "share": 0.67,
+                    "building": {**zone, "loss_w_per_k": 60.0, "emitter_w_per_k": 670.0},
+                },
+            ],
+        },
+    )
+
+
+def _house_fit() -> CalibrationResult:
+    return CalibrationResult(
+        fitted_at=datetime(2026, 11, 20, tzinfo=timezone.utc),
+        building=BuildingFit(
+            loss_w_per_k=210.0, solar_aperture_m2=2.0, internal_gains_w=300.0, days=10
+        ),
+        emitter=EmitterFit(
+            emitter_w_per_k=800.0, hours=40, raw_emitter_w_per_k=800.0, measured_lift_k=6.0
+        ),
+    )
+
+
+def test_zone_fit_carries_the_house_values_to_the_zones():
+    fitted = _zoned_device(True).calibrated(_house_fit())
+    og, eg = (z.building for z in fitted.zones.zones)
+    # the zones add up to the fitted house, split as configured (80:60, 330:670)
+    assert og.loss_w_per_k + eg.loss_w_per_k == pytest.approx(210.0)
+    assert og.loss_w_per_k / eg.loss_w_per_k == pytest.approx(80.0 / 60.0)
+    assert og.emitter_w_per_k + eg.emitter_w_per_k == pytest.approx(800.0)
+    assert og.emitter_w_per_k == pytest.approx(264.0)
+    # quantities configured as zero are split by share
+    assert og.internal_gains_w == pytest.approx(300.0 * 0.33)
+    assert eg.solar_aperture_m2 == pytest.approx(2.0 * 0.67)
+    # capacities are not fitted
+    assert og.slab_capacity_wh_per_k == 2000.0
+
+
+def test_zone_fit_is_off_by_default():
+    fitted = _zoned_device(False).calibrated(_house_fit())
+    og, eg = (z.building for z in fitted.zones.zones)
+    assert (og.loss_w_per_k, eg.loss_w_per_k) == (80.0, 60.0)
+    assert fitted.building.loss_w_per_k == 210.0
+
+
 def test_options_follow_the_settings():
     device = HeatPumpCommonSettings(
         device_id="wbb12",

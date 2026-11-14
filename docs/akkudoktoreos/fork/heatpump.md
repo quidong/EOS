@@ -184,6 +184,10 @@ bounded. The configuration file is never changed; EOS plans with the fitted valu
 (\*) `loss_w_per_k`, `solar_aperture_m2`, `internal_gains_w` from `Q = H·ΔT − A·G − g`;
 days with drifting room temperature, outages and holiday days are left out.
 
+Zones with their own `building` keep their configured values unless `calibration.fit_zones` is
+on: then loss, emitter, solar aperture and internal gains of these zones are scaled so they add up
+to the fitted house value times their shares, keeping the configured split between the zones.
+
 Missing outdoor temperature or irradiance is filled from the weather forecast
 (`weather_from_prediction`). Results: `<data>/rl29/heatpump_calibration.json` and the log.
 `scripts/rl29/calibrate_heatpump.py` does a first calibration from Home Assistant history before EOS has

@@ -1260,6 +1260,18 @@ class HeatPumpCalibrationSettings(SettingsBaseModel):
             "examples": [None, 0.5],
         },
     )
+    fit_zones: bool = Field(
+        default=False,
+        json_schema_extra={
+            "description": (
+                "Carry the fitted house values (loss, emitter, solar aperture, internal "
+                "gains) to zones with their own building: each quantity is scaled so the "
+                "zones add up to the fitted house value times their shares, keeping the "
+                "configured split between the zones. Zones without their own building "
+                "follow the house anyway."
+            )
+        },
+    )
     fit_ventilation_profile: bool = Field(
         default=True,
         json_schema_extra={
@@ -1877,7 +1889,31 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
             data["ventilation"]["profile"] = list(result.ventilation.profile)
             if result.ventilation.weekend is not None:
                 data["ventilation"]["profile_weekend"] = list(result.ventilation.weekend)
+        if self.calibration.fit_zones and (result.building or result.emitter):
+            self._calibrate_zones(data)
         return type(self).model_validate(data)
+
+    def _calibrate_zones(self, data: dict[str, Any]) -> None:
+        """Scale zones with their own building to the fitted house (RL29 fork).
+
+        ``data`` holds the calibrated settings; per quantity the explicit zones get
+        ``fitted house * their shares`` in total, split as configured (by share when
+        all configured values are zero).
+        """
+        zones = data.get("zones", {}).get("zones") or []
+        explicit = [z for z in zones if z.get("building") is not None]
+        if not explicit or not self.zones.active:
+            return
+        house = data["building"]
+        shares = sum(float(z.get("share") or 0.0) for z in explicit)
+        for name in ("loss_w_per_k", "emitter_w_per_k", "solar_aperture_m2", "internal_gains_w"):
+            target = float(house[name]) * shares
+            configured = sum(float(z["building"][name]) for z in explicit)
+            for zone in explicit:
+                if configured > 0:
+                    zone["building"][name] = float(zone["building"][name]) * target / configured
+                elif shares > 0:
+                    zone["building"][name] = target * float(zone.get("share") or 0.0) / shares
 
     def to_system(
         self, slot_hours: float, dhw_setpoint_c: Optional[float] = None
