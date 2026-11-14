@@ -55,6 +55,24 @@ sheet of your unit:
 | 1 HEAT_PUMP | charge to the heat pump setpoint now |
 | 2 ROD | heating rod to a target (`dhw.rod_targets_c`, one option per target, e.g. `ROD_60`) |
 
+### SG Ready 3/4 as heating curve shift
+
+Many heat pumps implement SG Ready 3/4 as a shift of the heating curve, not as a new room
+target. With fixed room setpoints (`comfort.fixed_room_setpoints`) the room controllers stop at
+their setpoint, so the target model gives RAISED no effect at all. The unit settings model what
+the heat pump really does:
+
+| Setting | Effect |
+| --- | --- |
+| `unit.raised_flow_offset_k` | RAISED/PREHEAT: flow this much above the normal curve; open valves take `emitter_w_per_k * offset` more heat while the room is below the controllers' target |
+| `unit.forced_flow_offset_k` | FORCED: valves forced open, the screed takes `emitter_w_per_k * (curve + offset - screed)` (capacity and `max_flow_c` apply) until comfort maximum + `forced_overshoot_k` |
+| `unit.preheat_valves_forced` | PREHEAT forces the valves too (e.g. KNX forced positions) and heats like FORCED with the raised offset |
+
+The normal curve is the weather-compensated mean water temperature that holds the setpoint in
+steady state. Read the offsets off the flow setpoint of the heat pump right before and after a
+switch. `None` keeps the old behaviour (FORCED at full capacity). The MILP linearises the curve
+heat at the steady screed of the setpoint; the GENETIC polish uses the exact law.
+
 RAISED/FORCED can raise the hot water setpoint (`dhw.raised_setpoint_c`, `dhw.forced_setpoint_c`).
 Legionella runs (`dhw.legionella_c`, `dhw.legionella_interval_days`) are planned with the cheapest
 option that reaches the temperature; without one, no run is planned and the log says so.
@@ -87,7 +105,8 @@ Measurements EOS reads (via `adapter.homeassistant.device_measurement_entity_ids
 | Key | Meaning |
 | --- | --- |
 | `<id>-room-temperature`, `<id>-dhw-temperature` | initial state (required for good plans) |
-| `<id>-slab-temperature` | optional; otherwise estimated from steady state |
+| `<id>-slab-temperature` | optional; otherwise `slab_estimate` (below) or the steady state |
+| `<id>-return-temperature` | optional: return of the heating circuit, corrects the carried screed (`slab_estimate`) |
 | `<id>-dhw-setpoint` | hot water setpoint read from the unit |
 | `<id>-power-limited` | 1 = §14a dimming active now |
 | `<id>-cooling-season`, `<id>-dewpoint` | cooling operation and room dew point |
@@ -98,6 +117,14 @@ Measurements EOS reads (via `adapter.homeassistant.device_measurement_entity_ids
 | `<id>-reduce-lock-until-ts` | optional: Unix time until which the controller does not reduce, 0 = no lock |
 | `<id>-warning-start-ts`, `<id>-warning-end-ts` | optional: weather warning period (Unix times, 0 = none) |
 | `<id>-outdoor-temperature`, `<id>-heat-power`, `<id>-electric-power`, `<id>-flow-temperature` | calibration |
+
+Screed estimate (`slab_estimate.enabled`): without a screed sensor each run starts from the
+screed the previous plan predicted for now (house and every zone, interpolated within the slot,
+plan not older than `max_age_hours`). While the heat pump heats the floor (space heat =
+`<id>-heat-power` − `<id>-dhw-heat-power` ≥ `min_heat_w`, no hot water charge) the return
+gives the screed: `(flow + return) / 2 − space heat / emitter_w_per_k` (without flow
+`return + flow_spread_k / 2`); `return_gain` of the difference corrects the estimate, and the
+same shift applies to every zone. The log line "screed estimate" shows both values.
 
 Use a power meter that sees all consumers of the heat pump (pumps, controller, cooling) for
 `<id>-electric-power`; internal counters of some units miss parts of it.

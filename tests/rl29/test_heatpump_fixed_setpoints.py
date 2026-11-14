@@ -18,8 +18,10 @@ from akkudoktoreos.devices.thermal.dhw import DhwTankParameters
 from akkudoktoreos.devices.thermal.heatpump import (
     ComfortParameters,
     HeatingMode,
+    HeatPumpParameters,
     HeatPumpSystem,
     SlotInputs,
+    ThermalState,
 )
 from akkudoktoreos.devices.thermal.zones import (
     MultiZoneHeatPump,
@@ -131,8 +133,13 @@ def test_raised_keeps_the_setpoint():
     assert system(False)._room_target(A, inputs()) == pytest.approx(22.0)
 
 
+def test_preheat_through_the_controllers_keeps_the_setpoint():
+    assert system(True)._room_target(P, inputs()) == pytest.approx(21.0)
+    assert system(False)._room_target(P, inputs()) == pytest.approx(23.0)
+
+
 def test_other_modes_are_unchanged():
-    for mode in (R, N, P, F):
+    for mode in (R, N, F):
         assert system(True)._room_target(mode, inputs()) == pytest.approx(
             system(False)._room_target(mode, inputs())
         )
@@ -207,3 +214,129 @@ def test_solution_reports_what_the_zone_runs():
     assert result["zone_og_heating_mode"][:4] == ["FORCED"] * 4
     assert result["zone_eg_heating_mode"][:4] == ["NORMAL"] * 4
     assert "REDUCED" not in result["zone_eg_heating_mode"][4:]
+
+
+# ----------------------------------------------------------------------
+# SG Ready 3/4 as heating curve shift (unit.raised/forced_flow_offset_k)
+# ----------------------------------------------------------------------
+
+
+def shifted(
+    raised: float | None = None, forced: float | None = None, preheat_forced: bool = False
+) -> HeatPumpSystem:
+    return HeatPumpSystem(
+        HOUSE,
+        TANK,
+        CopModel(WBB12_RATING_POINTS),
+        slot_hours=0.25,
+        heat_pump=HeatPumpParameters(
+            raised_flow_offset_k=raised,
+            forced_flow_offset_k=forced,
+            preheat_valves_forced=preheat_forced,
+        ),
+        comfort=ComfortParameters(fixed_room_setpoints=True),
+    )
+
+
+def space_w(hp: HeatPumpSystem, mode: HeatingMode, slab_c: float, room_c: float, **kw) -> float:
+    state = ThermalState(slab_c=slab_c, room_c=room_c, dhw_c=55.0)
+    return hp.step(state, inputs(**kw), mode).heat_space_wh / hp.dt
+
+
+def test_without_offsets_raised_equals_normal_with_fixed_setpoints():
+    hp = shifted()
+    assert space_w(hp, A, 24.0, 20.5) == pytest.approx(space_w(hp, N, 24.0, 20.5))
+
+
+def test_raised_offset_adds_emitter_heat_while_the_valves_are_open():
+    hp = shifted(raised=3.0)
+    normal = space_w(hp, N, 24.0, 20.5)
+    assert space_w(hp, A, 24.0, 20.5) == pytest.approx(normal + 3.0 * HOUSE.emitter_w_per_k)
+
+
+def test_raised_offset_adds_nothing_once_the_room_reached_the_setpoint():
+    hp = shifted(raised=3.0)
+    assert space_w(hp, A, 24.0, 21.2) == pytest.approx(space_w(hp, N, 24.0, 21.2))
+
+
+def test_forced_offset_heats_along_the_curve_instead_of_full_power():
+    hp = shifted(forced=0.5)
+    mean = hp.curve_mean_flow_c(inputs(), 0.5)
+    expected = (mean - 22.0) * HOUSE.emitter_w_per_k
+    assert space_w(hp, F, 22.0, 21.5) == pytest.approx(expected)
+    full = space_w(shifted(), F, 22.0, 21.5)
+    assert expected < full
+
+
+def test_forced_curve_heat_shrinks_with_a_warm_screed():
+    hp = shifted(forced=0.5)
+    assert space_w(hp, F, 28.0, 21.5) < space_w(hp, F, 23.0, 21.5)
+
+
+def test_forced_stops_at_comfort_maximum_plus_overshoot():
+    hp = shifted(forced=0.5)
+    assert space_w(hp, F, 22.0, 24.1) == pytest.approx(0.0)
+
+
+def test_curve_follows_the_outdoor_temperature():
+    hp = shifted()
+    assert hp.curve_mean_flow_c(inputs(outdoor_c=-5.0), 0.0) > hp.curve_mean_flow_c(inputs(), 0.0)
+    assert hp.curve_mean_flow_c(inputs(), 3.0) == pytest.approx(
+        hp.curve_mean_flow_c(inputs(), 0.0) + 3.0
+    )
+
+
+def test_preheat_with_forced_valves_heats_past_the_setpoint():
+    open_valves = shifted(raised=3.0)
+    forced = shifted(raised=3.0, preheat_forced=True)
+    # Room above the setpoint: the controllers close, forced valves keep heating.
+    assert space_w(open_valves, P, 22.0, 21.6) == pytest.approx(space_w(open_valves, N, 22.0, 21.6))
+    assert space_w(forced, P, 22.0, 21.6) > space_w(forced, N, 22.0, 21.6) + 1000.0
+
+
+def test_zones_share_one_curve_with_forced_valves():
+    zones = [ZoneParameters("og", UP, weight=80), ZoneParameters("eg", DOWN, weight=160)]
+    hp = MultiZoneHeatPump(shifted(forced=0.5), zones, [ZoneCoupling(0, 1, 100.0)])
+    state = hp.initial_state([21.0, 21.0], dhw_c=55.0, outdoor_c=2.0, slabs=[23.0, 24.0])
+    result = hp.step(state, inputs(), [F, F])
+    mean = hp.system.curve_mean_flow_c(inputs(), 0.5)
+    heats = [wh / hp.system.dt for wh in result.zone_heat_wh]
+    assert heats[0] == pytest.approx((mean - 23.0) * UP.emitter_w_per_k)
+    assert heats[1] == pytest.approx((mean - 24.0) * DOWN.emitter_w_per_k)
+
+
+def test_flow_offsets_reach_the_simulator():
+    settings = device(
+        unit={"raised_flow_offset_k": 3.0, "forced_flow_offset_k": 0.5},
+        comfort={"fixed_room_setpoints": True},
+    )
+    hp = zone_plan(settings=settings).system.hp
+    assert hp.raised_flow_offset_k == pytest.approx(3.0)
+    assert hp.forced_flow_offset_k == pytest.approx(0.5)
+    assert not hp.preheat_valves_forced
+    assert zone_plan().system.hp.forced_flow_offset_k is None
+
+
+def test_milp_mode_heat_follows_the_curve_shift():
+    from akkudoktoreos.optimization.milp.thermal import FORCED_HEAT_W, mode_control
+
+    def control(unit):
+        settings = HeatPumpCommonSettings.model_validate(
+            {
+                "device_id": "hp1",
+                "unit": unit,
+                "comfort": {"fixed_room_setpoints": True},
+                "optimization": {"heating_modes": [0, 1, 2, 3, 4]},
+            }
+        )
+        plan = zone_plan(settings=settings, hours=4)
+        return plan, mode_control(plan, [20.6] * plan.n_slots)
+
+    plan, plain = control({})
+    _, offset = control({"raised_flow_offset_k": 3.0, "forced_flow_offset_k": 0.5})
+    modes = plain.modes
+    emitter = plan.system.building.params.emitter_w_per_k
+    raised, forced = modes.index(int(A)), modes.index(int(F))
+    assert plain.const_w[0][forced] == FORCED_HEAT_W
+    assert offset.const_w[0][forced] < FORCED_HEAT_W
+    assert offset.const_w[0][raised] == pytest.approx(plain.const_w[0][raised] + 3.0 * emitter)

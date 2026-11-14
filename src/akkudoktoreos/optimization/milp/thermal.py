@@ -223,6 +223,37 @@ def mode_heat_coefficients(
     return const, -hp.room_gain_k_per_k * factor, -factor
 
 
+def _curve_shift_const_w(
+    system: Any,
+    inputs: Any,
+    mode: HeatingMode,
+    room_ref_c: float,
+    k_room: float,
+    k_slab: float,
+    const_w: float,
+) -> float:
+    """Extra state-independent heat of a heating curve shift (RL29 fork, flow offsets).
+
+    Open valves (RAISED, PREHEAT): ``emitter * raised_flow_offset_k`` on top of the
+    controller heat. Forced valves (FORCED, PREHEAT if configured): the curve heat
+    ``emitter * (curve + offset - slab)`` linearised at the steady screed of the
+    setpoint, expressed in the controller's state coefficients, replaces the
+    controller heat. ``HeatPumpSystem.heat_request_w`` is exact.
+    """
+    hp = system.hp
+    emitter = system.building.params.emitter_w_per_k
+    if system.valves_forced(mode):
+        shift = hp.forced_flow_offset_k if mode == HeatingMode.FORCED else hp.raised_flow_offset_k
+        _, setpoint, _ = system.comfort_band(inputs)
+        slab_ref = system.building.steady_slab_c(setpoint, float(inputs.outdoor_c), 0.0)
+        mean = system.curve_mean_flow_c(inputs, shift or 0.0)
+        curve_const = emitter * (mean - slab_ref) - k_room * room_ref_c - k_slab * slab_ref
+        return curve_const - const_w  # replaces the controller heat
+    if mode in (HeatingMode.RAISED, HeatingMode.PREHEAT) and hp.raised_flow_offset_k:
+        return emitter * max(0.0, hp.raised_flow_offset_k)
+    return 0.0
+
+
 def mode_control(plan: "HeatPumpRunPlan", room_ref_c: Sequence[float]) -> ModeControl:
     """Heating modes of a run plan as MILP data (see ``ModeControl``)."""
     system = plan.system
@@ -237,11 +268,13 @@ def mode_control(plan: "HeatPumpRunPlan", room_ref_c: Sequence[float]) -> ModeCo
         floor_const, kr, ks = mode_heat_coefficients(system, slot, floor_target, ref)
         row: list[float] = []
         for mode in modes:
-            if mode == int(HeatingMode.FORCED):
+            heating_mode = HeatingMode(mode)
+            if heating_mode == HeatingMode.FORCED and system.hp.forced_flow_offset_k is None:
                 row.append(FORCED_HEAT_W)
                 continue
-            target = system._room_target(HeatingMode(mode), slot)
+            target = system._room_target(heating_mode, slot)
             const, _, _ = mode_heat_coefficients(system, slot, target, ref)
+            const += _curve_shift_const_w(system, slot, heating_mode, ref, kr, ks, const)
             row.append(max(const, floor_const))  # the comfort minimum is the floor
         const_w.append(row)
         k_room.append(kr)

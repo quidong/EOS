@@ -70,6 +70,15 @@ class GeneticHeatPumpParameters(GeneticParametersBaseModel):
             "description": "Measured screed temperature [degC]; None = steady state estimate."
         },
     )
+    initial_zone_slab_c: Optional[dict[str, float]] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "Screed temperature per zone [degC] (RL29 fork, slab estimate); a missing "
+                "zone starts from its steady state."
+            )
+        },
+    )
     initial_dhw_c: Optional[float] = Field(
         default=None,
         json_schema_extra={
@@ -1640,7 +1649,13 @@ def _build_zones(
             row.append(zi)
         per_slot.append(tuple(row))
     first = inputs[0]
-    zone_state = model.initial_state(rooms, dhw_c=initial.dhw_c, outdoor_c=first.outdoor_c)
+    zone_slabs = parameters.initial_zone_slab_c or {}
+    zone_state = model.initial_state(
+        rooms,
+        dhw_c=initial.dhw_c,
+        outdoor_c=first.outdoor_c,
+        slabs=[zone_slabs.get(zone_id) for zone_id in ids],
+    )
     zone_state.shared.standby = initial.standby
     logger.info(
         "Heat pump {}: {} zones ({}), rooms {}.",

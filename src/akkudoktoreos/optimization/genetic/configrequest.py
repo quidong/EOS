@@ -812,6 +812,102 @@ class ConfigOptimizationRequest(
         return device.calibrated(result)
 
     @staticmethod
+    def _carried_slabs(
+        device: Any, observation_time: DateTime
+    ) -> tuple[Optional[float], Optional[dict[str, float]]]:
+        """Screed the previous plan predicted for now, house and per zone (RL29 fork)."""
+        from akkudoktoreos.devices.thermal.slabestimate import planned_value_at
+
+        try:
+            previous = get_ems().genetic_solution()
+            schedule = (getattr(previous, "heat_pumps", None) or {}).get(device.device_id) or {}
+            start = schedule.get("start_datetime")
+            seconds = float(schedule.get("slot_seconds") or 0)
+            if start is None or seconds <= 0:
+                return None, None
+            start_ts = to_datetime(start).timestamp()
+            now_ts = observation_time.timestamp()
+            if now_ts - start_ts > device.slab_estimate.max_age_hours * 3600.0:
+                return None, None
+            house = planned_value_at(list(schedule.get("slab_c") or []), start_ts, seconds, now_ts)
+            zones: dict[str, float] = {}
+            if device.zones.active:
+                for zone in device.zones.zones:
+                    value = planned_value_at(
+                        list(schedule.get(f"zone_{zone.zone_id}_slab_c") or []),
+                        start_ts,
+                        seconds,
+                        now_ts,
+                    )
+                    if value is not None:
+                        zones[zone.zone_id] = value
+            return house, zones or None
+        except Exception as exc:  # optional, never cancel the run
+            logger.debug(
+                "Heat pump {}: no screed from the previous plan: {}", device.device_id, exc
+            )
+            return None, None
+
+    async def _slab_estimate(
+        self, device: Any, observation_time: DateTime, room_c: Optional[float]
+    ) -> tuple[Optional[float], Optional[dict[str, float]]]:
+        """Screed carried from the previous plan, corrected by the return (RL29 fork).
+
+        See ``akkudoktoreos.devices.thermal.slabestimate``. (None, None) leaves the
+        steady state estimate.
+        """
+        from akkudoktoreos.devices.thermal.slabestimate import (
+            estimate_slabs,
+            slab_from_return_c,
+        )
+
+        cfg = device.slab_estimate
+        age = cfg.measurement_max_age_seconds
+        carried, carried_zones = self._carried_slabs(device, observation_time)
+        return_c = await self._latest_measurement(
+            device.measurement_key_return_temperature, observation_time, age
+        )
+        measured: Optional[float] = None
+        if return_c is not None:
+            flow_c = await self._latest_measurement(
+                f"{device.device_id}-flow-temperature", observation_time, age
+            )
+            heat_w = await self._latest_measurement(
+                f"{device.device_id}-heat-power", observation_time, age
+            )
+            dhw_heat_w = await self._latest_measurement(
+                f"{device.device_id}-dhw-heat-power", observation_time, age
+            )
+            space_w = None if heat_w is None else heat_w - max(0.0, dhw_heat_w or 0.0)
+            if dhw_heat_w is not None and dhw_heat_w > 100.0:
+                space_w = None  # hot water charge: the return comes from the tank
+            measured = slab_from_return_c(
+                return_c,
+                space_w,
+                device.building.emitter_w_per_k,
+                device.unit.flow_spread_k,
+                flow_c=flow_c,
+                min_heat_w=cfg.min_heat_w,
+            )
+        slab, zones = estimate_slabs(
+            carried,
+            carried_zones,
+            measured,
+            cfg.return_gain,
+            room_c=room_c,
+            max_c=device.unit.max_flow_c,
+        )
+        logger.info(
+            "Heat pump {}: screed estimate {} (carried {}, return-based {}), zones {}.",
+            device.device_id,
+            None if slab is None else round(slab, 2),
+            None if carried is None else round(carried, 2),
+            None if measured is None else round(measured, 2),
+            None if zones is None else {k: round(v, 2) for k, v in zones.items()},
+        )
+        return slab, zones
+
+    @staticmethod
     def _active_heat_pump_modes(
         device_id: str, observation_time: DateTime
     ) -> tuple[Optional[int], Optional[int]]:
@@ -895,6 +991,9 @@ class ConfigOptimizationRequest(
         slab = await self._latest_measurement(
             device.measurement_key_slab_temperature, observation_time, max_age
         )
+        zone_slabs: Optional[dict[str, float]] = None
+        if slab is None and device.slab_estimate.enabled:
+            slab, zone_slabs = await self._slab_estimate(device, observation_time, room)
         dhw = await self._latest_measurement(
             device.measurement_key_dhw_temperature, observation_time, max_age
         )
@@ -1193,6 +1292,7 @@ class ConfigOptimizationRequest(
             settings=device,
             initial_room_c=room,
             initial_slab_c=slab,
+            initial_zone_slab_c=zone_slabs,
             initial_dhw_c=dhw,
             dhw_setpoint_c=setpoint,
             power_limited_w=power_limited_w,

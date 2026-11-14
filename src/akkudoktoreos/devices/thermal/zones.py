@@ -24,7 +24,8 @@ Control, per slot:
   only possible for all zones together (SG Ready "reduced"); a single REDUCED
   zone runs NORMAL. ``MultiZoneResult.zone_modes`` reports what each zone ran.
   FORCED opens all valves of the zone (forced position) and takes what the
-  heat pump can deliver.
+  heat pump can deliver; with ``forced_flow_offset_k`` (RL29 fork) what the shared
+  heating curve plus offset pushes into the zone's screed.
 - The zones share one heating circuit, hence one flow temperature and one heat
   pump. The heat pump mode is derived from the zone modes
   (``aggregate_heating_mode``): FORCED if any zone is forced, else the
@@ -365,6 +366,8 @@ class MultiZoneHeatPump:
             other_el_w = agg.hp_electric_wh / dt
         else:
             max_mean = hp.max_flow_c - hp.flow_spread_k / 2.0
+            # One heating curve for the shared circuit (RL29 fork, flow offsets).
+            curve_mean = system.curve_mean_flow_c(inputs, 0.0)
             wanted: list[float] = []
             minimum: list[float] = []
             limit: list[float] = []
@@ -374,10 +377,16 @@ class MultiZoneHeatPump:
                 gains = self._zone_gains_w(i, zi, state.rooms[i])
                 low, setpoint, high = system.comfort_band(zi)
                 target = system._room_target(modes[i], zi)
-                room_max = target if modes[i] == HeatingMode.FORCED else high
-                w = self._demand_w(i, state.slabs[i], state.rooms[i], zi.outdoor_c, gains, target)
-                if modes[i] == HeatingMode.FORCED:
-                    w = float("inf")  # valves forced open
+                w, room_max = system.heat_request_w(
+                    modes[i],
+                    zi,
+                    self._demand_w(i, state.slabs[i], state.rooms[i], zi.outdoor_c, gains, target),
+                    state.slabs[i],
+                    state.rooms[i],
+                    target,
+                    p.emitter_w_per_k,
+                    curve_mean_c=curve_mean,
+                )
                 m = self._demand_w(
                     i,
                     state.slabs[i],

@@ -16,10 +16,18 @@ Space heating (``HeatingMode``):
 - ``RAISED``: room target = setpoint + ``raised_offset_k`` (SG Ready "increased
   operation"), at most the comfort maximum. With fixed room setpoints
   (``ComfortParameters.fixed_room_setpoints``) the target stays at the setpoint.
-- ``PREHEAT``: room target = comfort maximum with all valves forced open;
-  charges the screed for later hours.
+- ``PREHEAT``: room target = comfort maximum (the setpoint with fixed room
+  setpoints); charges the screed for later hours.
 - ``FORCED``: SG Ready "forced on" (state 4): the heat pump runs at full
   capacity until the room reaches comfort maximum + ``forced_overshoot_k``.
+
+RL29 fork, heating curve shift (``HeatPumpParameters.raised_flow_offset_k`` /
+``forced_flow_offset_k``, None = the target model above): SG Ready 3/4 raise the
+flow temperature above the weather-compensated heating curve. Open valves take
+``emitter_w_per_k * offset`` more heat while the room is below the controllers'
+target; forced valves (FORCED, PREHEAT with ``preheat_valves_forced``) take
+``emitter_w_per_k * (curve + offset - screed)`` until comfort maximum +
+``forced_overshoot_k``.
 
 ``RAISED`` and ``FORCED`` can also raise the hot water setpoint, as many heat
 pumps do on SG Ready 3/4 (``DhwControlParameters.raised_setpoint_c`` /
@@ -123,6 +131,27 @@ class HeatPumpParameters:
     forced_overshoot_k: float = 1.0
     """FORCED mode heats until comfort maximum + this offset [K]."""
 
+    raised_flow_offset_k: Optional[float] = None
+    """Heating curve shift of RAISED and PREHEAT (SG Ready 3) [K] (RL29 fork).
+
+    None keeps the target model (the mode only moves the room target). A value
+    models SG Ready 3 as the heat pump does it: the flow temperature rises by this
+    offset above the normal heating curve, so while the room controllers keep
+    their valves open the zone gets ``emitter_w_per_k * offset`` more heat."""
+
+    forced_flow_offset_k: Optional[float] = None
+    """Heating curve shift of FORCED (SG Ready 4) [K] (RL29 fork).
+
+    None keeps full capacity until comfort maximum + ``forced_overshoot_k``. A
+    value models the valves forced open at the normal heating curve plus this
+    offset: the screed takes ``emitter_w_per_k * (curve - screed)``, limited by
+    capacity and maximum flow temperature, until the same room limit."""
+
+    preheat_valves_forced: bool = False
+    """PREHEAT also forces the valves open (RL29 fork): it heats at the curve plus
+    ``raised_flow_offset_k`` until comfort maximum + ``forced_overshoot_k``, like
+    FORCED, instead of stopping at the room target."""
+
 
 @dataclass(frozen=True)
 class CoolingParameters:
@@ -163,7 +192,9 @@ class ComfortParameters:
     RAISED then only raises the flow temperature (room target = setpoint), and in the
     multi-zone model a single zone cannot be reduced on its own: REDUCED needs SG Ready
     "reduced" for the whole circuit, so a REDUCED zone runs NORMAL unless every zone is
-    reduced. PREHEAT and FORCED act through forced valve positions and are unchanged."""
+    reduced. FORCED acts through forced valve positions and is unchanged; PREHEAT stops at
+    the setpoint unless ``HeatPumpParameters.preheat_valves_forced``. How much RAISED
+    and PREHEAT add comes from ``HeatPumpParameters.raised_flow_offset_k``."""
 
 
 @dataclass(frozen=True)
@@ -382,7 +413,83 @@ class HeatPumpSystem:
             return min(setpoint + self.comfort.raised_offset_k, high)
         if mode == HeatingMode.FORCED:
             return high + self.hp.forced_overshoot_k
+        if mode == HeatingMode.PREHEAT and self.hp.preheat_valves_forced:
+            return high + self.hp.forced_overshoot_k  # forced valves, like FORCED
+        if self.comfort.fixed_room_setpoints:
+            return setpoint  # PREHEAT through the controllers stops at their setpoint
         return high
+
+    def curve_mean_flow_c(self, inputs: "SlotInputs", offset_k: float) -> float:
+        """Mean water temperature of the heating curve plus ``offset_k`` [degC] (RL29 fork).
+
+        The normal heating curve is weather compensated: the mean water
+        temperature that holds the room setpoint in steady state at the slot's
+        outdoor temperature, without gains (a heating curve does not see them).
+        """
+        _, setpoint, _ = self.comfort_band(inputs)
+        building = self.building
+        steady = building.steady_heat_w(setpoint, inputs.outdoor_c, 0.0)
+        slab = building.steady_slab_c(setpoint, inputs.outdoor_c, 0.0)
+        mean = slab + steady / building.params.emitter_w_per_k + offset_k
+        return min(mean, self.hp.max_flow_c - self.hp.flow_spread_k / 2.0)
+
+    def valves_forced(self, mode: HeatingMode) -> bool:
+        """Whether the mode forces the valves open (FORCED, PREHEAT if configured)."""
+        return mode == HeatingMode.FORCED or (
+            mode == HeatingMode.PREHEAT and self.hp.preheat_valves_forced
+        )
+
+    def heat_request_w(
+        self,
+        mode: HeatingMode,
+        inputs: "SlotInputs",
+        demand_w: float,
+        slab_c: float,
+        room_c: float,
+        room_target_c: float,
+        emitter_w_per_k: float,
+        curve_mean_c: Optional[float] = None,
+    ) -> tuple[float, float]:
+        """Space heat a zone asks for in a mode and the room limit; (heat W, room max degC).
+
+        ``demand_w`` is the controller demand towards ``room_target_c``. Without
+        flow offsets (RL29 fork) RAISED and PREHEAT only move that target and
+        FORCED takes full capacity. With ``raised_flow_offset_k`` /
+        ``forced_flow_offset_k`` the modes shift the heating curve: open valves
+        take the extra heat of the higher flow, forced valves take what the
+        curve pushes into the screed.
+
+        Args:
+            mode: Heating mode of the zone.
+            inputs: Slot inputs (comfort band, outdoor temperature).
+            demand_w: Controller demand towards ``room_target_c`` [W].
+            slab_c: Screed temperature of the zone [degC].
+            room_c: Room temperature of the zone [degC].
+            room_target_c: Room target of the mode [degC].
+            emitter_w_per_k: Emitter conductance of the zone [W/K].
+            curve_mean_c: Mean water temperature of the shared curve without
+                offset; None = this system's ``curve_mean_flow_c``.
+        """
+        _, _, high = self.comfort_band(inputs)
+        hp = self.hp
+        forced_limit = high + hp.forced_overshoot_k
+        if mode == HeatingMode.FORCED and hp.forced_flow_offset_k is None:
+            return float("inf"), room_target_c  # full capacity
+        shift: Optional[float] = None
+        if mode == HeatingMode.FORCED:
+            shift = hp.forced_flow_offset_k
+        elif mode in (HeatingMode.RAISED, HeatingMode.PREHEAT):
+            shift = hp.raised_flow_offset_k
+        if self.valves_forced(mode):
+            base = curve_mean_c if curve_mean_c is not None else self.curve_mean_flow_c(inputs, 0.0)
+            mean = min(base + (shift or 0.0), hp.max_flow_c - hp.flow_spread_k / 2.0)
+            # The heat pump holds the curve; the room controllers have no say.
+            return max(0.0, (mean - slab_c) * emitter_w_per_k), forced_limit
+        if shift is not None and shift > 0 and room_c < room_target_c:
+            # Valves open (room below the controllers' target): the shifted flow
+            # pushes more heat into the screed than the normal curve.
+            return demand_w + emitter_w_per_k * shift, high
+        return demand_w, high
 
     def slot_gains_w(self, inputs: "SlotInputs") -> float:
         """Internal gains (scaled by presence) plus solar gains of a slot [W]."""
@@ -600,12 +707,16 @@ class HeatPumpSystem:
                 hp_dhw_active = False
 
         # --- Space heating ------------------------------------------------
-        _, _, room_max = self.comfort_band(inputs)
         room_target = self._room_target(heating_mode, inputs)
-        wanted = self._space_heat_demand_w(state, inputs.outdoor_c, gains, room_target)
-        if heating_mode == HeatingMode.FORCED:
-            room_max = room_target  # forced on: heat beyond the comfort maximum
-            wanted = float("inf")  # full capacity
+        wanted, room_max = self.heat_request_w(
+            heating_mode,
+            inputs,
+            self._space_heat_demand_w(state, inputs.outdoor_c, gains, room_target),
+            state.slab_c,
+            state.room_c,
+            room_target,
+            self.building.params.emitter_w_per_k,
+        )
         minimum = self._space_heat_demand_w(
             state,
             inputs.outdoor_c,

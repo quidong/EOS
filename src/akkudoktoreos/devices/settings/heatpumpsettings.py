@@ -221,6 +221,46 @@ class HeatPumpUnitSettings(SettingsBaseModel):
             "description": "FORCED mode (SG Ready 4) heats until comfort.max_c + this offset [K]."
         },
     )
+    raised_flow_offset_k: Optional[float] = Field(
+        default=None,
+        ge=0,
+        le=15,
+        json_schema_extra={
+            "description": (
+                "Heating curve shift of SG Ready 3 (RAISED, PREHEAT) [K]. None: the mode "
+                "only moves the room target (with fixed room setpoints RAISED then has no "
+                "effect). A value: while the room controllers keep their valves open the "
+                "flow is this much above the normal heating curve, so the screed takes "
+                "building.emitter_w_per_k * offset more heat. Read it off the flow setpoint "
+                "of the heat pump before and after switching to SG Ready 3."
+            ),
+            "examples": [None, 3.0],
+        },
+    )
+    forced_flow_offset_k: Optional[float] = Field(
+        default=None,
+        ge=0,
+        le=15,
+        json_schema_extra={
+            "description": (
+                "Heating curve shift of SG Ready 4 (FORCED) [K]. None: FORCED runs at full "
+                "capacity until comfort.max_c + forced_overshoot_k. A value: the valves are "
+                "forced open and the screed takes emitter_w_per_k * (curve + offset - screed), "
+                "limited by capacity and max_flow_c, until the same room limit."
+            ),
+            "examples": [None, 0.5],
+        },
+    )
+    preheat_valves_forced: bool = Field(
+        default=False,
+        json_schema_extra={
+            "description": (
+                "PREHEAT also forces the valves open (e.g. KNX forced positions): it heats "
+                "at the curve + raised_flow_offset_k until comfort.max_c + "
+                "forced_overshoot_k instead of stopping at the room target."
+            )
+        },
+    )
 
 
 def _default_draw_profile() -> list[float]:
@@ -444,7 +484,8 @@ class HeatPumpComfortSettings(SettingsBaseModel):
                 "RL29 fork: the room controllers keep their setpoint (nothing changes it per "
                 "mode). RAISED then only raises the flow temperature, and with zones a single "
                 "zone cannot be reduced on its own (REDUCED needs SG Ready 'reduced' for all "
-                "zones). PREHEAT/FORCED act through forced valve positions."
+                "zones). FORCED acts through forced valve positions; PREHEAT stops at the "
+                "setpoint unless unit.preheat_valves_forced."
             )
         },
     )
@@ -1335,6 +1376,58 @@ class HeatPumpCalibrationSettings(SettingsBaseModel):
         )
 
 
+class HeatPumpSlabEstimateSettings(SettingsBaseModel):
+    """Screed temperature carried from plan to plan (RL29 fork).
+
+    Without a screed sensor every run started from the steady state of the room,
+    so heat stored by PREHEAT/FORCED vanished from the model at the next run. With
+    this enabled the run starts from the screed the previous plan predicted for now
+    (per zone too) and corrects it with the measured return temperature while the
+    heat pump heats the floor (``<id>-return-temperature``, optionally with
+    ``<id>-flow-temperature``, ``<id>-heat-power`` and ``<id>-dhw-heat-power``).
+    A measured screed (``<id>-slab-temperature``) still wins.
+    """
+
+    enabled: bool = Field(
+        default=False, json_schema_extra={"description": "Carry the screed temperature."}
+    )
+    max_age_hours: float = Field(
+        default=3.0,
+        gt=0,
+        json_schema_extra={
+            "description": "Oldest previous plan whose screed is carried forward [h]."
+        },
+    )
+    return_gain: float = Field(
+        default=0.5,
+        ge=0,
+        le=1,
+        json_schema_extra={
+            "description": (
+                "Share of the difference between the return-based and the carried screed "
+                "that corrects the estimate per run (0 = no correction, 1 = return only)."
+            )
+        },
+    )
+    min_heat_w: float = Field(
+        default=1000.0,
+        ge=0,
+        json_schema_extra={
+            "description": (
+                "Least space heat (heat output minus hot water) for a return correction [W]; "
+                "below it the return says little about the screed."
+            )
+        },
+    )
+    measurement_max_age_seconds: float = Field(
+        default=900.0,
+        gt=0,
+        json_schema_extra={
+            "description": "Oldest return, flow and heat measurement for the correction [s]."
+        },
+    )
+
+
 class HeatPumpZoneSettings(SettingsBaseModel):
     """One heating zone (eos-plus fork), e.g. one floor with its own screed.
 
@@ -1495,6 +1588,9 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
     weather_warning: HeatPumpWeatherWarningSettings = Field(
         default_factory=HeatPumpWeatherWarningSettings
     )
+    slab_estimate: HeatPumpSlabEstimateSettings = Field(
+        default_factory=HeatPumpSlabEstimateSettings
+    )
     power_limit_w: Optional[ValueTimeWindowSequence] = Field(
         default=None,
         json_schema_extra={
@@ -1581,7 +1677,22 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
                 keys.append(self.measurement_key_setback_room_temperature)
         if self.calibration.enabled:
             keys += [k for k in self.calibration_measurement_keys.values() if k not in keys]
+        if self.slab_estimate.enabled:
+            for key in (
+                self.measurement_key_return_temperature,
+                f"{self.device_id}-flow-temperature",
+                f"{self.device_id}-heat-power",
+                f"{self.device_id}-dhw-heat-power",
+            ):
+                if key not in keys:
+                    keys.append(key)
         return keys
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def measurement_key_return_temperature(self) -> str:
+        """Return temperature of the heating circuit [degC] (fork, slab estimate)."""
+        return f"{self.device_id}-return-temperature"
 
     def zone_measurement_key(self, zone_id: str, name: str) -> str:
         """Measurement key of a zone, e.g. ``wbb12-og-room-temperature``."""
@@ -1788,6 +1899,9 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
                 dhw_flow_overshoot_k=unit.dhw_flow_overshoot_k,
                 max_dhw_c=unit.max_dhw_c,
                 forced_overshoot_k=unit.forced_overshoot_k,
+                raised_flow_offset_k=unit.raised_flow_offset_k,
+                forced_flow_offset_k=unit.forced_flow_offset_k,
+                preheat_valves_forced=unit.preheat_valves_forced,
             ),
             comfort=ComfortParameters(
                 raised_offset_k=self.comfort.raised_offset_k,
