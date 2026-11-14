@@ -336,7 +336,9 @@ class ConfigOptimizationRequest(
             raise ValueError("Configure a positive prediction horizon.")
         end = start.add(hours=config.prediction.hours)
         interval = to_duration(settings.interval_sec)
-        updated = False
+        # RL29 fork: an energy management run has just updated the predictions; a
+        # second update in the same run only repeats every provider's work.
+        updated = bool(get_ems().predictions_updated_in_run())
 
         async def forecast(
             supplied: Optional[list[float]], key: str, energy: bool = False

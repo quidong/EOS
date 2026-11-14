@@ -110,6 +110,26 @@ async def ems_manage_energy() -> None:
     await ems.run()
 
 
+class FrozenEmsView:
+    """The EMS as one run saw it (RL29 fork, shadow comparison).
+
+    Start time, observation time and the previous solution are taken when the
+    view is made; everything else is read from the live EMS.
+    """
+
+    def __init__(self, ems: Any) -> None:
+        self._ems = ems
+        self.start_datetime = ems.start_datetime
+        self.observation_datetime = getattr(ems, "observation_datetime", None)
+        self._genetic_solution = ems.genetic_solution()
+
+    def genetic_solution(self) -> Any:
+        return self._genetic_solution
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._ems, name)
+
+
 def _genetic_family_optimizer(
     algorithm: OptimizationAlgorithm, verbose: bool, seed: Optional[int]
 ) -> GeneticOptimization:
@@ -289,6 +309,18 @@ class EnergyManagement(
     # energy management lock (for energy management run)
     _run_lock: ClassVar[Lock] = Lock()
 
+    # RL29 fork: the predictions of the current run are up to date (the parameter
+    # preparation does not update them a second time).
+    _predictions_updated_in_run: ClassVar[bool] = False
+
+    @classmethod
+    def predictions_updated_in_run(cls) -> bool:
+        """Whether this energy management run has already updated the predictions (fork)."""
+        return cls._predictions_updated_in_run and cls._stage in (
+            EnergyManagementStage.FORECAST_RETRIEVAL,
+            EnergyManagementStage.OPTIMIZATION,
+        )
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def start_datetime(self) -> DateTime:
@@ -427,9 +459,16 @@ class EnergyManagement(
         config = self.config
         verbose = bool(config.server.verbose)
 
+        runner = ShadowRunner.instance()
+        frozen = FrozenEmsView(self)
+
         def optimize(algorithm: OptimizationAlgorithm, params: Any) -> GeneticSolution:
             generations, individuals = _genetic_family_budget(config, algorithm)
             optimizer = _genetic_family_optimizer(algorithm, verbose, seed)
+            # RL29 fork: the next live run may start meanwhile; the shadow keeps the
+            # start time and previous solution of its own run and stops on request.
+            optimizer.ems = frozen  # type: ignore[misc]
+            optimizer._stop_event = runner.stop_event
             return optimizer.optimize_ems(
                 start_hour=start_hour,
                 parameters=params,
@@ -443,7 +482,7 @@ class EnergyManagement(
             await HistoryRecorder.instance().record_shadow(config, result)
 
         try:
-            ShadowRunner.instance().schedule(
+            runner.schedule(
                 algorithms,
                 parameters,
                 active_algorithm,
@@ -525,7 +564,10 @@ class EnergyManagement(
             # state (EMS start, caches, worker pool); let it finish first.
             from akkudoktoreos.core.shadow import ShadowRunner
 
-            await ShadowRunner.instance().wait_idle()
+            # RL29 fork: the run does not wait for a running shadow comparison; the
+            # comparison is asked to stop and works on its own frozen EMS view.
+            await ShadowRunner.instance().yield_to_live_run()
+            EnergyManagement._predictions_updated_in_run = False
 
             if mode is None:
                 mode = self.config.ems.mode
@@ -584,6 +626,7 @@ class EnergyManagement(
                 await self.prediction.update_data(
                     force_enable=force_enable, force_update=force_update
                 )
+                EnergyManagement._predictions_updated_in_run = True
             except Exception as e:
                 trace = "".join(traceback.TracebackException.from_exception(e).format())
                 error_msg = (

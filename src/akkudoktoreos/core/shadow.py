@@ -16,6 +16,7 @@ value of the stored heat. Lower is better.
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from collections import deque
 from dataclasses import asdict, dataclass
@@ -31,6 +32,8 @@ SHADOW_CAPABLE = (OptimizationAlgorithm.GENETIC, OptimizationAlgorithm.MILP)
 
 MAX_RESULTS = 2000
 """In-memory results kept for the summary (about three weeks at 15-minute runs)."""
+YIELD_TIMEOUT_S = 10.0
+"""Longest wait of a live run for a shadow comparison to stop (RL29 fork)."""
 
 
 @dataclass
@@ -172,6 +175,8 @@ class ShadowRunner:
         # Last solution of each shadow algorithm: its own warm start for the next
         # comparison (see ``shadow_parameters``).
         self._own_starts: dict[str, tuple[Any, Any]] = {}
+        # Set by the next live run: the comparison stops and drops its result.
+        self.stop_event = threading.Event()
 
     @classmethod
     def instance(cls) -> "ShadowRunner":
@@ -184,11 +189,28 @@ class ShadowRunner:
         return self._task is not None and not self._task.done()
 
     async def wait_idle(self) -> None:
-        """Wait until a running comparison has finished (before the next EMS run)."""
+        """Wait until a running comparison has finished (tests, shutdown)."""
         task = self._task
         if task is not None and not task.done():
-            logger.info("Shadow comparison still running; the energy management run waits.")
             await asyncio.gather(task, return_exceptions=True)
+
+    async def yield_to_live_run(self, timeout_s: float = YIELD_TIMEOUT_S) -> None:
+        """Ask a running comparison to stop and give it ``timeout_s`` to do so (fork).
+
+        The live run never waits longer: the comparison stops after its current
+        generation, its result is dropped, and a comparison still busy after the
+        timeout goes on with its own frozen EMS view.
+        """
+        task = self._task
+        if task is None or task.done():
+            return
+        self.stop_event.set()
+        logger.info("Shadow comparison still running; asked to stop for the live run.")
+        done, _ = await asyncio.wait({task}, timeout=max(0.0, timeout_s))
+        if not done:
+            logger.info(
+                "Shadow comparison did not stop within {:.0f} s; the live run goes on.", timeout_s
+            )
 
     def schedule(
         self,
@@ -210,6 +232,7 @@ class ShadowRunner:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return False
+        self.stop_event = threading.Event()  # a fresh one per comparison
         self._task = loop.create_task(
             self._run(
                 list(algorithms),
@@ -236,7 +259,11 @@ class ShadowRunner:
         active_objective, active_net = solution_objective(active_solution)
         issued = datetime.now(timezone.utc)
         loop = asyncio.get_running_loop()
+        stop = self.stop_event
         for algorithm in algorithms:
+            if stop.is_set():
+                logger.info("Shadow comparison {} skipped: a live run started.", algorithm)
+                break
             started = time.monotonic()
             own = self._own_starts.get(str(algorithm))
             params = shadow_parameters(parameters, own)
@@ -247,6 +274,13 @@ class ShadowRunner:
                 logger.warning("Shadow comparison {} failed: {}", algorithm, exc)
                 continue
             duration = time.monotonic() - started
+            if stop.is_set():
+                logger.info(
+                    "Shadow comparison {} stopped after {:.0f} s for a live run; result dropped.",
+                    algorithm,
+                    duration,
+                )
+                break
             start = getattr(solution, "start_solution", None)
             if start is not None:
                 self._own_starts[str(algorithm)] = (

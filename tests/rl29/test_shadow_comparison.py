@@ -1,6 +1,9 @@
 """Shadow comparison of GENETIC and MILP on identical inputs (RL29 fork)."""
 
 import asyncio
+import inspect
+import threading
+import time
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
@@ -330,3 +333,145 @@ async def test_runner_warm_starts_each_shadow_from_its_own_previous_solution():
         await runner.wait_idle()
     # First comparison cold, second from the shadow's own first solution.
     assert seen == [None, [1, 1, 1]]
+
+
+@pytest.mark.asyncio
+async def test_a_live_run_stops_the_comparison_and_drops_its_result():
+    """The live run asks the shadow to stop; it waits at most the timeout."""
+    runner = ShadowRunner()
+    started = threading.Event()
+    seen: list[bool] = []
+
+    def optimize(algorithm: OptimizationAlgorithm, parameters: Any) -> Any:
+        started.set()
+        # the optimizer polls the stop event between generations
+        seen.append(runner.stop_event.wait(timeout=5))
+        return fake_solution(1.0)
+
+    assert runner.schedule(
+        [OptimizationAlgorithm.MILP, OptimizationAlgorithm.GENETIC],
+        object(),
+        "GENETIC",
+        fake_solution(2.0),
+        1.0,
+        optimize,
+    )
+    await asyncio.get_running_loop().run_in_executor(None, started.wait, 5)
+    await runner.yield_to_live_run(timeout_s=5)
+    assert not runner.busy
+    assert seen == [True]  # stopped, the second algorithm is skipped
+    assert len(runner.results) == 0
+    # the next comparison starts with a fresh stop flag
+    assert runner.schedule(
+        [OptimizationAlgorithm.MILP], object(), "GENETIC", fake_solution(2.0), 1.0,
+        lambda a, p: fake_solution(1.0),
+    )
+    await runner.wait_idle()
+    assert len(runner.results) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_live_run_does_not_wait_longer_than_the_timeout():
+    runner = ShadowRunner()
+    release = threading.Event()
+    started = threading.Event()
+
+    def stubborn(algorithm: OptimizationAlgorithm, parameters: Any) -> Any:
+        started.set()
+        release.wait(timeout=5)  # ignores the stop request
+        return fake_solution(1.0)
+
+    assert runner.schedule(
+        [OptimizationAlgorithm.MILP], object(), "GENETIC", fake_solution(2.0), 1.0, stubborn
+    )
+    await asyncio.get_running_loop().run_in_executor(None, started.wait, 5)
+    began = time.monotonic()
+    await runner.yield_to_live_run(timeout_s=0.2)
+    assert time.monotonic() - began < 2.0
+    assert runner.busy
+    release.set()
+    await runner.wait_idle()
+    assert len(runner.results) == 0  # stopped meanwhile: result dropped
+
+
+def test_genetic_loop_stops_on_request():
+    from akkudoktoreos.optimization.genetic import genetic
+
+    source = inspect.getsource(genetic.GeneticOptimization._evolve_population_adaptive)
+    assert "_stop_event" in source
+
+
+def test_frozen_ems_view_keeps_the_run_state():
+    from akkudoktoreos.core.ems import FrozenEmsView
+
+    live = SimpleNamespace(
+        start_datetime="t0",
+        observation_datetime="t0+2",
+        genetic_solution=lambda: "previous",
+        config="config",
+    )
+    view = FrozenEmsView(live)
+    live.start_datetime = "t1"
+    live.genetic_solution = lambda: "newer"
+    assert view.start_datetime == "t0"
+    assert view.observation_datetime == "t0+2"
+    assert view.genetic_solution() == "previous"
+    assert view.config == "config"
+
+
+def test_predictions_are_updated_once_per_run(monkeypatch):
+    from akkudoktoreos.core.ems import EnergyManagement, EnergyManagementStage
+
+    monkeypatch.setattr(EnergyManagement, "_predictions_updated_in_run", True)
+    monkeypatch.setattr(EnergyManagement, "_stage", EnergyManagementStage.OPTIMIZATION)
+    assert EnergyManagement.predictions_updated_in_run()
+    # outside a run (REST request) the preparation updates them itself
+    monkeypatch.setattr(EnergyManagement, "_stage", EnergyManagementStage.IDLE)
+    assert not EnergyManagement.predictions_updated_in_run()
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_optimization_still_returns_a_plan(config_eos):
+    from akkudoktoreos.core.coreabc import get_ems
+    from akkudoktoreos.optimization.genetic.genetic import GeneticOptimization
+    from akkudoktoreos.optimization.genetic.geneticparams import GeneticOptimizationParameters
+    from akkudoktoreos.utils.datetimeutil import to_datetime
+
+    config_eos.merge_settings_from_dict(
+        {
+            "prediction": {"hours": 48},
+            "optimization": {
+                "genetic": {
+                    "horizon_hours": 4,
+                    "tail_horizon_hours": 0,
+                    "interval_sec": 3600,
+                    "individuals": 10,
+                    "generations": 10,
+                    "terminal_value_mode": "FIXED",
+                }
+            },
+        }
+    )
+    get_ems(init=True).set_start_datetime(to_datetime("2026-11-10T00:00:00"))
+    params = GeneticOptimizationParameters.model_validate(
+        {
+            "ems": {
+                "pv_prognose_wh": [0.0] * 4,
+                "gesamtlast": [300.0] * 4,
+                "strompreis_euro_pro_wh": [0.0003] * 4,
+                "einspeiseverguetung_euro_pro_wh": [0.00007] * 4,
+                "preis_euro_pro_wh_akku": 0.0,
+            },
+            "pv_battery": {"device_id": "bat", "capacity_wh": 5000, "initial_soc_percentage": 50},
+            "inverter": {"device_id": "inv", "battery_id": "bat", "max_power_wh": 5000},
+            "forecast_interval_seconds": 3600,
+            "ev": None,
+        }
+    )
+    optimizer = GeneticOptimization(fixed_seed=1)
+    stop = threading.Event()
+    stop.set()
+    optimizer._stop_event = stop
+    solution = optimizer.optimize_ems(params, ngen=50, individuals=10)
+    assert solution is not None
+    assert len(solution.discharge_allowed) >= 4

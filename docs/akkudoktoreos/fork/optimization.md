@@ -98,8 +98,12 @@ minus the value of the stored heat; MILP polishes with the same evaluator), so t
 - With the history database the results go to the table `eos_shadow`; `/v1/energy-management/history/summary`
   (MCP `eos_kpis`) reports per algorithm pair the runs, the mean delta and the share of runs the shadow was
   better (`shadow`).
-- The next energy management run waits until a running comparison has finished, because both share the
-  optimizer state. Keep the combined runtime well below the run interval.
+- The next energy management run does not wait for a running comparison: it asks the comparison to stop
+  (after its current generation; at most 10 s), and the comparison drops its result. A comparison that
+  is still busy goes on with its own frozen view of the EMS (start time, previous plan), so it cannot mix
+  up the live run. Each shadow algorithm warm-starts from its own last plan.
+- An energy management run updates the predictions once; the parameter preparation of the same run does
+  not update them a second time.
 - Runs requested explicitly (REST with own parameters or a fixed algorithm) are not shadowed.
 
 ## Input snapshots and replay

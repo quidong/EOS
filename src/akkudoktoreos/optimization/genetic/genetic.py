@@ -3655,6 +3655,11 @@ class GeneticOptimization(OptimizationBase):
         improvements = 0
         last_improvement_generation = 0
         for generation in range(1, ngen + 1):
+            stop_event = getattr(self, "_stop_event", None)
+            if stop_event is not None and stop_event.is_set():
+                # RL29 fork: a shadow comparison yields to the next live run.
+                logger.info("Optimization stopped on request after {} generations.", generation - 1)
+                break
             diversity = self._population_diversity(population)
             soft_restart = (
                 stagnation >= self.SOFT_RESTART_GENERATIONS
