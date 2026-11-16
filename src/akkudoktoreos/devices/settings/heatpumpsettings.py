@@ -261,6 +261,20 @@ class HeatPumpUnitSettings(SettingsBaseModel):
             )
         },
     )
+    curve_limits_open_valves: bool = Field(
+        default=False,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: the heating curve limits space heating while the room "
+                "controllers regulate (REDUCED, NORMAL, RAISED, PREHEAT without forced "
+                "valves). The heat pump holds its weather-compensated curve (plus "
+                "raised_flow_offset_k in RAISED/PREHEAT); a room deficit does not raise "
+                "the flow, so the screed takes at most emitter_w_per_k * (curve - screed). "
+                "False keeps the room-compensated controller that may use the flow up "
+                "to max_flow_c. Use it with comfort.fixed_room_setpoints."
+            )
+        },
+    )
 
 
 def _default_draw_profile() -> list[float]:
@@ -1949,6 +1963,7 @@ class HeatPumpCommonSettings(DevicesBaseSettings):
                 raised_flow_offset_k=unit.raised_flow_offset_k,
                 forced_flow_offset_k=unit.forced_flow_offset_k,
                 preheat_valves_forced=unit.preheat_valves_forced,
+                curve_limits_open_valves=unit.curve_limits_open_valves,
             ),
             comfort=ComfortParameters(
                 raised_offset_k=self.comfort.raised_offset_k,

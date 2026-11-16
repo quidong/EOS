@@ -395,6 +395,12 @@ class MultiZoneHeatPump:
                     gains,
                     min(low + REPAIR_MARGIN_K, setpoint),
                 )
+                floor_cap = system.open_valve_cap_w(
+                    HeatingMode.NORMAL, zi, state.slabs[i], p.emitter_w_per_k, curve_mean
+                )
+                if floor_cap is not None:
+                    # Nothing raises the flow for the comfort floor (RL29 fork).
+                    m = min(m, max(w, floor_cap))
                 if state.rooms[i] >= room_max:
                     w = m = 0.0
                 cap = max(0.0, (max_mean - state.slabs[i]) * p.emitter_w_per_k)

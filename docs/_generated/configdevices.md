@@ -212,7 +212,8 @@ config path from ``self.device_id`` without needing an external index.
                        "forced_overshoot_k": 1.0,
                        "raised_flow_offset_k": null,
                        "forced_flow_offset_k": null,
-                       "preheat_valves_forced": false
+                       "preheat_valves_forced": false,
+                       "curve_limits_open_valves": false
                    },
                    "dhw": {
                        "volume_l": 190.0,
@@ -782,7 +783,8 @@ config path from ``self.device_id`` without needing an external index.
                        "forced_overshoot_k": 1.0,
                        "raised_flow_offset_k": null,
                        "forced_flow_offset_k": null,
-                       "preheat_valves_forced": false
+                       "preheat_valves_forced": false,
+                       "curve_limits_open_valves": false
                    },
                    "dhw": {
                        "volume_l": 190.0,

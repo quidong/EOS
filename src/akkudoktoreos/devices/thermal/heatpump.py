@@ -152,6 +152,13 @@ class HeatPumpParameters:
     ``raised_flow_offset_k`` until comfort maximum + ``forced_overshoot_k``, like
     FORCED, instead of stopping at the room target."""
 
+    curve_limits_open_valves: bool = False
+    """The heating curve limits space heating while the room controllers regulate
+    (RL29 fork): a room deficit does not raise the flow above the curve (plus
+    ``raised_flow_offset_k`` in RAISED/PREHEAT), so open valves take at most
+    ``emitter_w_per_k * (curve - screed)``. False keeps the room-compensated
+    controller that may use the flow up to ``max_flow_c``."""
+
 
 @dataclass(frozen=True)
 class CoolingParameters:
@@ -485,11 +492,47 @@ class HeatPumpSystem:
             mean = min(base + (shift or 0.0), hp.max_flow_c - hp.flow_spread_k / 2.0)
             # The heat pump holds the curve; the room controllers have no say.
             return max(0.0, (mean - slab_c) * emitter_w_per_k), forced_limit
+        cap = self.open_valve_cap_w(mode, inputs, slab_c, emitter_w_per_k, curve_mean_c)
+        if cap is not None:
+            # The curve, not the room deficit, sets the flow (RL29 fork).
+            return min(demand_w, cap), high
         if shift is not None and shift > 0 and room_c < room_target_c:
             # Valves open (room below the controllers' target): the shifted flow
             # pushes more heat into the screed than the normal curve.
             return demand_w + emitter_w_per_k * shift, high
         return demand_w, high
+
+    def open_valve_cap_w(
+        self,
+        mode: HeatingMode,
+        inputs: "SlotInputs",
+        slab_c: float,
+        emitter_w_per_k: float,
+        curve_mean_c: Optional[float] = None,
+    ) -> Optional[float]:
+        """Most space heat open valves take at the heating curve [W] (RL29 fork).
+
+        Only with ``HeatPumpParameters.curve_limits_open_valves``; None otherwise.
+        RAISED and PREHEAT add ``raised_flow_offset_k`` to the curve; forced valves
+        are not limited here (``heat_request_w`` handles them).
+
+        Args:
+            mode: Heating mode of the zone.
+            inputs: Slot inputs (comfort band, outdoor temperature).
+            slab_c: Screed temperature of the zone [degC].
+            emitter_w_per_k: Emitter conductance of the zone [W/K].
+            curve_mean_c: Mean water temperature of the shared curve without offset;
+                None = this system's ``curve_mean_flow_c``.
+        """
+        hp = self.hp
+        if not hp.curve_limits_open_valves or self.valves_forced(mode):
+            return None
+        base = curve_mean_c if curve_mean_c is not None else self.curve_mean_flow_c(inputs, 0.0)
+        shift = 0.0
+        if mode in (HeatingMode.RAISED, HeatingMode.PREHEAT):
+            shift = max(0.0, hp.raised_flow_offset_k or 0.0)
+        mean = min(base + shift, hp.max_flow_c - hp.flow_spread_k / 2.0)
+        return max(0.0, (mean - slab_c) * emitter_w_per_k)
 
     def slot_gains_w(self, inputs: "SlotInputs") -> float:
         """Internal gains (scaled by presence) plus solar gains of a slot [W]."""
@@ -723,6 +766,12 @@ class HeatPumpSystem:
             gains,
             min(inputs.comfort_min_c + REPAIR_MARGIN_K, self.comfort_band(inputs)[1]),
         )
+        floor_cap = self.open_valve_cap_w(
+            HeatingMode.NORMAL, inputs, state.slab_c, self.building.params.emitter_w_per_k
+        )
+        if floor_cap is not None:
+            # Nothing raises the flow for the comfort floor either (RL29 fork).
+            minimum = min(minimum, max(wanted, floor_cap))
         if state.room_c >= room_max or stays_standby:
             wanted = 0.0  # standby: no space heating above the room floor
             minimum = 0.0

@@ -73,6 +73,13 @@ steady state. Read the offsets off the flow setpoint of the heat pump right befo
 switch. `None` keeps the old behaviour (FORCED at full capacity). The MILP linearises the curve
 heat at the steady screed of the setpoint; the GENETIC polish uses the exact law.
 
+`unit.curve_limits_open_valves` makes the curve limit open valves too: a room deficit does not
+raise the flow, so REDUCED and NORMAL take at most `emitter_w_per_k * (curve - screed)` and
+RAISED/PREHEAT the same with the raised offset. The comfort floor (repair heat) is limited the
+same way. Without it the controller law may use the flow up to `max_flow_c`, and a cold room
+(for example after airing) recovers in NORMAL far faster than a curve-led heat pump can, so the
+optimizer never sees a reason for RAISED or PREHEAT.
+
 RAISED/FORCED can raise the hot water setpoint (`dhw.raised_setpoint_c`, `dhw.forced_setpoint_c`).
 Legionella runs (`dhw.legionella_c`, `dhw.legionella_interval_days`) are planned with the cheapest
 option that reaches the temperature; without one, no run is planned and the log says so.

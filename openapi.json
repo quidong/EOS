@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2611141590995341"
+    "version": "v0.3.0.dev2611162110506041"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -13693,6 +13693,12 @@
             "type": "boolean",
             "title": "Preheat Valves Forced",
             "description": "PREHEAT also forces the valves open (e.g. KNX forced positions): it heats at the curve + raised_flow_offset_k until comfort.max_c + forced_overshoot_k instead of stopping at the room target.",
+            "default": false
+          },
+          "curve_limits_open_valves": {
+            "type": "boolean",
+            "title": "Curve Limits Open Valves",
+            "description": "RL29 fork: the heating curve limits space heating while the room controllers regulate (REDUCED, NORMAL, RAISED, PREHEAT without forced valves). The heat pump holds its weather-compensated curve (plus raised_flow_offset_k in RAISED/PREHEAT); a room deficit does not raise the flow, so the screed takes at most emitter_w_per_k * (curve - screed). False keeps the room-compensated controller that may use the flow up to max_flow_c. Use it with comfort.fixed_room_setpoints.",
             "default": false
           }
         },
