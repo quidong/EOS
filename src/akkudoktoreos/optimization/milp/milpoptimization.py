@@ -43,6 +43,7 @@ from akkudoktoreos.optimization.milp.dispatch import (
     DispatchInput,
     DispatchResult,
     SwitchingModel,
+    UncertaintyBudget,
     battery_states,
     describe_optimality,
     solve_dispatch,
@@ -186,6 +187,37 @@ class MilpOptimization(GeneticOptimization):
             ),
         )
 
+    def _uncertainty_budget(self) -> Optional[UncertaintyBudget]:
+        """Hedge against forecast errors (fork, P2); None when off."""
+        settings = self._milp
+        if settings.uncertainty_budget_hours <= 0:
+            return None
+        slots_per_hour = 1.0 / self.slot_duration_h
+        load_dev = settings.uncertainty_load_dev
+        if load_dev is None:
+            load_dev = self._load_spread_high()
+        return UncertaintyBudget(
+            pv_dev=settings.uncertainty_pv_dev,
+            load_dev=load_dev,
+            budget_slots=settings.uncertainty_budget_hours * slots_per_hour,
+            day_slots=max(1, round(24 * slots_per_hour)),
+        )
+
+    def _load_spread_high(self) -> float:
+        """Upper LoadML quantile width (adverse side only), else 0.2."""
+        try:
+            import json
+            from pathlib import Path
+
+            path = Path(self.config.general.data_folder_path) / "rl29" / "load_ml.json"
+            data = json.loads(path.read_text(encoding="utf-8"))
+            spread = float(data.get("spread_high", 0.0))
+            if data.get("used") and 0.0 < spread < 2.0:
+                return spread
+        except Exception:  # noqa: S110 - no LoadML report: default spread
+            pass
+        return 0.2
+
     def _battery_mode(self, gene: int) -> int:
         """Switched battery mode of one battery gene: 0 idle, 1 discharge, 2 grid charge."""
         import numpy as np
@@ -295,6 +327,7 @@ class MilpOptimization(GeneticOptimization):
             ),
             mip_rel_gap=self._milp.mip_rel_gap,
             switching=self._switching_model(tie_break) if switching else None,
+            uncertainty=self._uncertainty_budget(),
             import_excess_cost_per_wh=(
                 float(grid.import_excess_penalty_amt_kwh) / 1000.0 if max_import_w else None
             ),

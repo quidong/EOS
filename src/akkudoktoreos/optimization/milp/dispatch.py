@@ -101,6 +101,64 @@ class SwitchingModel:
 
 
 @dataclass
+class UncertaintyBudget:
+    """Forecast errors the plan hedges against (RL29 fork, evcc ``uncertainty``).
+
+    Every slot may deliver ``pv_dev`` less PV and need ``load_dev`` more load than
+    forecast, but at most ``budget_slots`` slots within a day do so (budget of
+    Bertsimas and Sim). The worst case up to each slot is known before the solve; the
+    model prices the recourse: the reserve above the minimum SoC that covers the
+    shortfall (at what the plan values stored energy) and the import for what it cannot
+    cover (at the price of the slot). No binaries, four variables per slot.
+    """
+
+    pv_dev: float = 0.3
+    load_dev: float = 0.2
+    budget_slots: float = 0.0
+    day_slots: int = 96
+    """Slots the worst case looks back (one day)."""
+
+
+HEDGE_TIE_DISCOUNT = 1e-3
+"""Protection is priced slightly below its worth, so a tie keeps the forecast's plan."""
+
+
+def worst_deviation(
+    pv: Sequence[float],
+    load: Sequence[float],
+    hedge: UncertaintyBudget,
+    max_charge_wh: float,
+) -> list[float]:
+    """Budgeted worst case deviation up to each slot [Wh] (the day before it).
+
+    A slot's deviation is ``pv_dev * pv + load_dev * load`` beyond the PV surplus the
+    battery cannot take anyway (that surplus is exported or curtailed whatever the plan).
+    """
+    import heapq
+
+    n = len(pv)
+    dev = []
+    for t in range(n):
+        deviation = hedge.pv_dev * pv[t] + hedge.load_dev * load[t]
+        spill = max(pv[t] - load[t] - max_charge_wh, 0.0)
+        dev.append(max(deviation - spill, 0.0))
+    budget = min(max(hedge.budget_slots, 0.0), float(n))
+    size = math.ceil(budget)
+    part = budget - math.floor(budget)
+    worst = [0.0] * n
+    if size == 0:
+        return worst
+    for t in range(n):
+        first = max(0, t - max(hedge.day_slots, 1) + 1)
+        largest = heapq.nlargest(size, dev[first : t + 1])
+        total = sum(largest)
+        if part and len(largest) == size:
+            total -= (1.0 - part) * largest[-1]
+        worst[t] = total
+    return worst
+
+
+@dataclass
 class ApplianceRun:
     """One run of a schedulable appliance: allowed start slots and its energy profile."""
 
@@ -135,6 +193,8 @@ class DispatchInput:
     of the house balance (or priced separately with their own meter)."""
     switching: Optional[SwitchingModel] = None
     """Fork: battery mode changes (P1); None = changes are free and not modelled."""
+    uncertainty: Optional[UncertaintyBudget] = None
+    """Fork: hedge the reported scenario against forecast errors (P2); None = off."""
     import_excess_cost_per_wh: Optional[float] = None
     """Fork: import above ``max_grid_import_wh`` costs this per Wh on top of the price
     (soft limit, as in the GENETIC simulation); None = hard limit."""
@@ -530,6 +590,76 @@ def _switch_tie_break(
     return improved, f"improved {before} to {after}"
 
 
+def _add_hedge(
+    b: "_Builder",
+    data: DispatchInput,
+    plan: _ScenarioVars,
+    pv: list[float],
+    load: list[float],
+    price: list[float],
+    feed: list[float],
+    weight: float,
+) -> None:
+    """Budgeted recourse cost of forecast errors (evcc ``_add_uncertainty_constraints``)."""
+    hedge, bat = data.uncertainty, data.battery
+    if hedge is None or hedge.budget_slots <= 0 or bat is None or bat.capacity_wh <= 0:
+        return
+    if hedge.pv_dev <= 0 and hedge.load_dev <= 0:
+        return
+    n = len(plan.imp)
+    inf = math.inf
+    worst = worst_deviation(pv, load, hedge, bat.max_charge_wh)
+    if not any(worst):
+        return
+    eta_c = max(bat.charge_efficiency, 1e-9)
+    eta_d = max(bat.discharge_efficiency, 1e-9)
+    stored_value = max((value for _, value in data.terminal_segments), default=0.0)
+    reserve_price = max(max(feed, default=0.0), stored_value / eta_d, 0.0) * (
+        1.0 - HEDGE_TIE_DISCOUNT
+    )
+    running_prev: Optional[int] = None
+    for t in range(n):
+        p_t = max(price[t], 0.0) * (1.0 - HEDGE_TIE_DISCOUNT)
+        u_imp = b.var(0.0, inf, weight * p_t)
+        u_chg = b.var(0.0, inf, weight * p_t / (eta_c * eta_d))
+        u_res = b.var(0.0, inf, weight * reserve_price)
+        running = b.var(0.0, worst[t])
+        c_pv, c_grid, d = plan.chg_pv[t], plan.chg_grid[t], plan.dis[t]
+        if c_pv is None or c_grid is None or d is None:  # pragma: no cover - battery set
+            return
+        # running <= running_prev + u_imp + u_chg
+        row: dict[int, float] = {running: 1.0, u_imp: -1.0, u_chg: -1.0}
+        if running_prev is not None:
+            row[running_prev] = -1.0
+        b.row(row, -inf, 0.0)
+        # Extra import replaces a planned discharge or covers what arrives in this slot.
+        arriving = max(worst[t] - (worst[t - 1] if t > 0 else 0.0), 0.0)
+        b.row({u_imp: 1.0, d: -1.0}, -inf, arriving)
+        # Refill from the grid with the charge power the plan leaves unused.
+        if bat.allow_grid_charge:
+            b.row(
+                {u_chg: 1.0, c_grid: eta_c * eta_d, c_pv: eta_c * eta_d},
+                -inf,
+                eta_c * eta_d * bat.max_charge_wh,
+            )
+        else:
+            b.row({u_chg: 1.0}, -inf, 0.0)
+        # The reserve above the minimum SoC covers the rest: running >= worst - reserve.
+        b.row(
+            {running: 1.0, plan.soc[t + 1]: eta_d},
+            worst[t] + eta_d * bat.min_soc_wh,
+            inf,
+        )
+        # Reserve consumed by the worst case, what this slot adds to it.
+        res_row: dict[int, float] = {u_res: 1.0, running: 1.0}
+        lower = worst[t]
+        if running_prev is not None:
+            res_row[running_prev] = -1.0
+            lower -= worst[t - 1]
+        b.row(res_row, lower, inf)
+        running_prev = running
+
+
 def solve_dispatch(data: DispatchInput) -> DispatchResult:
     """Build and solve the dispatch model; see the module docstring.
 
@@ -603,6 +733,17 @@ def solve_dispatch(data: DispatchInput) -> DispatchResult:
         first.soc,
     )
     switch_vars = _add_switching(b, data, first)
+    weight0, pv0, load0 = scenarios[0]
+    _add_hedge(
+        b,
+        data,
+        first,
+        [max(float(v), 0.0) for v in list(pv0)[:n]],
+        [max(float(v), 0.0) for v in list(load0)[:n]],
+        price,
+        feed,
+        max(weight0, 0.0) / total_weight,
+    )
 
     outcome = b.solve(data.time_limit_s, data.mip_rel_gap)
     tie_break: Optional[str] = None

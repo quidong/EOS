@@ -288,3 +288,23 @@ def test_scenarios_and_soft_import_limit(config_eos: ConfigEOS, tmp_path):
     assert optimizer._ignore_import_limit is False
     assert optimizer.milp_summary["seeds"] >= 1
     assert np.asarray(solution.ac_charge)[:4].sum() > 0
+
+
+def test_uncertainty_budget_from_settings(config_eos: ConfigEOS, tmp_path):
+    """Fork (P2): the hedge is built from the settings; LoadML's upper spread by default."""
+    configure(config_eos, uncertainty_budget_hours=6, uncertainty_pv_dev=0.25)
+    config_eos.merge_settings_from_dict({"general": {"data_folder_path": str(tmp_path)}})
+    (tmp_path / "rl29").mkdir()
+    (tmp_path / "rl29" / "load_ml.json").write_text(
+        '{"used": true, "spread_low": 0.3, "spread_high": 0.45}'
+    )
+    optimizer = MilpOptimization(fixed_seed=1)
+    prices = [0.00010] * 4 + [0.00030] * 4 + [0.00060] * 4
+    solution = optimizer.optimize_ems(parameters(prices=prices), ngen=0, individuals=20)
+    hedge = optimizer._uncertainty_budget()
+    assert hedge is not None
+    assert hedge.budget_slots == 6 and hedge.day_slots == 24
+    assert hedge.pv_dev == 0.25 and hedge.load_dev == pytest.approx(0.45)
+    assert np.asarray(solution.ac_charge)[:4].sum() > 0
+    configure(config_eos, uncertainty_budget_hours=0)
+    assert MilpOptimization(fixed_seed=1)._uncertainty_budget() is None

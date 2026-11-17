@@ -151,6 +151,42 @@ class MilpCommonSettings(SettingsBaseModel):
             "examples": [None, 0.2],
         },
     )
+    uncertainty_budget_hours: float = Field(
+        default=0.0,
+        ge=0,
+        le=24,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: hedge against forecast errors (evcc risk profile, budget of "
+                "Bertsimas and Sim). At most this many hours per day deliver "
+                "`uncertainty_pv_dev` less PV and `uncertainty_load_dev` more load than "
+                "forecast; the plan prices the reserve and import that would cover it. "
+                "0 = off. A quarter of a day covers the usual bad afternoon."
+            ),
+            "examples": [0.0, 6.0],
+        },
+    )
+    uncertainty_pv_dev: float = Field(
+        default=0.3,
+        ge=0,
+        le=1,
+        json_schema_extra={
+            "description": "RL29 fork: share of the PV forecast that may fall short per slot.",
+            "examples": [0.3],
+        },
+    )
+    uncertainty_load_dev: Optional[float] = Field(
+        default=None,
+        ge=0,
+        le=2,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: share by which the base load may exceed the forecast per slot. "
+                "None = upper quantile width published by LoadML, else 0.2."
+            ),
+            "examples": [None, 0.2],
+        },
+    )
     switching: bool = Field(
         default=True,
         json_schema_extra={

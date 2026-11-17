@@ -356,3 +356,76 @@ def test_no_charge_and_discharge_at_once_at_negative_prices():
     locked = solve_dispatch(DispatchInput(**{**data.__dict__, "lock_charge_discharge": "negative_prices"}))
     for c_pv, c_grid, d in zip(locked.charge_pv_wh, locked.charge_grid_wh, locked.discharge_wh):
         assert c_pv + c_grid < 1e-6 or d < 1e-6
+
+
+# --------------------------------------------------------------------------------------
+# Fork: budgeted hedge against forecast errors (P2)
+# --------------------------------------------------------------------------------------
+
+
+class TestUncertaintyBudget:
+    def test_worst_deviation_budget_and_window(self):
+        from akkudoktoreos.optimization.milp.dispatch import UncertaintyBudget, worst_deviation
+
+        hedge = UncertaintyBudget(pv_dev=0.0, load_dev=0.5, budget_slots=2, day_slots=3)
+        worst = worst_deviation([0.0] * 5, [100, 400, 200, 300, 0], hedge, 1000.0)
+        # Largest two deviations of the last three slots.
+        assert worst == pytest.approx([50, 250, 300, 350, 250])
+        half = UncertaintyBudget(pv_dev=0.0, load_dev=0.5, budget_slots=1.5, day_slots=96)
+        assert worst_deviation([0.0] * 2, [400, 200], half, 1000.0) == pytest.approx([200, 250])
+
+    def test_surplus_the_battery_cannot_take_is_no_risk(self):
+        from akkudoktoreos.optimization.milp.dispatch import UncertaintyBudget, worst_deviation
+
+        hedge = UncertaintyBudget(pv_dev=0.3, load_dev=0.0, budget_slots=1)
+        assert worst_deviation([5000], [0], hedge, 1000.0) == [0.0]
+
+    def test_hedge_buys_reserve_for_an_expensive_evening(self):
+        from akkudoktoreos.optimization.milp.dispatch import UncertaintyBudget
+
+        data = DispatchInput(
+            pv_wh=[0.0] * 5,
+            load_wh=[0.0] + [1000.0] * 4,
+            price_per_wh=[10 * CENT] + [40 * CENT] * 4,
+            feed_in_per_wh=[0.0] * 5,
+            battery=battery(soc_wh=0, max_charge_wh=8000, max_discharge_wh=8000),
+        )
+        plain = solve_dispatch(data)
+        hedged = solve_dispatch(
+            DispatchInput(
+                **{
+                    **data.__dict__,
+                    "uncertainty": UncertaintyBudget(pv_dev=0.0, load_dev=0.2, budget_slots=4),
+                }
+            )
+        )
+        assert plain.charge_grid_wh[0] == pytest.approx(4000, abs=1)
+        assert hedged.charge_grid_wh[0] == pytest.approx(4800, abs=1)
+        # The reported grid cost is the plan's; the premium is the extra charge.
+        assert hedged.grid_cost(data.price_per_wh, data.feed_in_per_wh) == pytest.approx(
+            4800 * 10 * CENT, abs=1e-6
+        )
+
+    def test_flat_tariff_buys_no_reserve(self):
+        from akkudoktoreos.optimization.milp.dispatch import UncertaintyBudget
+
+        data = DispatchInput(
+            pv_wh=[0.0] * 4,
+            load_wh=[1000.0] * 4,
+            price_per_wh=[30 * CENT] * 4,
+            feed_in_per_wh=[0.0] * 4,
+            # With losses a reserve bought now costs more than importing the shortfall.
+            battery=battery(soc_wh=0, charge_efficiency=0.95, discharge_efficiency=0.95),
+            uncertainty=UncertaintyBudget(pv_dev=0.0, load_dev=0.3, budget_slots=4),
+        )
+        assert sum(solve_dispatch(data).charge_grid_wh) == pytest.approx(0, abs=1e-6)
+
+    def test_off_without_budget(self):
+        from akkudoktoreos.optimization.milp.dispatch import UncertaintyBudget
+
+        base = zigzag_input()
+        plain = solve_dispatch(base)
+        off = solve_dispatch(
+            DispatchInput(**{**base.__dict__, "uncertainty": UncertaintyBudget(budget_slots=0)})
+        )
+        assert off.objective == pytest.approx(plain.objective)
