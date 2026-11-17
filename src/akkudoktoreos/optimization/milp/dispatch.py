@@ -211,7 +211,12 @@ class DispatchInput:
     terminal_segments: list[tuple[float, float]] = field(default_factory=list)
     """(width Wh of AC energy, value per Wh) of the terminal credit, in order."""
     terminal_dc_to_ac: float = 1.0
-    """Factor from DC battery content to the AC energy the terminal curve values."""
+    """Factor from DC battery content to the AC energy the terminal curve values
+    (battery discharge efficiency times inverter DC/AC efficiency, as the GENETIC
+    simulation's usable energy content)."""
+    terminal_offset_wh: float = 0.0
+    """Fork: DC content the terminal curve does not value (the minimum SoC): the curve
+    is over the usable energy ``terminal_dc_to_ac * (soc - offset)``."""
     max_grid_import_wh: Optional[float] = None
     max_grid_export_wh: Optional[float] = None
     scenarios: list[tuple[float, Sequence[float], Sequence[float]]] = field(default_factory=list)
@@ -506,7 +511,11 @@ def _add_scenario(
             terminal: dict[int, float] = {v: 1.0 for v in seg_vars}
             terminal[soc[n]] = -data.terminal_dc_to_ac
             # Segments may stay below the content (credit flat beyond the last breakpoint).
-            b.row(terminal, -inf, 0.0)
+            # Only the usable content above the minimum SoC is valued (fork, as the
+            # simulation's current_energy_content()).
+            # Never above the lowest reachable SoC (a start below the minimum stays feasible).
+            offset = min(max(data.terminal_offset_wh, 0.0), low)
+            b.row(terminal, -inf, -data.terminal_dc_to_ac * offset)
 
     # Energy balance and battery-serves-house-only.
     for t in range(n):

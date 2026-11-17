@@ -369,3 +369,19 @@ def test_coarse_far_horizon_from_settings(config_eos: ConfigEOS):
     ac = np.asarray(solution.ac_charge)
     assert ac[32:48].sum() > 0
     assert ac[48:64].sum() == 0
+
+
+def test_dispatch_starts_from_the_run_state_and_values_usable_energy(config_eos: ConfigEOS):
+    """Fork: the MILP reads the initial SoC from the parameters, not from the simulation
+    object (which holds the state of the last evaluation), and values the end content as
+    the GENETIC fitness does: (soc - min_soc) * discharging efficiency * DC/AC."""
+    configure(config_eos, polish_generations=0)
+    optimizer = MilpOptimization(fixed_seed=1)
+    params = parameters()
+    optimizer.optimize_ems(params, ngen=0, individuals=20)
+    optimizer.simulation.battery.soc_wh = 9000.0  # stale state of an evaluation
+    data = optimizer._dispatch_input(None)
+    assert data.battery is not None
+    assert data.battery.soc_wh == pytest.approx(2000.0)  # 20 % of 10 kWh
+    assert data.terminal_offset_wh == pytest.approx(500.0)  # 5 % minimum SoC
+    assert data.terminal_dc_to_ac == pytest.approx(data.battery.discharge_efficiency)

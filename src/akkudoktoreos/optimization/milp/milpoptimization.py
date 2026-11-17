@@ -337,9 +337,20 @@ class MilpOptimization(GeneticOptimization):
             grid_cap, target_wh, target_slot, shortfall_per_wh = self._full_charge_terms(
                 n, max_ac, float(bat.capacity_wh)
             )
+            # The simulation object holds the state of the last evaluation; the run
+            # starts from the parameters (fork).
+            run_bat = getattr(getattr(self, "_run_parameters", None), "pv_battery", None)
+            soc_wh = (
+                min(
+                    float(run_bat.initial_soc_percentage) / 100.0 * float(bat.capacity_wh),
+                    float(bat.max_soc_wh),
+                )
+                if run_bat is not None
+                else float(bat.soc_wh)
+            )
             battery_model = BatteryModel(
                 capacity_wh=float(bat.capacity_wh),
-                soc_wh=float(bat.soc_wh),
+                soc_wh=soc_wh,
                 min_soc_wh=float(bat.min_soc_wh),
                 max_soc_wh=float(bat.max_soc_wh),
                 max_charge_wh=max_charge,
@@ -399,7 +410,12 @@ class MilpOptimization(GeneticOptimization):
             battery=battery_model,
             appliances=appliances,
             terminal_segments=segments,
-            terminal_dc_to_ac=float(dc_to_ac),
+            # The curve values the usable AC content like the simulation:
+            # (soc - min_soc) * discharging efficiency * DC/AC efficiency (fork).
+            terminal_dc_to_ac=(
+                battery_model.discharge_efficiency if battery_model is not None else float(dc_to_ac)
+            ),
+            terminal_offset_wh=battery_model.min_soc_wh if battery_model is not None else 0.0,
             time_limit_s=(
                 min(self._milp.time_limit_s, self._milp.switch_time_limit_s)
                 if switching

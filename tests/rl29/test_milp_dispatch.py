@@ -551,3 +551,30 @@ class TestElectricVehicle:
         assert len(result.ev_charge_wh) == 12 and len(result.ev_soc_wh) == 13
         assert sum(result.ev_charge_wh[:4]) == pytest.approx(0, abs=1e-6)
         assert result.ev_soc_wh[-1] == pytest.approx(20000, abs=1)
+
+
+def test_terminal_credit_values_usable_energy_like_the_simulation():
+    """Fork: only (soc - min_soc) * discharge efficiency is credited, as in GENETIC."""
+    segments = [(1000.0, 50 * CENT), (9000.0, 30 * CENT)]
+    data = DispatchInput(
+        pv_wh=[0.0],
+        load_wh=[1000.0],
+        price_per_wh=[40 * CENT],
+        feed_in_per_wh=[0.0],
+        battery=battery(soc_wh=3000, min_soc_wh=1000, discharge_efficiency=0.9),
+        terminal_segments=segments,
+        terminal_dc_to_ac=0.9,
+        terminal_offset_wh=1000,
+    )
+    result = solve_dispatch(data)
+    # Usable AC content without discharge: (3000 - 1000) * 0.9 = 1800 Wh: the first
+    # 1000 Wh at 50 ct, the next 800 at 30 ct. A DC Wh delivers 0.9 Wh at 40 ct (36 ct):
+    # worth more than the 30 ct segment (27 ct per DC Wh), less than the 50 ct one
+    # (45 ct): the battery delivers exactly the 800 AC Wh of the 30 ct segment.
+    assert result.discharge_wh[0] == pytest.approx(800, abs=1)
+    # Without the offset the minimum SoC would earn the 50 ct segment for free.
+    unshifted = solve_dispatch(replace(data, terminal_offset_wh=0.0))
+    assert unshifted.objective < result.objective - 0.1
+    # A start below the minimum SoC stays feasible.
+    low = solve_dispatch(replace(data, battery=battery(soc_wh=500, min_soc_wh=1000)))
+    assert low.success
