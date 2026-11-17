@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2611162110506041"
+    "version": "v0.3.0.dev2611172097913571"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -10136,6 +10136,39 @@
             "description": "Maximum age of SoC measurements used for configuration-based optimization [s]. Without an explicit SoC or usable measurement, the initial SoC defaults to 0%.",
             "default": 300
           },
+          "load_nowcast_slots": {
+            "type": "integer",
+            "maximum": 24.0,
+            "minimum": 0.0,
+            "title": "Load Nowcast Slots",
+            "description": "RL29 fork: the measured base load of the last completed slot replaces the load forecast of the current slot and decays linearly into the forecast over this many slots. 0 = off.",
+            "default": 4,
+            "examples": [
+              4,
+              0
+            ]
+          },
+          "load_nowcast_subtract_keys": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Load Nowcast Subtract Keys",
+            "description": "RL29 fork: power measurements [W] of consumers EOS plans itself, removed from the house meter for the load nowcast. None = `load.loadml.subtract_power_keys`.",
+            "examples": [
+              null,
+              [
+                "wbb12-electric-power"
+              ]
+            ]
+          },
           "tail_horizon_hours": {
             "type": "integer",
             "minimum": 0.0,
@@ -10358,6 +10391,39 @@
             "title": "Measurement Max Age Seconds",
             "description": "Maximum age of SoC measurements used for configuration-based optimization [s]. Without an explicit SoC or usable measurement, the initial SoC defaults to 0%.",
             "default": 300
+          },
+          "load_nowcast_slots": {
+            "type": "integer",
+            "maximum": 24.0,
+            "minimum": 0.0,
+            "title": "Load Nowcast Slots",
+            "description": "RL29 fork: the measured base load of the last completed slot replaces the load forecast of the current slot and decays linearly into the forecast over this many slots. 0 = off.",
+            "default": 4,
+            "examples": [
+              4,
+              0
+            ]
+          },
+          "load_nowcast_subtract_keys": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Load Nowcast Subtract Keys",
+            "description": "RL29 fork: power measurements [W] of consumers EOS plans itself, removed from the house meter for the load nowcast. None = `load.loadml.subtract_power_keys`.",
+            "examples": [
+              null,
+              [
+                "wbb12-electric-power"
+              ]
+            ]
           },
           "tail_horizon_hours": {
             "type": "integer",
@@ -18284,6 +18350,138 @@
             "examples": [
               null,
               0.2
+            ]
+          },
+          "coarse_after_hours": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coarse After Hours",
+            "description": "RL29 fork (evcc coarsening): beyond this many hours from the start the MILP merges slots into `coarse_slot_minutes` (energies summed, prices averaged, building and tank discretised exactly for the longer slot) and expands the result back. Makes a 48 h control horizon affordable. None = full resolution.",
+            "examples": [
+              null,
+              12.0
+            ]
+          },
+          "coarse_slot_minutes": {
+            "type": "integer",
+            "maximum": 240.0,
+            "minimum": 15.0,
+            "title": "Coarse Slot Minutes",
+            "description": "RL29 fork: length of a coarse MILP slot [min] (multiple of the slot).",
+            "default": 60,
+            "examples": [
+              60
+            ]
+          },
+          "uncertainty_budget_hours": {
+            "type": "number",
+            "maximum": 24.0,
+            "minimum": 0.0,
+            "title": "Uncertainty Budget Hours",
+            "description": "RL29 fork: hedge against forecast errors (evcc risk profile, budget of Bertsimas and Sim). At most this many hours per day deliver `uncertainty_pv_dev` less PV and `uncertainty_load_dev` more load than forecast; the plan prices the reserve and import that would cover it. 0 = off. A quarter of a day covers the usual bad afternoon.",
+            "default": 0.0,
+            "examples": [
+              0.0,
+              6.0
+            ]
+          },
+          "uncertainty_pv_dev": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Uncertainty Pv Dev",
+            "description": "RL29 fork: share of the PV forecast that may fall short per slot.",
+            "default": 0.3,
+            "examples": [
+              0.3
+            ]
+          },
+          "uncertainty_load_dev": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 2.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uncertainty Load Dev",
+            "description": "RL29 fork: share by which the base load may exceed the forecast per slot. None = upper quantile width published by LoadML, else 0.2.",
+            "examples": [
+              null,
+              0.2
+            ]
+          },
+          "ev_start_cost_amt": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Ev Start Cost Amt",
+            "description": "RL29 fork: cost of every EV charging start in the MILP [currency], so the car charges in few blocks (evcc continuity). 0 = starts are free.",
+            "default": 0.02,
+            "examples": [
+              0.02,
+              0.0
+            ]
+          },
+          "switching": {
+            "type": "boolean",
+            "title": "Switching",
+            "description": "RL29 fork: the battery seeds are re-solved with the mode changes priced like the GENETIC fitness (`genetic.battery_change_penalty_amt`, `battery_min_hold_minutes`, `battery_hold_penalty_amt`), so the MILP plan already respects the switching limits. The candidate search stays a pure cost model.",
+            "default": true,
+            "examples": [
+              true
+            ]
+          },
+          "switch_tie_break": {
+            "type": "boolean",
+            "title": "Switch Tie Break",
+            "description": "RL29 fork: after the switching solve of the best seed, a second solve keeps its objective and minimises the number of battery mode changes (evcc continuity).",
+            "default": true,
+            "examples": [
+              true
+            ]
+          },
+          "switch_time_limit_s": {
+            "type": "number",
+            "maximum": 300.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Switch Time Limit S",
+            "description": "Time limit of each switching solve and of the tie break [s].",
+            "default": 10.0,
+            "examples": [
+              10.0
+            ]
+          },
+          "switch_initial_from_plan": {
+            "type": "boolean",
+            "title": "Switch Initial From Plan",
+            "description": "RL29 fork: the battery mode of the previous plan for the current slot is the mode in effect; leaving it in the first slot counts as a change.",
+            "default": true,
+            "examples": [
+              true
+            ]
+          },
+          "lock_charge_discharge": {
+            "type": "string",
+            "enum": [
+              "never",
+              "negative_prices",
+              "always"
+            ],
+            "title": "Lock Charge Discharge",
+            "description": "RL29 fork: forbid charging and discharging the battery in the same slot (binaries); `negative_prices` only where cycling could earn money.",
+            "default": "negative_prices",
+            "examples": [
+              "negative_prices"
             ]
           },
           "max_grid_import_w": {

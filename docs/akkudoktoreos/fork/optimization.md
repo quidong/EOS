@@ -21,8 +21,8 @@ plan, the solution and plan formats, the PDF report.
    generations on the exact simulation (0 = take the MILP plan as it is).
 
 The result is never worse than the best MILP candidate under the exact simulation. Not in the MILP:
-electric vehicles (plain GENETIC search then) and battery export for direct marketing (polish only).
-Cooling seasons use the mode search without the linear heat pump model.
+battery export for direct marketing (polish only). Cooling seasons use the mode search without the linear
+heat pump model.
 
 | Setting (`optimization.milp.*`) | Default | Meaning |
 | --- | --- | --- |
@@ -34,6 +34,13 @@ Cooling seasons use the mode search without the linear heat pump model.
 | `shared_slots` | 4 | slots decided jointly for all scenarios |
 | `pv_scenario_spread` / `load_scenario_spread` | 0.25 / LoadML or 0.2 | spread of the outer scenarios |
 | `max_grid_import_w` / `max_grid_export_w` | none | grid limits; PV above the export limit is curtailed |
+| `switching` / `switch_tie_break` | true / true | battery mode changes in the MILP (see below) |
+| `switch_time_limit_s` / `switch_initial_from_plan` | 10 / true | limit of a switching solve; mode in effect from the previous plan |
+| `lock_charge_discharge` | `negative_prices` | no charging and discharging in the same slot (`never`, `always`) |
+| `uncertainty_budget_hours` | 0 (off) | hedge against forecast errors (see below) |
+| `uncertainty_pv_dev` / `uncertainty_load_dev` | 0.3 / LoadML or 0.2 | adverse deviation per slot |
+| `coarse_after_hours` / `coarse_slot_minutes` | none / 60 | coarse slots for the far horizon (see below) |
+| `ev_start_cost_amt` | 0.02 | cost of an EV charging start |
 
 **Scenarios**: central (50 %), little PV and high load (25 %), much PV and low load (25 %). Appliance starts
 and the first `shared_slots` battery decisions are common, afterwards each scenario adapts (two-stage).
@@ -42,6 +49,35 @@ and the first `shared_slots` battery decisions are common, afterwards each scena
 `scripts/rl29/compare_milp_genetic.py` compares both algorithms on a synthetic day. On a 96-slot day with
 battery, heat pump and washer the MILP reached the GENETIC result (300 individuals × 400 generations) in about
 a fifth of the time; a long GENETIC run after the MILP found practically no further improvement.
+
+**Battery mode changes** (`switching`, after evcc's continuity stage): the candidate search is a pure
+cost model; the seeds are then re-solved with the mode changes priced like the GENETIC fitness
+(`genetic.battery_change_penalty_amt`, `battery_min_hold_minutes`, `battery_hold_penalty_amt`). Mode
+binaries (idle, discharge allowed, grid charge) make the counted changes exactly the changes of the encoded
+plan; leaving the mode of the previous plan in the first slot counts as a change. For the best seed a second
+solve keeps the objective found and minimises the number of changes (`switch_tie_break`), so equally good plans
+do not switch back and forth.
+
+**Hedge against forecast errors** (`uncertainty_budget_hours`, after evcc's risk profile, budget of Bertsimas
+and Sim): every slot may deliver `uncertainty_pv_dev` less PV and need `uncertainty_load_dev` more base load
+than forecast, but at most `uncertainty_budget_hours` per day do so. The worst case up to each slot is known
+before the solve; the model prices the reserve above the minimum SoC that covers it (at what the plan values
+stored energy) and the import for the rest (at the price of the slot). Without binaries and one-sided, unlike
+the symmetric `scenarios`; a quarter of a day covers the usual bad afternoon. Compare it with the snapshot
+replay before switching from `scenarios`.
+
+**Coarse far horizon** (`coarse_after_hours`, after evcc's request coarsening): beyond that many hours the MILP
+merges slots into `coarse_slot_minutes`. Energies are summed, prices averaged, power limits scale with the slot
+length, building and tank are discretised exactly for the longer slot (`A^k`, `Σ A^i B`, ventilation folded in).
+The result is expanded back (flows split evenly, states interpolated). Appliance windows, the shared scenario
+slots and the joint mode model stay at full resolution. This makes a 48 h control horizon
+(`genetic.horizon_hours: 48`) affordable.
+
+**Electric vehicles**: the charger is a consumer of the house (PV, grid and the house battery cover it, as in the
+simulation) with one binary per slot for the smallest charge rate, a soft target at the deadline
+(`genetic.penalties.ev_soc_miss` per percent), §14a dimming, `fixed_eauto_hours` and a small cost per charging
+start (`ev_start_cost_amt`), so the car charges in few blocks. The MILP charge energy is encoded as the smallest
+configured charge rate that reaches it.
 
 ## Joint mode model (experimental)
 
@@ -144,6 +180,14 @@ EOS re-plans every `ems.interval` seconds with fresh measurements. The fork adds
   complete slot (`measurement.pv_production_emr_keys`, interpolated meter readings) differs from the forecast
   the plan used by more than this.
 
+## Load nowcast
+
+`optimization.genetic.load_nowcast_slots` (default 4, 0 = off): the measured base load of the last completed
+slot replaces the load forecast of the current slot and decays linearly into the forecast over that many slots,
+as evcc anchors its home profile. The base load is the house meter (`measurement.load_emr_keys`) minus the
+consumers EOS plans itself (`genetic.load_nowcast_subtract_keys`, default `load.loadml.subtract_power_keys`).
+Without a usable measurement the forecast stays as it is.
+
 ## 15-minute slots
 
 `optimization.genetic.interval_sec: 900` plans battery and appliances per quarter hour (day-ahead prices are
@@ -165,15 +209,15 @@ prices it relies on the price forecast (see {doc}`forecasts`).
   (Germany, Solarspitzengesetz). PV above it is curtailed and earns nothing; the optimizer therefore keeps
   room in the battery for the midday peak instead of filling it in the morning, and moves loads there.
 - `max_import_w` and `import_excess_penalty_amt_kwh` (1 €/kWh): import cap for the main fuse, contracted
-  power or peak shaving. GENETIC penalises energy above it; MILP treats it as a hard limit (and drops it when
-  the fixed load alone exceeds it).
+  power or peak shaving. GENETIC and MILP penalise energy above it (soft limit, the MILP reports the excess
+  per slot).
 
 ## Batteries and electric vehicles
 
 - **§14a dimming:** batteries and EVs listed in `elecfee.grid_control_14a.controllable_device_ids` read
   `<id>-power-limited` (1 = dimmed). From now on, for `dimming_hold_hours`, the EV may draw at most
-  `dimming_power_w` and the battery may grid-charge at most that power (PV charging is not limited). GENETIC
-  only.
+  `dimming_power_w` and the battery may grid-charge at most that power (PV charging is not limited). The EV
+  limit also applies in the MILP.
 - **Weather reserve:** `devices.batteries.<id>.weather_reserve` (`enabled`, `min_soc_percentage` 50,
   `max_hours` 48) with `<id>-warning-start-ts` / `<id>-warning-end-ts` (Unix times, 0 = none): the battery
   is kept at or above the reserve during the warning. The largest shortfall costs
@@ -186,10 +230,9 @@ prices it relies on the price forecast (see {doc}`forecasts`).
   operating mode (grid charge, discharge allowed, PV charge allowed, export) between two slots, so a change
   has to save at least that much; `genetic.battery_min_hold_minutes` with `battery_hold_penalty_amt`
   (default 0.5) charges modes shorter than the hold time. Both default to off. They are part of the
-  GENETIC fitness, so the MILP's candidates get them in the polish step.
+  GENETIC fitness, and the MILP plans with them (`milp.switching`).
 - **Plausibility check:** `scripts/rl29/check_battery_plan.py --url http://<eos>:8503 --device <id>`
   checks the battery part of the current plan (exit 0 = plausible, 1 = warning, 2 = implausible): one
   operation mode per slot, state of charge within the limits, grid charging only when the price after
   round-trip losses and storage cost is below a later price, no battery export, no blocked PV charging
   while feeding in, and the first planned state of charge against the measured `<id>-soc-factor`.
-

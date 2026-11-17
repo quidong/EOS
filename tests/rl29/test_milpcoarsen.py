@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import replace
+from typing import Any
 
 import numpy as np
 import pytest
@@ -29,13 +30,13 @@ from .test_milp_thermal import make_plan, valley_prices
 CENT = 0.01 / 1000.0
 
 
-def two_days(**kw) -> DispatchInput:
+def two_days(**kw: Any) -> DispatchInput:
     n = 192
     pv = [max(0.0, 3000 * math.sin(math.pi * ((t % 96) - 28) / 48)) / 4 for t in range(n)]
     load = [120.0 + (200.0 if 68 <= t % 96 < 88 else 0.0) for t in range(n)]
     hourly = [(25 + 10 * math.sin(2 * math.pi * h / 24)) * CENT for h in range(48)]
     price = [p for p in hourly for _ in range(4)]
-    values = dict(
+    values: dict[str, Any] = dict(
         pv_wh=pv,
         load_wh=load,
         price_per_wh=price,
@@ -80,6 +81,7 @@ def test_coarse_horizon_is_close_and_faster():
     assert seconds < 10
     # Expanded back to the original slots, energy balanced, close in cost.
     assert len(coarse.grid_import_wh) == 192 and len(coarse.soc_wh) == 193
+    assert coarse.objective is not None and fine.objective is not None
     assert coarse.objective == pytest.approx(fine.objective, abs=0.03 * abs(fine.objective) + 0.05)
     # The near hours (what is executed) agree.
     assert coarse.discharge_wh[:24] == pytest.approx(fine.discharge_wh[:24], abs=50)

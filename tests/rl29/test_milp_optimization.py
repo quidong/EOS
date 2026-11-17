@@ -132,6 +132,7 @@ def test_switching_seed_respects_change_cost(config_eos: ConfigEOS):
         config_eos.merge_settings_from_dict({"optimization": {"genetic": genetic}})
         optimizer = MilpOptimization(fixed_seed=1)
         solution = optimizer.optimize_ems(parameters(prices=prices), ngen=0, individuals=20)
+        assert solution.start_solution is not None
         signature = optimizer.battery_mode_signature(solution.start_solution)
         assert optimizer.milp_summary["switching"]
         return int(np.count_nonzero(signature[1:] != signature[:-1]))
@@ -219,11 +220,56 @@ def test_heat_pump_and_battery_with_appliance(config_eos: ConfigEOS):
     )
 
 
-def test_electric_vehicle_falls_back_to_genetic(config_eos: ConfigEOS, caplog):
-    configure(config_eos)
+def ev_parameters(**kw: Any) -> dict[str, Any]:
+    values: dict[str, Any] = {
+        "device_id": "car",
+        "capacity_wh": 60000,
+        "initial_soc_percentage": 20,
+        "min_soc_percentage": 40,
+        "max_soc_percentage": 100,
+        "max_charge_power_w": 11000,
+        "charging_efficiency": 0.9,
+        "charge_rates": [0.0, 0.375, 0.5, 0.75, 1.0],
+        "min_soc_max_duration_h": 8,
+    }
+    values.update(kw)
+    return values
+
+
+def test_electric_vehicle_is_planned_in_the_milp(config_eos: ConfigEOS):
+    """Fork (F1): the car reaches its target in the cheapest hours before the deadline."""
+    configure(config_eos, polish_generations=0)
+    prices = [0.00030] * 2 + [0.00008] * 2 + [0.00030] * 4 + [0.00001] * 4
+    params = parameters(prices=prices, battery=False, ev=ev_parameters())
     optimizer = MilpOptimization(fixed_seed=1)
-    optimizer.optimize_ev = True
-    assert optimizer._extra_seeds(parameters(), 0) == []
+    solution = optimizer.optimize_ems(params, ngen=0, individuals=20)
+    assert optimizer.optimize_ev
+    assert optimizer.milp_summary["seeds"] >= 1
+    _, ev_genes, _ = optimizer.split_individual(np.array(solution.start_solution))
+
+    assert ev_genes is not None
+    charging = [t for t, g in enumerate(ev_genes) if optimizer.ev_possible_charge_values[g] > 0]
+    # 12 kWh stored = 13.3 kWh raw: the two cheap hours before the 8 h deadline.
+    assert charging and set(charging) <= {2, 3}, charging
+    soc = np.asarray(solution.result.EAuto_SoC_pro_Stunde)
+    assert soc[8] >= 40 - 1e-6
+
+
+def test_ev_model_respects_dimming_and_fixed_hours(config_eos: ConfigEOS):
+    configure(config_eos, polish_generations=0)
+    optimizer = MilpOptimization(fixed_seed=1)
+    params = parameters(battery=False, ev=ev_parameters())
+    optimizer.optimize_ems(params, ngen=0, individuals=20)
+    optimizer.fixed_eauto_hours = 2
+    optimizer.simulation.ev_dimmed_wh = 4200.0
+    optimizer.simulation.ev_dimmed_slots = 3
+    model = optimizer._ev_model()
+    assert model is not None
+    assert model.slot_cap_wh[:3] == [4200.0] * 3
+    assert model.slot_cap_wh[-2:] == [0.0, 0.0]
+    assert model.min_rate == 0.375
+    assert model.target_slot == 8
+    assert model.shortfall_per_wh == pytest.approx(10 * 100 / 60000)
 
 
 @pytest.mark.asyncio

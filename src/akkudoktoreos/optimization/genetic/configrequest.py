@@ -437,7 +437,9 @@ class ConfigOptimizationRequest(
             start_solution_datetime=warm_start_time,
         )
 
-    async def _load_nowcast(self, load: list[float], first: int, slot_start: DateTime) -> list[float]:
+    async def _load_nowcast(
+        self, load: list[float], first: int, slot_start: DateTime
+    ) -> list[float]:
         """Anchor the first load slots to the measured base load (RL29 fork, ``loadnowcast``).
 
         Args:

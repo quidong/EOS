@@ -43,6 +43,8 @@
                "workers": null,
                "pin_workers": true,
                "measurement_max_age_seconds": 300,
+               "load_nowcast_slots": 4,
+               "load_nowcast_subtract_keys": null,
                "tail_horizon_hours": 48,
                "terminal_value_mode": "AUTO",
                "terminal_value_euro_per_kwh": 0.0,
@@ -81,6 +83,17 @@
                "shared_slots": 4,
                "pv_scenario_spread": 0.25,
                "load_scenario_spread": null,
+               "coarse_after_hours": null,
+               "coarse_slot_minutes": 60,
+               "uncertainty_budget_hours": 0.0,
+               "uncertainty_pv_dev": 0.3,
+               "uncertainty_load_dev": null,
+               "ev_start_cost_amt": 0.02,
+               "switching": true,
+               "switch_tie_break": true,
+               "switch_time_limit_s": 10.0,
+               "switch_initial_from_plan": true,
+               "lock_charge_discharge": "negative_prices",
                "max_grid_import_w": null,
                "max_grid_export_w": null
            },
@@ -117,6 +130,8 @@
                "workers": null,
                "pin_workers": true,
                "measurement_max_age_seconds": 300,
+               "load_nowcast_slots": 4,
+               "load_nowcast_subtract_keys": null,
                "tail_horizon_hours": 48,
                "terminal_value_mode": "AUTO",
                "terminal_value_euro_per_kwh": 0.0,
@@ -158,6 +173,17 @@
                "shared_slots": 4,
                "pv_scenario_spread": 0.25,
                "load_scenario_spread": null,
+               "coarse_after_hours": null,
+               "coarse_slot_minutes": 60,
+               "uncertainty_budget_hours": 0.0,
+               "uncertainty_pv_dev": 0.3,
+               "uncertainty_load_dev": null,
+               "ev_start_cost_amt": 0.02,
+               "switching": true,
+               "switch_tie_break": true,
+               "switch_time_limit_s": 10.0,
+               "switch_initial_from_plan": true,
+               "lock_charge_discharge": "negative_prices",
                "max_grid_import_w": null,
                "max_grid_export_w": null
            },
@@ -218,11 +244,15 @@
 
 | Name | Type | Read-Only | Default | Description |
 | ---- | ---- | --------- | ------- | ----------- |
+| coarse_after_hours | `Optional[float]` | `rw` | `None` | RL29 fork (evcc coarsening): beyond this many hours from the start the MILP merges slots into `coarse_slot_minutes` (energies summed, prices averaged, building and tank discretised exactly for the longer slot) and expands the result back. Makes a 48 h control horizon affordable. None = full resolution. |
+| coarse_slot_minutes | `int` | `rw` | `60` | RL29 fork: length of a coarse MILP slot [min] (multiple of the slot). |
+| ev_start_cost_amt | `float` | `rw` | `0.02` | RL29 fork: cost of every EV charging start in the MILP [currency], so the car charges in few blocks (evcc continuity). 0 = starts are free. |
 | hp_search_seconds | `float` | `rw` | `20.0` | Time budget of the coordinate search over the heat pump modes [s]. |
 | joint_modes | `bool` | `rw` | `False` | RL29 fork: plan the heating modes inside the MILP. One binary per gene period and mode selects the room target; the controller's heat for that target (affine in room and screed temperature, clipped to zero and the capacity) is modelled exactly with binaries. The resulting modes are one more candidate for the exact simulation and the search, next to the projected heat schedule. Needs thermal_model. |
 | joint_time_limit_s | `float` | `rw` | `30.0` | Time limit of the joint mode MILP [s]. |
 | joint_window_hours | `int` | `rw` | `6` | Relax-and-fix window of the joint mode MILP [h]: the modes of one window are decided with binaries while the later hours are relaxed, then fixed; the time limit is shared between the windows. |
 | load_scenario_spread | `Optional[float]` | `rw` | `None` | Load of the outer scenarios: forecast x (1 +/- spread). None = the quantile width published by LoadML, else 0.2. |
+| lock_charge_discharge | `Literal['never', 'negative_prices', 'always']` | `rw` | `negative_prices` | RL29 fork: forbid charging and discharging the battery in the same slot (binaries); `negative_prices` only where cycling could earn money. |
 | max_grid_export_w | `Optional[float]` | `rw` | `None` | Grid feed-in limit [W]; PV above it is curtailed. |
 | max_grid_import_w | `Optional[float]` | `rw` | `None` | Grid import limit [W] (e.g. main fuse); infeasible plans fall back to no limit. |
 | mip_rel_gap | `float` | `rw` | `0.0001` | Relative optimality gap of the MILP. |
@@ -232,8 +262,15 @@
 | scenarios | `bool` | `rw` | `False` | Plan against three weighted scenarios (central 50 %, little PV + high load 25 %, much PV + low load 25 %) instead of one forecast; appliance starts and the first `shared_slots` battery decisions are common to all. |
 | seeds | `int` | `rw` | `3` | Best candidates handed to the polish step. |
 | shared_slots | `int` | `rw` | `4` | Slots decided jointly for all scenarios. |
+| switch_initial_from_plan | `bool` | `rw` | `True` | RL29 fork: the battery mode of the previous plan for the current slot is the mode in effect; leaving it in the first slot counts as a change. |
+| switch_tie_break | `bool` | `rw` | `True` | RL29 fork: after the switching solve of the best seed, a second solve keeps its objective and minimises the number of battery mode changes (evcc continuity). |
+| switch_time_limit_s | `float` | `rw` | `10.0` | Time limit of each switching solve and of the tie break [s]. |
+| switching | `bool` | `rw` | `True` | RL29 fork: the battery seeds are re-solved with the mode changes priced like the GENETIC fitness (`genetic.battery_change_penalty_amt`, `battery_min_hold_minutes`, `battery_hold_penalty_amt`), so the MILP plan already respects the switching limits. The candidate search stays a pure cost model. |
 | thermal_model | `bool` | `rw` | `True` | Plan the heat pump inside the MILP (linear building and tank model, COP secants) and turn the heat schedule into mode candidates; off = mode candidates from heuristics and the coordinate search only. |
 | time_limit_s | `float` | `rw` | `10.0` | Time limit of one dispatch MILP [s]. |
+| uncertainty_budget_hours | `float` | `rw` | `0.0` | RL29 fork: hedge against forecast errors (evcc risk profile, budget of Bertsimas and Sim). At most this many hours per day deliver `uncertainty_pv_dev` less PV and `uncertainty_load_dev` more load than forecast; the plan prices the reserve and import that would cover it. 0 = off. A quarter of a day covers the usual bad afternoon. |
+| uncertainty_load_dev | `Optional[float]` | `rw` | `None` | RL29 fork: share by which the base load may exceed the forecast per slot. None = upper quantile width published by LoadML, else 0.2. |
+| uncertainty_pv_dev | `float` | `rw` | `0.3` | RL29 fork: share of the PV forecast that may fall short per slot. |
 :::
 <!-- pyml enable line-length -->
 
@@ -260,6 +297,17 @@
                "shared_slots": 4,
                "pv_scenario_spread": 0.25,
                "load_scenario_spread": null,
+               "coarse_after_hours": null,
+               "coarse_slot_minutes": 60,
+               "uncertainty_budget_hours": 0.0,
+               "uncertainty_pv_dev": 0.3,
+               "uncertainty_load_dev": null,
+               "ev_start_cost_amt": 0.02,
+               "switching": true,
+               "switch_tie_break": true,
+               "switch_time_limit_s": 10.0,
+               "switch_initial_from_plan": true,
+               "lock_charge_discharge": "negative_prices",
                "max_grid_import_w": null,
                "max_grid_export_w": null
            }
@@ -393,6 +441,8 @@ optimizer spreads charging and loads.
 | horizon_hours | `int` | `rw` | `24` | The general time window within which the energy optimization goal shall be achieved [h]. Defaults to 24 hours. |
 | individuals | `Optional[int]` | `rw` | `300` | Number of individuals (solutions) in the population [>= 10]. Defaults to 300. |
 | interval_sec | `Literal[900, 3600]` | `rw` | `3600` | The optimization interval [sec]. Defaults to 3600 seconds (1 hour) |
+| load_nowcast_slots | `int` | `rw` | `4` | RL29 fork: the measured base load of the last completed slot replaces the load forecast of the current slot and decays linearly into the forecast over this many slots. 0 = off. |
+| load_nowcast_subtract_keys | `Optional[list[str]]` | `rw` | `None` | RL29 fork: power measurements [W] of consumers EOS plans itself, removed from the house meter for the load nowcast. None = `load.loadml.subtract_power_keys`. |
 | measurement_max_age_seconds | `int` | `rw` | `300` | Maximum age of SoC measurements used for configuration-based optimization [s]. Without an explicit SoC or usable measurement, the initial SoC defaults to 0%. |
 | penalties | `dict[str, Union[float, int, str]]` | `rw` | `required` | Penalty parameters used in fitness evaluation. |
 | pin_workers | `bool` | `rw` | `True` | Pin the evaluation workers to the last 'workers' CPU cores. The server process stays unpinned and keeps a core that is not busy with the optimization, so it answers requests during a run, and the run never uses more than 'workers' cores. Needs at least one core more than workers; Linux only. |
@@ -426,6 +476,8 @@ optimizer spreads charging and loads.
                "workers": null,
                "pin_workers": true,
                "measurement_max_age_seconds": 300,
+               "load_nowcast_slots": 4,
+               "load_nowcast_subtract_keys": null,
                "tail_horizon_hours": 48,
                "terminal_value_mode": "AUTO",
                "terminal_value_euro_per_kwh": 0.0,
@@ -460,6 +512,8 @@ optimizer spreads charging and loads.
                "workers": null,
                "pin_workers": true,
                "measurement_max_age_seconds": 300,
+               "load_nowcast_slots": 4,
+               "load_nowcast_subtract_keys": null,
                "tail_horizon_hours": 48,
                "terminal_value_mode": "AUTO",
                "terminal_value_euro_per_kwh": 0.0,

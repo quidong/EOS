@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from typing import Any
+
 import pytest
 
 from akkudoktoreos.optimization.milp.dispatch import (
@@ -265,10 +268,10 @@ def test_scenario_validation_and_export_limit():
 # --------------------------------------------------------------------------------------
 
 
-def zigzag_input(**kw) -> DispatchInput:
+def zigzag_input(**kw: Any) -> DispatchInput:
     """Prices alternate by 2 ct: pure cost cycles the battery every slot."""
     n = 8
-    values = dict(
+    values: dict[str, Any] = dict(
         pv_wh=[0.0] * n,
         load_wh=[1000.0] * n,
         price_per_wh=[(30 if t % 2 else 20) * CENT for t in range(n)],
@@ -293,6 +296,7 @@ def changes(result) -> int:
 class TestSwitching:
     def test_change_cost_must_be_earned(self):
         free = solve_dispatch(zigzag_input(switching=SwitchingModel(tie_break=False)))
+        assert free.mode_changes is not None
         assert free.mode_changes == changes(free) and free.mode_changes >= 4
         priced = solve_dispatch(
             zigzag_input(switching=SwitchingModel(change_cost=1.0, tie_break=False))
@@ -313,9 +317,9 @@ class TestSwitching:
             switching=SwitchingModel(),
         )
         result = solve_dispatch(data)
-        plain = solve_dispatch(DispatchInput(**{**data.__dict__, "switching": None}))
+        plain = solve_dispatch(replace(data, switching=None))
         assert result.objective == pytest.approx(plain.objective, abs=1e-4)
-        assert result.mode_changes <= 1
+        assert result.mode_changes is not None and result.mode_changes <= 1
         assert result.tie_break is not None
 
     def test_hold_time_penalises_short_modes(self):
@@ -353,7 +357,7 @@ def test_no_charge_and_discharge_at_once_at_negative_prices():
     assert any(
         c > 1 and d > 1 for c, d in zip(cycling.charge_grid_wh, cycling.discharge_wh)
     )  # the unlocked model burns energy for money
-    locked = solve_dispatch(DispatchInput(**{**data.__dict__, "lock_charge_discharge": "negative_prices"}))
+    locked = solve_dispatch(replace(data, lock_charge_discharge="negative_prices"))
     for c_pv, c_grid, d in zip(locked.charge_pv_wh, locked.charge_grid_wh, locked.discharge_wh):
         assert c_pv + c_grid < 1e-6 or d < 1e-6
 
@@ -365,7 +369,10 @@ def test_no_charge_and_discharge_at_once_at_negative_prices():
 
 class TestUncertaintyBudget:
     def test_worst_deviation_budget_and_window(self):
-        from akkudoktoreos.optimization.milp.dispatch import UncertaintyBudget, worst_deviation
+        from akkudoktoreos.optimization.milp.dispatch import (
+            UncertaintyBudget,
+            worst_deviation,
+        )
 
         hedge = UncertaintyBudget(pv_dev=0.0, load_dev=0.5, budget_slots=2, day_slots=3)
         worst = worst_deviation([0.0] * 5, [100, 400, 200, 300, 0], hedge, 1000.0)
@@ -375,7 +382,10 @@ class TestUncertaintyBudget:
         assert worst_deviation([0.0] * 2, [400, 200], half, 1000.0) == pytest.approx([200, 250])
 
     def test_surplus_the_battery_cannot_take_is_no_risk(self):
-        from akkudoktoreos.optimization.milp.dispatch import UncertaintyBudget, worst_deviation
+        from akkudoktoreos.optimization.milp.dispatch import (
+            UncertaintyBudget,
+            worst_deviation,
+        )
 
         hedge = UncertaintyBudget(pv_dev=0.3, load_dev=0.0, budget_slots=1)
         assert worst_deviation([5000], [0], hedge, 1000.0) == [0.0]
@@ -392,12 +402,7 @@ class TestUncertaintyBudget:
         )
         plain = solve_dispatch(data)
         hedged = solve_dispatch(
-            DispatchInput(
-                **{
-                    **data.__dict__,
-                    "uncertainty": UncertaintyBudget(pv_dev=0.0, load_dev=0.2, budget_slots=4),
-                }
-            )
+            replace(data, uncertainty=UncertaintyBudget(pv_dev=0.0, load_dev=0.2, budget_slots=4))
         )
         assert plain.charge_grid_wh[0] == pytest.approx(4000, abs=1)
         assert hedged.charge_grid_wh[0] == pytest.approx(4800, abs=1)
@@ -426,6 +431,123 @@ class TestUncertaintyBudget:
         base = zigzag_input()
         plain = solve_dispatch(base)
         off = solve_dispatch(
-            DispatchInput(**{**base.__dict__, "uncertainty": UncertaintyBudget(budget_slots=0)})
+            replace(base, uncertainty=UncertaintyBudget(budget_slots=0))
         )
         assert off.objective == pytest.approx(plain.objective)
+
+
+# --------------------------------------------------------------------------------------
+# Fork: electric vehicle (F1)
+# --------------------------------------------------------------------------------------
+
+
+def ev_model(**kw: Any) -> Any:
+    from akkudoktoreos.optimization.milp.dispatch import EVModel
+
+    values: dict[str, Any] = dict(
+        capacity_wh=50000,
+        soc_wh=10000,
+        max_soc_wh=50000,
+        max_charge_wh=11000,
+        min_rate=0.375,
+        charge_efficiency=0.9,
+        target_wh=20000,
+        target_slot=6,
+        shortfall_per_wh=10 * 100 / 50000,
+    )
+    values.update(kw)
+    return EVModel(**values)
+
+
+class TestElectricVehicle:
+    def test_charges_in_the_cheapest_slots_before_the_deadline(self):
+        prices = [30, 30, 10, 12, 30, 30, 5, 5]
+        result = solve_dispatch(
+            DispatchInput(
+                pv_wh=[0.0] * 8,
+                load_wh=[0.0] * 8,
+                price_per_wh=[p * CENT for p in prices],
+                feed_in_per_wh=[0.0] * 8,
+                ev=ev_model(),
+            )
+        )
+        assert result.success
+        charge = result.ev_charge_wh
+        # 10 kWh stored = 11.1 kWh raw in the two cheap slots; the remainder of 111 Wh
+        # is below the minimum rate (4125 Wh), so the cheaper slot gives way.
+        assert charge[2] + charge[3] == pytest.approx(10000 / 0.9, abs=1)
+        assert charge[3] == pytest.approx(0.375 * 11000, abs=1)
+        assert result.ev_soc_wh[6] == pytest.approx(20000, abs=1)
+        assert sum(charge[:2]) + sum(charge[4:]) == pytest.approx(0, abs=1e-6)
+
+    def test_minimum_rate_is_semi_continuous(self):
+        result = solve_dispatch(
+            DispatchInput(
+                pv_wh=[0.0] * 4,
+                load_wh=[0.0] * 4,
+                price_per_wh=[10 * CENT] * 4,
+                feed_in_per_wh=[0.0] * 4,
+                ev=ev_model(soc_wh=19000, target_slot=4),
+            )
+        )
+        positive = [c for c in result.ev_charge_wh if c > 1e-6]
+        assert positive and all(c >= 0.375 * 11000 - 1e-6 for c in positive)
+
+    def test_pv_surplus_goes_into_the_car(self):
+        result = solve_dispatch(
+            DispatchInput(
+                pv_wh=[6000.0] * 4,
+                load_wh=[500.0] * 4,
+                price_per_wh=[30 * CENT] * 4,
+                feed_in_per_wh=[8 * CENT] * 4,
+                # Target needs exactly the PV surplus of 4 x 5.5 kWh.
+                ev=ev_model(target_wh=10000 + 22000 * 0.9, target_slot=None),
+            )
+        )
+        assert sum(result.ev_charge_wh) == pytest.approx(4 * 5500, abs=1)
+        assert sum(result.grid_import_wh) == pytest.approx(0, abs=1e-6)
+
+    def test_unreachable_target_is_soft_and_dimming_caps(self):
+        result = solve_dispatch(
+            DispatchInput(
+                pv_wh=[0.0] * 4,
+                load_wh=[0.0] * 4,
+                price_per_wh=[30 * CENT] * 4,
+                feed_in_per_wh=[0.0] * 4,
+                ev=ev_model(target_wh=50000, target_slot=2, slot_cap_wh=[4200, 4200]),
+            )
+        )
+        assert result.success
+        assert result.ev_charge_wh[:2] == pytest.approx([4200, 4200], abs=1)
+
+    def test_start_cost_keeps_one_charging_block(self):
+        prices = [10, 11, 30, 10, 11, 30, 10, 11]
+        result = solve_dispatch(
+            DispatchInput(
+                pv_wh=[0.0] * 8,
+                load_wh=[0.0] * 8,
+                price_per_wh=[p * CENT for p in prices],
+                feed_in_per_wh=[0.0] * 8,
+                ev=ev_model(
+                    soc_wh=0, target_wh=29700, target_slot=8, max_charge_wh=11000,
+                    min_rate=0.375, start_cost=5.0,
+                ),
+            )
+        )
+        on = [c > 1 for c in result.ev_charge_wh]
+        starts = sum(1 for t, x in enumerate(on) if x and (t == 0 or not on[t - 1]))
+        assert starts == 1
+
+    def test_house_battery_may_serve_the_car_and_coarse_slots_keep_it(self):
+        data = DispatchInput(
+            pv_wh=[0.0] * 12,
+            load_wh=[0.0] * 12,
+            price_per_wh=[40 * CENT] * 4 + [10 * CENT] * 8,
+            feed_in_per_wh=[0.0] * 12,
+            ev=ev_model(target_slot=12),
+            coarsen_after_slots=4,
+        )
+        result = solve_dispatch(data)
+        assert len(result.ev_charge_wh) == 12 and len(result.ev_soc_wh) == 13
+        assert sum(result.ev_charge_wh[:4]) == pytest.approx(0, abs=1e-6)
+        assert result.ev_soc_wh[-1] == pytest.approx(20000, abs=1)

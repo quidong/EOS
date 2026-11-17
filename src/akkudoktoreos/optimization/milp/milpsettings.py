@@ -210,6 +210,17 @@ class MilpCommonSettings(SettingsBaseModel):
             "examples": [None, 0.2],
         },
     )
+    ev_start_cost_amt: float = Field(
+        default=0.02,
+        ge=0,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: cost of every EV charging start in the MILP [currency], so the "
+                "car charges in few blocks (evcc continuity). 0 = starts are free."
+            ),
+            "examples": [0.02, 0.0],
+        },
+    )
     switching: bool = Field(
         default=True,
         json_schema_extra={

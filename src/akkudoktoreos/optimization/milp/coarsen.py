@@ -27,9 +27,11 @@ from akkudoktoreos.optimization.milp.dispatch import (
     BatteryModel,
     DispatchInput,
     DispatchResult,
+    EVModel,
     worst_deviation,
 )
 from akkudoktoreos.optimization.milp.thermal import ThermalBlock, ThermalTrajectory
+
 
 def slot_groups(n: int, fine_slots: int, factor: int) -> list[tuple[int, int]]:
     """(start, length) per model slot: single slots up to ``fine_slots``, then ``factor``.
@@ -95,6 +97,30 @@ def _coarsen_battery(bat: BatteryModel, groups: list[tuple[int, int]]) -> Batter
         grid_charge_max_wh=grid_cap,
         target_slot=(
             _group_of(int(bat.target_slot), groups) if bat.target_slot is not None else None
+        ),
+    )
+
+
+def _coarsen_ev(ev: EVModel, groups: list[tuple[int, int]]) -> EVModel:
+    """Slot caps summed (missing = full power), the target check moved to its model slot."""
+    caps: list[Optional[float]] = []
+    for start, k in groups:
+        part = [
+            ev.slot_cap_wh[t] if t < len(ev.slot_cap_wh) else None for t in range(start, start + k)
+        ]
+        if all(c is None for c in part):
+            caps.append(None)
+        else:
+            caps.append(
+                float(
+                    sum(ev.max_charge_wh if c is None else min(c, ev.max_charge_wh) for c in part)
+                )
+            )
+    return replace(
+        ev,
+        slot_cap_wh=caps,
+        target_slot=(
+            _group_of(int(ev.target_slot), groups) if ev.target_slot is not None else None
         ),
     )
 
@@ -223,6 +249,7 @@ def coarsen_input(data: DispatchInput, groups: list[tuple[int, int]]) -> Dispatc
         price_per_wh=_mean(list(data.price_per_wh)[:n], groups),
         feed_in_per_wh=_mean(list(data.feed_in_per_wh)[:n], groups),
         battery=(_coarsen_battery(data.battery, groups) if data.battery is not None else None),
+        ev=(_coarsen_ev(data.ev, groups) if data.ev is not None else None),
         scenarios=[
             (w, _sum(list(p)[:n], groups), _sum(list(lo)[:n], groups))
             for w, p, lo in data.scenarios
@@ -302,5 +329,11 @@ def expand_result(
         thermal=thermal,
         import_excess_wh=(
             _expand(result.import_excess_wh, groups) if result.import_excess_wh else []
+        ),
+        ev_charge_wh=_expand(result.ev_charge_wh, groups) if result.ev_charge_wh else [],
+        ev_soc_wh=(
+            [result.ev_soc_wh[0]] + _states(result.ev_soc_wh[0], result.ev_soc_wh[1:], groups)
+            if result.ev_soc_wh
+            else []
         ),
     )

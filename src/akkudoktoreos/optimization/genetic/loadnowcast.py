@@ -91,9 +91,7 @@ async def measured_base_load_wh(
             )
         except (KeyError, ValueError):
             return None
-        samples = [
-            (d.timestamp(), None if v is None else float(v)) for d, v in zip(dates, values)
-        ]
+        samples = [(d.timestamp(), None if v is None else float(v)) for d, v in zip(dates, values)]
         means = hold_hourly_means(samples, [start.timestamp()], max_hold_s, float(interval_s))
         if not means or means[0] is None:
             return None

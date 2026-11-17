@@ -738,7 +738,7 @@ async def test_load_nowcast_blends_measured_base_load_into_first_slots(
 ):
     """RL29 fork: the measured base load anchors the current slot and decays (P3)."""
     config, _, _, data = configured_request
-    seen = {}
+    seen: dict[str, object] = {}
 
     async def measured(measurement, slot_start, interval_s, keys, max_hold_s):
         seen.update(slot_start=slot_start, interval_s=interval_s, keys=keys)

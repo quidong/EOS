@@ -101,6 +101,37 @@ class SwitchingModel:
 
 
 @dataclass
+class EVModel:
+    """Electric vehicle in the dispatch model (RL29 fork, F1; evcc loadpoint battery).
+
+    The charger draws ``ev_wh[t]`` (raw, before the charging losses) per slot: 0 or
+    between the smallest charge rate and full power (semi-continuous, one binary per
+    slot). It is a consumer of the house: PV, grid and the house battery cover it as in
+    the GENETIC simulation. The target is soft: every Wh missing at ``target_slot``
+    costs ``shortfall_per_wh`` (``ev_soc_miss`` per percent). Charging starts cost
+    ``start_cost`` each, so the plan charges in few blocks (evcc continuity).
+    """
+
+    capacity_wh: float
+    soc_wh: float
+    max_soc_wh: float
+    max_charge_wh: float
+    """Raw energy at full power per slot."""
+    min_rate: float = 0.0
+    """Smallest positive charge rate (share of full power); 0 = continuous."""
+    charge_efficiency: float = 0.9
+    target_wh: Optional[float] = None
+    target_slot: Optional[int] = None
+    """Slot at whose start the target is checked; None = end of the horizon."""
+    shortfall_per_wh: float = 0.0
+    start_cost: float = 0.0
+    slot_cap_wh: list[Optional[float]] = field(default_factory=list)
+    """Raw energy cap per slot (§14a dimming, no charging at the end); missing = none."""
+    charging_now: bool = False
+    """The charger runs at the start: continuing costs no start."""
+
+
+@dataclass
 class UncertaintyBudget:
     """Forecast errors the plan hedges against (RL29 fork, evcc ``uncertainty``).
 
@@ -197,6 +228,8 @@ class DispatchInput:
     """Fork: battery mode changes (P1); None = changes are free and not modelled."""
     uncertainty: Optional[UncertaintyBudget] = None
     """Fork: hedge the reported scenario against forecast errors (P2); None = off."""
+    ev: Optional[EVModel] = None
+    """Fork: electric vehicle planned in the model (F1); None = no EV."""
     import_excess_cost_per_wh: Optional[float] = None
     """Fork: import above ``max_grid_import_wh`` costs this per Wh on top of the price
     (soft limit, as in the GENETIC simulation); None = hard limit."""
@@ -241,6 +274,10 @@ class DispatchResult:
     """Fork: what the switching tie break did (``improved 5 to 3``, ``kept``, ...)."""
     import_excess_wh: list[float] = field(default_factory=list)
     """Fork: import above the soft import limit per slot (empty without a limit)."""
+    ev_charge_wh: list[float] = field(default_factory=list)
+    """Fork: raw EV charger energy per slot (empty without an EV)."""
+    ev_soc_wh: list[float] = field(default_factory=list)
+    """Fork: EV energy at the start of every slot plus the end state."""
 
     def grid_cost(self, price: Sequence[float], feed_in: Sequence[float]) -> float:
         return float(
@@ -282,8 +319,11 @@ class _Builder:
         cost: Optional[list[float]] = None,
         extra_rows: Optional[list[tuple[dict[int, float], float, float]]] = None,
     ) -> "_SolveOutcome":
-        """Solve the model; ``cost``/``extra_rows`` replace the objective and add rows
-        for this solve only (lexicographic stages)."""
+        """Solve the model.
+
+        ``cost``/``extra_rows`` replace the objective and add rows for this solve only
+        (lexicographic stages).
+        """
         from scipy.optimize import Bounds, LinearConstraint, milp
         from scipy.sparse import csr_array
 
@@ -400,8 +440,9 @@ def _add_scenario(
     excess: list[Optional[int]] = [None] * n
     if soft_import:
         for t in range(n):
-            excess[t] = b.var(0.0, inf, weight * float(data.import_excess_cost_per_wh or 0.0))
-            b.row({imp[t]: 1.0, excess[t]: -1.0}, -inf, imp_limit * factor[t])
+            over = b.var(0.0, inf, weight * float(data.import_excess_cost_per_wh or 0.0))
+            b.row({imp[t]: 1.0, over: -1.0}, -inf, imp_limit * factor[t])
+            excess[t] = over
     # Negative feed-in tariff: exporting costs money; the model may curtail by not exporting
     # (PV that is neither used nor exported is curtailed).
     exp = [b.var(0.0, min(pv[t], exp_limit * factor[t]), -weight * feed[t]) for t in range(n)]
@@ -513,7 +554,9 @@ class _SwitchVars:
         return sum(1 for a, b in zip(modes, modes[1:]) if a != b)
 
 
-def _add_switching(b: "_Builder", data: DispatchInput, plan: _ScenarioVars) -> Optional[_SwitchVars]:
+def _add_switching(
+    b: "_Builder", data: DispatchInput, plan: _ScenarioVars
+) -> Optional[_SwitchVars]:
     """Mode binaries, change and short-hold variables of the reported scenario (P1)."""
     sw, bat = data.switching, data.battery
     if sw is None or bat is None or bat.capacity_wh <= 0:
@@ -685,6 +728,57 @@ def _add_hedge(
         running_prev = running
 
 
+@dataclass
+class _EVVars:
+    charge: list[int]
+    soc: list[int]
+
+
+def _add_ev(
+    b: "_Builder", data: DispatchInput, n: int, app_load: list[dict[int, float]]
+) -> Optional[_EVVars]:
+    """EV charger and EV battery (decided now: shared by all scenarios)."""
+    ev = data.ev
+    if ev is None or ev.capacity_wh <= 0 or ev.max_charge_wh <= 0:
+        return None
+    inf = math.inf
+    start = min(max(ev.soc_wh, 0.0), ev.capacity_wh)
+    soc = [b.var(start, start)]
+    charge: list[int] = []
+    on_prev: Optional[int] = None
+    for t in range(n):
+        full = ev.max_charge_wh * _factor(data, t)
+        cap = ev.slot_cap_wh[t] if t < len(ev.slot_cap_wh) else None
+        upper = full if cap is None else max(0.0, min(full, float(cap)))
+        e = b.var(0.0, upper)
+        if ev.min_rate > 0 or ev.start_cost > 0:
+            on = b.var(0.0, 1.0, 0.0, integer=True)
+            b.row({e: 1.0, on: -upper}, -inf, 0.0)
+            # Smallest rate of one original slot (a coarse slot may run part of it); a
+            # start only means something when "on" draws real power (1 % at least).
+            rate = max(ev.min_rate, 0.01 if ev.start_cost > 0 else 0.0)
+            low = min(rate * ev.max_charge_wh, upper)
+            b.row({e: 1.0, on: -low}, 0.0, inf)
+            if ev.start_cost > 0:
+                started = b.var(0.0, 1.0, ev.start_cost)
+                if on_prev is None:
+                    b.row({started: 1.0, on: -1.0}, -1.0 if ev.charging_now else 0.0, inf)
+                else:
+                    b.row({started: 1.0, on: -1.0, on_prev: 1.0}, 0.0, inf)
+            on_prev = on
+        soc.append(b.var(0.0, max(ev.max_soc_wh, start)))
+        b.row({soc[t + 1]: 1.0, soc[t]: -1.0, e: -ev.charge_efficiency}, 0.0, 0.0)
+        app_load[t][e] = app_load[t].get(e, 0.0) + 1.0
+        charge.append(e)
+    if ev.target_wh is not None:
+        k = n if ev.target_slot is None else min(max(int(ev.target_slot), 0), n)
+        target = min(ev.target_wh, ev.max_soc_wh)
+        if target > start:
+            short = b.var(0.0, target, ev.shortfall_per_wh)
+            b.row({soc[k]: 1.0, short: 1.0}, target, inf)
+    return _EVVars(charge, soc)
+
+
 def solve_dispatch(data: DispatchInput) -> DispatchResult:
     """Build and solve the dispatch model; see the module docstring.
 
@@ -729,6 +823,8 @@ def solve_dispatch(data: DispatchInput) -> DispatchResult:
                 slot = start + offset
                 if 0 <= slot < n and energy:
                     app_load[slot][xv] = app_load[slot].get(xv, 0.0) + float(energy)
+
+    ev_vars = _add_ev(b, data, n, app_load)
 
     # Heat pumps (decided before the outcome is known: shared by all scenarios).
     thermal_vars = []
@@ -823,6 +919,8 @@ def solve_dispatch(data: DispatchInput) -> DispatchResult:
         mode_changes=switch_vars.count(sol) if switch_vars is not None else None,
         tie_break=tie_break,
         import_excess_wh=[float(sol[i]) for i in first.excess if i is not None],
+        ev_charge_wh=values(ev_vars.charge) if ev_vars is not None else [],
+        ev_soc_wh=[float(sol[i]) for i in ev_vars.soc] if ev_vars is not None else [],
     )
 
 

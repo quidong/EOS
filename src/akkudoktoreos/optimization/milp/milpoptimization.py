@@ -21,8 +21,9 @@ random search by mathematical optimization:
    exact simulation (0 = take the MILP plan as it is, after simulating it). The result
    is never worse than the best MILP candidate under the simulation.
 
-Not covered by the MILP (handled by the polish step): electric vehicles, battery export
-for direct marketing.
+Electric vehicles are planned in the MILP as a consumer with a soft target (fork, F1).
+Not covered by the MILP (handled by the polish step): battery export for direct
+marketing.
 """
 
 from __future__ import annotations
@@ -42,6 +43,7 @@ from akkudoktoreos.optimization.milp.dispatch import (
     BatteryModel,
     DispatchInput,
     DispatchResult,
+    EVModel,
     SwitchingModel,
     UncertaintyBudget,
     battery_states,
@@ -187,6 +189,74 @@ class MilpOptimization(GeneticOptimization):
             ),
         )
 
+    def _ev_model(self) -> Optional[EVModel]:
+        """The electric vehicle as MILP data (fork, F1); None when it is not optimised."""
+        ev = self.simulation.ev
+        if not self.optimize_ev or ev is None or float(ev.capacity_wh) <= 0:
+            return None
+        n = self.control_slots
+        slot_h = self.slot_duration_h
+        full = float(ev.max_charge_power_w) * slot_h
+        rates = [float(r) for r in self.ev_possible_charge_values if float(r) > 0.0]
+        caps: list[Optional[float]] = [None] * n
+        dimmed = getattr(self.simulation, "ev_dimmed_wh", None)
+        if dimmed is not None:
+            for t in range(min(n, int(getattr(self.simulation, "ev_dimmed_slots", 0)))):
+                caps[t] = float(dimmed)
+        fixed = int(getattr(self, "fixed_eauto_hours", 0) or 0)
+        for t in range(max(0, n - fixed), n):
+            caps[t] = 0.0
+        try:
+            per_percent = float(self._genetic_cfg.penalties["ev_soc_miss"])
+        except Exception:
+            per_percent = 10.0
+        capacity = float(ev.capacity_wh)
+        # The simulation object carries the state of the last evaluation; the run starts
+        # from the parameters.
+        run_ev = getattr(getattr(self, "_run_parameters", None), "ev", None)
+        initial_pct = (
+            float(run_ev.initial_soc_percentage)
+            if run_ev is not None
+            else 100.0 * float(ev.soc_wh) / capacity
+        )
+        return EVModel(
+            capacity_wh=capacity,
+            soc_wh=initial_pct / 100.0 * capacity,
+            max_soc_wh=float(ev.max_soc_wh),
+            max_charge_wh=full,
+            min_rate=min(rates) if rates else 0.0,
+            charge_efficiency=float(ev.charging_efficiency),
+            target_wh=(
+                float(run_ev.min_soc_percentage) / 100.0 * capacity
+                if run_ev is not None
+                else float(ev.min_soc_wh)
+            ),
+            target_slot=getattr(self, "_ev_soc_deadline_slot", None),
+            shortfall_per_wh=per_percent * 100.0 / capacity,
+            start_cost=float(self._milp.ev_start_cost_amt),
+            slot_cap_wh=caps,
+        )
+
+    def _ev_genes(self, result: DispatchResult) -> Optional[list[int]]:
+        """EV charge rate index per slot for a dispatch result (smallest rate reaching it)."""
+        if not self.optimize_ev or self.simulation.ev is None:
+            return None
+        rates = [float(r) for r in self.ev_possible_charge_values]
+        zero = min(range(len(rates)), key=lambda i: abs(rates[i]))
+        full = float(self.simulation.ev.max_charge_power_w) * self.slot_duration_h
+        genes = [zero] * self.control_end_slot
+        for t, energy in enumerate(result.ev_charge_wh[: self.control_end_slot]):
+            if energy <= 1.0 or full <= 0:
+                continue
+            share = min(energy / full, 1.0)
+            reaching = [i for i, r in enumerate(rates) if r >= share - 1e-6 and r > 0]
+            genes[t] = (
+                min(reaching, key=lambda i: rates[i])
+                if reaching
+                else max(range(len(rates)), key=lambda i: rates[i])
+            )
+        return genes
+
     def _coarse_after_slots(self) -> Optional[int]:
         """First slot of the coarse part (fork, P4); None = full resolution."""
         hours = self._milp.coarse_after_hours
@@ -232,9 +302,7 @@ class MilpOptimization(GeneticOptimization):
 
     def _battery_mode(self, gene: int) -> int:
         """Switched battery mode of one battery gene: 0 idle, 1 discharge, 2 grid charge."""
-        import numpy as np
-
-        signature = int(self.battery_mode_signature(np.array([int(gene)]))[0])
+        signature = int(self.battery_mode_signature([int(gene)])[0])
         return 2 if signature & 1 else 1 if signature & 2 else 0
 
     def _dispatch_input(
@@ -340,6 +408,7 @@ class MilpOptimization(GeneticOptimization):
             mip_rel_gap=self._milp.mip_rel_gap,
             switching=self._switching_model(tie_break) if switching else None,
             uncertainty=self._uncertainty_budget(),
+            ev=self._ev_model(),
             coarsen_after_slots=self._coarse_after_slots(),
             coarse_factor=self._coarse_factor(),
             import_excess_cost_per_wh=(
@@ -474,9 +543,10 @@ class MilpOptimization(GeneticOptimization):
     def _genome(self, result: DispatchResult, hp_genes: Optional[list[int]]) -> list[int]:
         import numpy as np
 
+        ev_genes = self._ev_genes(result)
         return self.merge_individual(
             np.array(self._battery_genes(result), dtype=int),
-            None,
+            np.array(ev_genes, dtype=int) if ev_genes is not None else None,
             list(result.appliance_starts),
             hp_genes if self._hp_layout() else None,
         )
@@ -660,9 +730,7 @@ class MilpOptimization(GeneticOptimization):
         self._milp_solves += 1
         if not switched.success:
             return result, f"not solved ({switched.status})"
-        before = len(
-            [1 for a, b in zip(self._modes(result), self._modes(result)[1:]) if a != b]
-        )
+        before = len([1 for a, b in zip(self._modes(result), self._modes(result)[1:]) if a != b])
         return switched, (
             f"{before} -> {switched.mode_changes} changes"
             + (f", tie break {switched.tie_break}" if switched.tie_break else "")
@@ -707,9 +775,6 @@ class MilpOptimization(GeneticOptimization):
     def _extra_seeds(
         self, parameters: GeneticOptimizationParameters, start_slot: int
     ) -> list[list[int]]:
-        if self.optimize_ev:
-            logger.warning("MILP: electric vehicles are not modelled; GENETIC search only.")
-            return []
         if self.optimize_battery_grid_export:
             logger.info("MILP: battery export (direct marketing) left to the polish step.")
         started = time.monotonic()
@@ -802,7 +867,7 @@ class MilpOptimization(GeneticOptimization):
                 return []
             scored.append((score, [], result))
 
-        seeds = []
+        seeds: list[list[int]] = []
         seen: set[tuple[int, ...]] = set()
         switch_reports: list[str] = []
         for score, genes, result in scored:
@@ -834,7 +899,7 @@ class MilpOptimization(GeneticOptimization):
         )
         if switch_reports:
             logger.info("MILP: battery switching {}.", "; ".join(switch_reports))
-        self.milp_summary = {
+        self.milp_summary: dict[str, Any] = {
             "switching": switch_reports,
             "thermal": getattr(self, "thermal_summary", {}),
             "thermal_best_start": bool(getattr(self, "_thermal_start", False)),
