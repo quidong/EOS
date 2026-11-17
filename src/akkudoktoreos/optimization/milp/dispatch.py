@@ -117,6 +117,8 @@ class UncertaintyBudget:
     budget_slots: float = 0.0
     day_slots: int = 96
     """Slots the worst case looks back (one day)."""
+    worst_wh: Optional[list[float]] = None
+    """Precomputed worst case per model slot (coarse slots); None = from the forecast."""
 
 
 HEDGE_TIE_DISCOUNT = 1e-3
@@ -198,6 +200,13 @@ class DispatchInput:
     import_excess_cost_per_wh: Optional[float] = None
     """Fork: import above ``max_grid_import_wh`` costs this per Wh on top of the price
     (soft limit, as in the GENETIC simulation); None = hard limit."""
+    slot_factor: list[float] = field(default_factory=list)
+    """Fork (coarse slots): original slots per model slot; power limits per slot scale
+    with it. Empty = 1 everywhere."""
+    coarsen_after_slots: Optional[int] = None
+    """Fork (P4): merge ``coarse_factor`` slots into one beyond this slot (``coarsen.py``);
+    None = full resolution."""
+    coarse_factor: int = 4
     lock_charge_discharge: str = "negative_prices"
     """Fork: binaries that forbid charging and discharging in the same slot:
     ``never``, ``negative_prices`` (only where cycling could earn money) or ``always``."""
@@ -349,6 +358,11 @@ def describe_optimality(optimal: bool, mip_gap: Optional[float]) -> str:
     return f"NOT optimal (gap {mip_gap * 100:.1f} %)"
 
 
+def _factor(data: DispatchInput, t: int) -> float:
+    """Original slots in model slot ``t`` (coarse slots, P4)."""
+    return float(data.slot_factor[t]) if t < len(data.slot_factor) else 1.0
+
+
 @dataclass
 class _ScenarioVars:
     imp: list[int]
@@ -373,20 +387,24 @@ def _add_scenario(
     """Variables and constraints of one scenario; costs scaled by ``weight``."""
     n = len(pv)
     inf = math.inf
+    factor = [_factor(data, t) for t in range(n)]
     imp_limit = data.max_grid_import_wh if data.max_grid_import_wh is not None else inf
     exp_limit = data.max_grid_export_wh if data.max_grid_export_wh is not None else inf
     soft_import = data.max_grid_import_wh is not None and data.import_excess_cost_per_wh is not None
     # Soft import limit (fork): excess is allowed at a penalty on top of the price, so a
     # fixed load above the limit no longer makes the model infeasible.
-    imp = [b.var(0.0, inf if soft_import else imp_limit, weight * price[t]) for t in range(n)]
+    imp = [
+        b.var(0.0, inf if soft_import else imp_limit * factor[t], weight * price[t])
+        for t in range(n)
+    ]
     excess: list[Optional[int]] = [None] * n
     if soft_import:
         for t in range(n):
             excess[t] = b.var(0.0, inf, weight * float(data.import_excess_cost_per_wh or 0.0))
-            b.row({imp[t]: 1.0, excess[t]: -1.0}, -inf, imp_limit)
+            b.row({imp[t]: 1.0, excess[t]: -1.0}, -inf, imp_limit * factor[t])
     # Negative feed-in tariff: exporting costs money; the model may curtail by not exporting
     # (PV that is neither used nor exported is curtailed).
-    exp = [b.var(0.0, min(pv[t], exp_limit), -weight * feed[t]) for t in range(n)]
+    exp = [b.var(0.0, min(pv[t], exp_limit * factor[t]), -weight * feed[t]) for t in range(n)]
 
     bat = data.battery
     chg_pv: list[Optional[int]] = [None] * n
@@ -398,25 +416,27 @@ def _add_scenario(
         low = min(bat.min_soc_wh, start_soc)
         soc.append(b.var(start_soc, start_soc))
         for t in range(n):
+            max_c = bat.max_charge_wh * factor[t]
+            max_d = bat.max_discharge_wh * factor[t]
             # PV charging only from the surplus over the fixed load, as in the simulation
             # (idle and self-consumption states charge from surplus only).
-            c_pv = b.var(0.0, min(max(pv[t] - load[t], 0.0), bat.max_charge_wh))
-            grid_cap = bat.max_charge_wh if bat.allow_grid_charge else 0.0
+            c_pv = b.var(0.0, min(max(pv[t] - load[t], 0.0), max_c))
+            grid_cap = max_c if bat.allow_grid_charge else 0.0
             if bat.grid_charge_max_wh is not None:
                 slot_cap = bat.grid_charge_max_wh[t] if t < len(bat.grid_charge_max_wh) else 0.0
                 grid_cap = min(grid_cap, max(slot_cap, 0.0))
             c_grid = b.var(0.0, grid_cap, 1e-9)
-            d = b.var(0.0, bat.max_discharge_wh, weight * bat.lcos_per_wh)
+            d = b.var(0.0, max_d, weight * bat.lcos_per_wh)
             chg_pv[t], chg_grid[t], dis[t] = c_pv, c_grid, d
             lock = data.lock_charge_discharge
             if lock == "always" or (lock == "negative_prices" and price[t] < 0.0):
                 # Fork (P5): the inverter cannot charge and discharge at once; without the
                 # lock, cycling would "sell" losses while the import price is negative.
                 z = b.var(0.0, 1.0, 0.0, integer=True)
-                b.row({c_pv: 1.0, c_grid: 1.0, z: bat.max_charge_wh}, -inf, bat.max_charge_wh)
-                b.row({d: 1.0, z: -bat.max_discharge_wh}, -inf, 0.0)
+                b.row({c_pv: 1.0, c_grid: 1.0, z: max_c}, -inf, max_c)
+                b.row({d: 1.0, z: -max_d}, -inf, 0.0)
             soc.append(b.var(low, max(bat.max_soc_wh, start_soc)))
-            b.row({c_pv: 1.0, c_grid: 1.0}, -inf, bat.max_charge_wh)
+            b.row({c_pv: 1.0, c_grid: 1.0}, -inf, max_c)
             # Grid charging is paid for: it needs as much import in the same slot.
             b.row({c_grid: 1.0, imp[t]: -1.0}, -inf, 0.0)
             b.row(
@@ -510,10 +530,11 @@ def _add_switching(b: "_Builder", data: DispatchInput, plan: _ScenarioVars) -> O
             return None
         g_t = b.var(0.0, 1.0, 0.0, integer=True)
         d_t = b.var(0.0, 1.0, 0.0, integer=True)
+        f_t = _factor(data, t)
         # Exact modes: flow above the threshold <=> binary set (as battery_states reads it).
-        b.row({c_grid: 1.0, g_t: -bat.max_charge_wh}, -inf, 0.0)
+        b.row({c_grid: 1.0, g_t: -bat.max_charge_wh * f_t}, -inf, 0.0)
         b.row({c_grid: 1.0, g_t: -thr}, 0.0, inf)
-        b.row({d: 1.0, d_t: -bat.max_discharge_wh}, -inf, 0.0)
+        b.row({d: 1.0, d_t: -bat.max_discharge_wh * f_t}, -inf, 0.0)
         b.row({d: 1.0, d_t: -thr}, 0.0, inf)
         b.row({g_t: 1.0, d_t: 1.0}, -inf, 1.0)
         grid.append(g_t)
@@ -608,7 +629,11 @@ def _add_hedge(
         return
     n = len(plan.imp)
     inf = math.inf
-    worst = worst_deviation(pv, load, hedge, bat.max_charge_wh)
+    worst = (
+        list(hedge.worst_wh)
+        if hedge.worst_wh is not None
+        else worst_deviation(pv, load, hedge, bat.max_charge_wh)
+    )
     if not any(worst):
         return
     eta_c = max(bat.charge_efficiency, 1e-9)
@@ -640,7 +665,7 @@ def _add_hedge(
             b.row(
                 {u_chg: 1.0, c_grid: eta_c * eta_d, c_pv: eta_c * eta_d},
                 -inf,
-                eta_c * eta_d * bat.max_charge_wh,
+                eta_c * eta_d * bat.max_charge_wh * _factor(data, t),
             )
         else:
             b.row({u_chg: 1.0}, -inf, 0.0)
@@ -672,6 +697,19 @@ def solve_dispatch(data: DispatchInput) -> DispatchResult:
     n = min(len(data.pv_wh), len(data.load_wh), len(data.price_per_wh), len(data.feed_in_per_wh))
     if n == 0:
         raise ValueError("empty horizon")
+    if data.coarsen_after_slots is not None and data.coarse_factor > 1:
+        from akkudoktoreos.optimization.milp.coarsen import (
+            coarsen_input,
+            expand_result,
+            fine_slots_needed,
+            slot_groups,
+        )
+
+        fine = fine_slots_needed(data, int(data.coarsen_after_slots))
+        if fine < n - 1:
+            groups = slot_groups(n, fine, int(data.coarse_factor))
+            coarse = coarsen_input(data, groups)
+            return expand_result(solve_dispatch(coarse), data, groups)
     price = [float(v) for v in data.price_per_wh[:n]]
     feed = [float(v) for v in data.feed_in_per_wh[:n]]
     scenarios = list(data.scenarios) or [(1.0, list(data.pv_wh), list(data.load_wh))]

@@ -151,6 +151,29 @@ class MilpCommonSettings(SettingsBaseModel):
             "examples": [None, 0.2],
         },
     )
+    coarse_after_hours: Optional[float] = Field(
+        default=None,
+        ge=0,
+        json_schema_extra={
+            "description": (
+                "RL29 fork (evcc coarsening): beyond this many hours from the start the "
+                "MILP merges slots into `coarse_slot_minutes` (energies summed, prices "
+                "averaged, building and tank discretised exactly for the longer slot) and "
+                "expands the result back. Makes a 48 h control horizon affordable. None = "
+                "full resolution."
+            ),
+            "examples": [None, 12.0],
+        },
+    )
+    coarse_slot_minutes: int = Field(
+        default=60,
+        ge=15,
+        le=240,
+        json_schema_extra={
+            "description": "RL29 fork: length of a coarse MILP slot [min] (multiple of the slot).",
+            "examples": [60],
+        },
+    )
     uncertainty_budget_hours: float = Field(
         default=0.0,
         ge=0,

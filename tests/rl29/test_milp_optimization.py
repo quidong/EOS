@@ -308,3 +308,18 @@ def test_uncertainty_budget_from_settings(config_eos: ConfigEOS, tmp_path):
     assert np.asarray(solution.ac_charge)[:4].sum() > 0
     configure(config_eos, uncertainty_budget_hours=0)
     assert MilpOptimization(fixed_seed=1)._uncertainty_budget() is None
+
+
+def test_coarse_far_horizon_from_settings(config_eos: ConfigEOS):
+    """Fork (P4): 24 h at 15 min, coarse hours after 6 h; the plan still arbitrages."""
+    configure(config_eos, hours=24, polish_generations=0, coarse_after_hours=6)
+    config_eos.merge_settings_from_dict({"optimization": {"genetic": {"interval_sec": 900}}})
+    optimizer = MilpOptimization(fixed_seed=1)
+    prices = [0.00030] * 32 + [0.00010] * 16 + [0.00060] * 16 + [0.00030] * 32
+    params = parameters(hours=96, prices=prices, forecast_interval_seconds=900)
+    params.temperature_forecast = [2.0] * 96
+    solution = optimizer.optimize_ems(params, ngen=0, individuals=20)
+    assert optimizer._coarse_after_slots() == 24 and optimizer._coarse_factor() == 4
+    ac = np.asarray(solution.ac_charge)
+    assert ac[32:48].sum() > 0
+    assert ac[48:64].sum() == 0

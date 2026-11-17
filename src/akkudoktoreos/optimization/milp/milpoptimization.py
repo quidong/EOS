@@ -187,6 +187,18 @@ class MilpOptimization(GeneticOptimization):
             ),
         )
 
+    def _coarse_after_slots(self) -> Optional[int]:
+        """First slot of the coarse part (fork, P4); None = full resolution."""
+        hours = self._milp.coarse_after_hours
+        if hours is None or self._coarse_factor() <= 1:
+            return None
+        return max(0, round(hours / self.slot_duration_h))
+
+    def _coarse_factor(self) -> int:
+        """Original slots per coarse slot (at least 1)."""
+        slot_minutes = self.slot_duration_h * 60.0
+        return max(1, int(round(self._milp.coarse_slot_minutes / slot_minutes)))
+
     def _uncertainty_budget(self) -> Optional[UncertaintyBudget]:
         """Hedge against forecast errors (fork, P2); None when off."""
         settings = self._milp
@@ -328,6 +340,8 @@ class MilpOptimization(GeneticOptimization):
             mip_rel_gap=self._milp.mip_rel_gap,
             switching=self._switching_model(tie_break) if switching else None,
             uncertainty=self._uncertainty_budget(),
+            coarsen_after_slots=self._coarse_after_slots(),
+            coarse_factor=self._coarse_factor(),
             import_excess_cost_per_wh=(
                 float(grid.import_excess_penalty_amt_kwh) / 1000.0 if max_import_w else None
             ),

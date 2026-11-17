@@ -153,6 +153,27 @@ class ThermalBlock:
     rod_power_w in every slot."""
     mode_control: Optional[ModeControl] = None
     """Fork: heating modes as binaries; None = free heat schedule (projected later)."""
+    slot_dt: list[float] = field(default_factory=list)
+    """Fork (coarse slots): duration per slot [h]; empty = ``dt`` in every slot."""
+    a_slots: list[list[list[float]]] = field(default_factory=list)
+    """Fork (coarse slots): building matrix per slot (ventilation folded in); empty = ``a``."""
+    b_slots: list[list[list[float]]] = field(default_factory=list)
+    """Fork (coarse slots): input matrix per slot; empty = ``b``."""
+    tank_decay_slots: list[float] = field(default_factory=list)
+    tank_gain_slots: list[float] = field(default_factory=list)
+
+    def slot_matrices(self, t: int) -> tuple[float, list[list[float]], list[list[float]]]:
+        """Duration [h], building and input matrix of slot ``t``."""
+        dt = self.slot_dt[t] if t < len(self.slot_dt) else self.dt
+        a = self.a_slots[t] if t < len(self.a_slots) else self.a
+        bm = self.b_slots[t] if t < len(self.b_slots) else self.b
+        return dt, a, bm
+
+    def tank_step(self, t: int) -> tuple[float, float]:
+        """Tank decay and input gain of slot ``t``."""
+        decay = self.tank_decay_slots[t] if t < len(self.tank_decay_slots) else self.tank_decay
+        gain = self.tank_gain_slots[t] if t < len(self.tank_gain_slots) else self.tank_gain
+        return decay, gain
 
 
 @dataclass
@@ -465,8 +486,7 @@ def add_thermal(b: Any, block: ThermalBlock) -> ThermalVars:
     with weight 1; the house balance gets ``hp_wh`` from the caller.
     """
     inf = math.inf
-    n, dt = block.n, block.dt
-    a, bm = block.a, block.b
+    n = block.n
     slab = [b.var(block.slab0, block.slab0)]
     room = [b.var(block.room0, block.room0)]
     tank = [b.var(block.tank0, block.tank0)]
@@ -478,6 +498,8 @@ def add_thermal(b: Any, block: ThermalBlock) -> ThermalVars:
     free = block.tank0
     mode_vars: list[list[int]] = []
     for t in range(n):
+        dt, a, bm = block.slot_matrices(t)
+        decay, gain = block.tank_step(t)
         cap = block.q_cap_w[t]
         q = b.var(0.0, cap)
         e_sp = b.var(0.0, inf)
@@ -535,16 +557,14 @@ def add_thermal(b: Any, block: ThermalBlock) -> ThermalVars:
                 const,
             )
         # Tank: T' = amb + (T - amb) decay + (w + r - draw) gain
-        const_t = (
-            block.tank_ambient_c * (1.0 - block.tank_decay) - block.draw_w[t] * block.tank_gain
-        )
-        free = const_t + block.tank_decay * free  # tank without any heating
+        const_t = block.tank_ambient_c * (1.0 - decay) - block.draw_w[t] * gain
+        free = const_t + decay * free  # tank without any heating
         t_next = b.var(
             -inf,
             max(block.hp_dhw_max_c, block.rod_max_c if block.rod_power_w else 0.0, free),
         )
         b.row(
-            {t_next: 1.0, tank[t]: -block.tank_decay, w: -block.tank_gain, r: -block.tank_gain},
+            {t_next: 1.0, tank[t]: -decay, w: -gain, r: -gain},
             const_t,
             const_t,
         )
@@ -556,10 +576,10 @@ def add_thermal(b: Any, block: ThermalBlock) -> ThermalVars:
         if block.rod_power_w > 0:
             on = b.var(0.0, 1.0, 0.0, integer=True)
             b.row({w: 1.0, on: -block.dhw_heat_w}, -inf, 0.0)
-            big = block.tank_decay * max(block.rod_max_c, block.tank0) + 1.0
-            b.row({tank[t]: block.tank_decay, w: block.tank_gain, on: big}, -inf, hp_limit + big)
+            big = decay * max(block.rod_max_c, block.tank0) + 1.0
+            b.row({tank[t]: decay, w: gain, on: big}, -inf, hp_limit + big)
         else:
-            b.row({tank[t]: block.tank_decay, w: block.tank_gain}, -inf, hp_limit)
+            b.row({tank[t]: decay, w: gain}, -inf, hp_limit)
         # Comfort and limits of the modes (soft).
         under = b.var(0.0, inf, block.comfort_penalty * dt)
         b.row({r_next: 1.0, under: 1.0}, block.room_min_c[t], inf)
