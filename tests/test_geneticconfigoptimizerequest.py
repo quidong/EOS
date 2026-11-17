@@ -730,3 +730,52 @@ async def test_missing_newest_soc_value_falls_back_to_older_fresh_sample(
     parameters = await ConfigOptimizationRequest.model_validate(data).resolve()
     assert parameters.pv_battery is not None
     assert parameters.pv_battery.initial_soc_percentage == 42
+
+
+@pytest.mark.asyncio
+async def test_load_nowcast_blends_measured_base_load_into_first_slots(
+    configured_request, monkeypatch
+):
+    """RL29 fork: the measured base load anchors the current slot and decays (P3)."""
+    config, _, _, data = configured_request
+    seen = {}
+
+    async def measured(measurement, slot_start, interval_s, keys, max_hold_s):
+        seen.update(slot_start=slot_start, interval_s=interval_s, keys=keys)
+        return 600.0
+
+    monkeypatch.setattr(configrequest, "measured_base_load_wh", measured)
+    request = ConfigOptimizationRequest.model_validate(data)
+    slot_start = to_datetime("2026-09-12T10:15:00Z", in_timezone="UTC")
+    blended = await request._load_nowcast([200.0] * 50, 41, slot_start)
+    assert blended[40] == 200.0
+    assert blended[41:45] == pytest.approx([600.0, 500.0, 400.0, 300.0])
+    assert blended[45] == 200.0
+    assert seen == {"slot_start": slot_start, "interval_s": 900, "keys": []}
+
+    config.merge_settings_from_dict({"optimization": {"genetic": {"load_nowcast_slots": 2}}})
+    blended = await request._load_nowcast([200.0] * 50, 41, slot_start)
+    assert blended[41:44] == pytest.approx([600.0, 400.0, 200.0])
+
+
+@pytest.mark.asyncio
+async def test_load_nowcast_keeps_forecast_without_measurement(configured_request, monkeypatch):
+    _, _, _, data = configured_request
+
+    async def missing(*_args):
+        return None
+
+    monkeypatch.setattr(configrequest, "measured_base_load_wh", missing)
+    request = ConfigOptimizationRequest.model_validate(data)
+    load = [200.0] * 10
+    assert await request._load_nowcast(load, 3, to_datetime("2026-09-12T10:15:00Z")) == load
+
+
+@pytest.mark.asyncio
+async def test_supplied_load_is_not_nowcast(configured_request, monkeypatch):
+    _, _, _, data = configured_request
+    called = AsyncMock(return_value=900.0)
+    monkeypatch.setattr(configrequest, "measured_base_load_wh", called)
+    parameters = await ConfigOptimizationRequest.model_validate(data).resolve()
+    called.assert_not_awaited()
+    assert parameters.ems.total_load[41] == 200.0

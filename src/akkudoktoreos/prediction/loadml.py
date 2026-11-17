@@ -223,11 +223,13 @@ def hold_hourly_means(
     samples: Sequence[tuple[float, Optional[float]]],
     hour_starts: Sequence[float],
     max_hold_s: float,
+    period_s: float = 3600.0,
 ) -> list[Optional[float]]:
     """Time-weighted hourly means of a step signal (value holds until the next sample).
 
     ``samples`` are (unix seconds, value) sorted by time; ``None`` ends the hold. An hour
-    is ``None`` unless it is fully covered by held values.
+    is ``None`` unless it is fully covered by held values. ``period_s`` sets the length
+    of the averaging periods that start at ``hour_starts`` (default one hour).
     """
     result: list[Optional[float]] = []
     clean = [(t, v) for t, v in samples if t is not None]
@@ -235,7 +237,7 @@ def hold_hourly_means(
     idx = 0
     n = len(clean)
     for start in hour_starts:
-        end = start + 3600.0
+        end = start + period_s
         # Last sample at or before the hour start.
         while idx + 1 < n and clean[idx + 1][0] <= start:
             idx += 1
@@ -264,7 +266,7 @@ def hold_hourly_means(
             else:
                 ok = False  # hold expired before the next sample
                 break
-        result.append(integral / covered if ok and covered >= 3600.0 - 1e-6 else None)
+        result.append(integral / covered if ok and covered >= period_s - 1e-6 else None)
     return result
 
 

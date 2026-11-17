@@ -195,6 +195,32 @@ class GeneticCommonSettings(SettingsBaseModel):
         ),
     )
 
+    load_nowcast_slots: int = Field(
+        default=4,
+        ge=0,
+        le=24,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: the measured base load of the last completed slot replaces the "
+                "load forecast of the current slot and decays linearly into the forecast "
+                "over this many slots. 0 = off."
+            ),
+            "examples": [4, 0],
+        },
+    )
+
+    load_nowcast_subtract_keys: Optional[list[str]] = Field(
+        default=None,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: power measurements [W] of consumers EOS plans itself, removed "
+                "from the house meter for the load nowcast. None = "
+                "`load.loadml.subtract_power_keys`."
+            ),
+            "examples": [None, ["wbb12-electric-power"]],
+        },
+    )
+
     tail_horizon_hours: int = Field(
         default=48,
         ge=0,

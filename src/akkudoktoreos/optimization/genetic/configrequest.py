@@ -26,6 +26,10 @@ from akkudoktoreos.optimization.genetic.geneticparams import (
     GeneticOptimizationParameters,
 )
 from akkudoktoreos.optimization.genetic.heatpumpgenes import GeneticHeatPumpParameters
+from akkudoktoreos.optimization.genetic.loadnowcast import (
+    blend_measured,
+    measured_base_load_wh,
+)
 from akkudoktoreos.utils.datetimeutil import DateTime, to_datetime, to_duration
 
 
@@ -390,6 +394,10 @@ class ConfigOptimizationRequest(
                 )
         if any(value < 0 for values in (pv, load) for value in values[first:last]):
             raise ValueError("PV and load energy must be nonnegative.")
+        if supplied.total_load is None and settings.load_nowcast_slots > 0:
+            load = await self._load_nowcast(
+                load, first, origin.add(seconds=first * settings.interval_sec)
+            )
         temperatures = await self._temperature_forecast(
             supplied.temperature_forecast, origin, end, interval, length
         )
@@ -428,6 +436,41 @@ class ConfigOptimizationRequest(
             start_solution=warm_start,
             start_solution_datetime=warm_start_time,
         )
+
+    async def _load_nowcast(self, load: list[float], first: int, slot_start: DateTime) -> list[float]:
+        """Anchor the first load slots to the measured base load (RL29 fork, ``loadnowcast``).
+
+        Args:
+            load: Base load forecast per slot [Wh], from the day start.
+            first: Index of the current slot.
+            slot_start: Start of the current slot.
+
+        Returns:
+            The blended forecast; unchanged when there is no usable measurement.
+        """
+        settings = self.config.optimization.genetic
+        loadml = self.config.load.loadml
+        keys = settings.load_nowcast_subtract_keys
+        if keys is None:
+            keys = list(loadml.subtract_power_keys)
+        measured = await measured_base_load_wh(
+            self.measurement,
+            slot_start,
+            settings.interval_sec,
+            keys,
+            loadml.subtract_max_hold_hours * 3600.0,
+        )
+        if measured is None:
+            logger.debug("Load nowcast: no measured base load; forecast unchanged.")
+            return load
+        blended = blend_measured(load, first, measured, settings.load_nowcast_slots)
+        logger.info(
+            "Load nowcast: measured base load {:.0f} Wh in the last slot; first slots {} -> {} Wh.",
+            measured,
+            [round(v) for v in load[first : first + settings.load_nowcast_slots]],
+            [round(v) for v in blended[first : first + settings.load_nowcast_slots]],
+        )
+        return blended
 
     async def _temperature_forecast(
         self,
