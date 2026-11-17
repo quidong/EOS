@@ -69,6 +69,38 @@ class BatteryModel:
 
 
 @dataclass
+class SwitchingModel:
+    """Battery mode changes in the dispatch model (RL29 fork, evcc ``continuity``).
+
+    The modes are the ones Home Assistant switches at the inverter and the GENETIC
+    states encode (``battery_states``): idle (PV surplus charges), discharge allowed,
+    grid charge. A slot is in a mode when its flow exceeds ``threshold_wh``; binaries
+    make that exact, so the changes counted here are the changes of the plan.
+
+    Two mechanisms, usable together:
+
+    - ``change_cost``/``hold_cost`` price a change and a mode shorter than
+      ``hold_slots`` in the objective, like the GENETIC fitness does
+      (``battery_change_penalty_amt``, ``battery_hold_penalty_amt``): a change has to
+      earn at least its cost.
+    - ``tie_break``: a second solve keeps the objective found (within
+      ``tie_break_tolerance``) and minimises the number of changes, so equally good
+      plans do not switch back and forth.
+    """
+
+    change_cost: float = 0.0
+    hold_slots: int = 0
+    hold_cost: float = 0.0
+    threshold_wh: float = 1.0
+    tie_break: bool = True
+    tie_break_tolerance: float = 1e-4
+    tie_break_time_limit_s: float = 10.0
+    initial_state: Optional[int] = None
+    """Mode in effect before the first slot (0 idle, 1 discharge, 2 grid charge);
+    None = the first slot is free."""
+
+
+@dataclass
 class ApplianceRun:
     """One run of a schedulable appliance: allowed start slots and its energy profile."""
 
@@ -101,6 +133,14 @@ class DispatchInput:
     thermal: list[ThermalBlock] = field(default_factory=list)
     """Heat pumps planned inside the model (``thermal.py``); their electric energy is part
     of the house balance (or priced separately with their own meter)."""
+    switching: Optional[SwitchingModel] = None
+    """Fork: battery mode changes (P1); None = changes are free and not modelled."""
+    import_excess_cost_per_wh: Optional[float] = None
+    """Fork: import above ``max_grid_import_wh`` costs this per Wh on top of the price
+    (soft limit, as in the GENETIC simulation); None = hard limit."""
+    lock_charge_discharge: str = "negative_prices"
+    """Fork: binaries that forbid charging and discharging in the same slot:
+    ``never``, ``negative_prices`` (only where cycling could earn money) or ``always``."""
 
 
 @dataclass
@@ -126,6 +166,12 @@ class DispatchResult:
     mip_gap: Optional[float] = None
     """Relative gap between the solution and the solver's bound when it stopped (0 for a
     proven optimum, None for a pure LP or when the solver does not report it)."""
+    mode_changes: Optional[int] = None
+    """Fork: battery mode changes of the plan (with ``switching``)."""
+    tie_break: Optional[str] = None
+    """Fork: what the switching tie break did (``improved 5 to 3``, ``kept``, ...)."""
+    import_excess_wh: list[float] = field(default_factory=list)
+    """Fork: import above the soft import limit per slot (empty without a limit)."""
 
     def grid_cost(self, price: Sequence[float], feed_in: Sequence[float]) -> float:
         return float(
@@ -160,25 +206,38 @@ class _Builder:
         self.row_lb.append(lb)
         self.row_ub.append(ub)
 
-    def solve(self, time_limit: float, gap: float) -> "_SolveOutcome":
+    def solve(
+        self,
+        time_limit: float,
+        gap: float,
+        cost: Optional[list[float]] = None,
+        extra_rows: Optional[list[tuple[dict[int, float], float, float]]] = None,
+    ) -> "_SolveOutcome":
+        """Solve the model; ``cost``/``extra_rows`` replace the objective and add rows
+        for this solve only (lexicographic stages)."""
         from scipy.optimize import Bounds, LinearConstraint, milp
         from scipy.sparse import csr_array
 
         n = len(self.lb)
+        rows = list(self.rows)
+        row_lb = list(self.row_lb)
+        row_ub = list(self.row_ub)
+        for coeffs, lo, hi in extra_rows or []:
+            rows.append({k: v for k, v in coeffs.items() if v != 0.0})
+            row_lb.append(lo)
+            row_ub.append(hi)
         data, indices, indptr = [], [], [0]
-        for row in self.rows:
+        for row in rows:
             for k, v in sorted(row.items()):
                 indices.append(k)
                 data.append(v)
             indptr.append(len(indices))
         constraints = []
-        if self.rows:
-            matrix = csr_array((data, indices, indptr), shape=(len(self.rows), n))
-            constraints.append(
-                LinearConstraint(matrix, np.array(self.row_lb), np.array(self.row_ub))
-            )
+        if rows:
+            matrix = csr_array((data, indices, indptr), shape=(len(rows), n))
+            constraints.append(LinearConstraint(matrix, np.array(row_lb), np.array(row_ub)))
         result = milp(
-            c=np.array(self.cost),
+            c=np.array(self.cost if cost is None else cost),
             integrality=np.array(self.integer),
             bounds=Bounds(np.array(self.lb), np.array(self.ub)),
             constraints=constraints,
@@ -238,6 +297,7 @@ class _ScenarioVars:
     chg_grid: list[Optional[int]]
     dis: list[Optional[int]]
     soc: list[int]
+    excess: list[Optional[int]] = field(default_factory=list)
 
 
 def _add_scenario(
@@ -255,7 +315,15 @@ def _add_scenario(
     inf = math.inf
     imp_limit = data.max_grid_import_wh if data.max_grid_import_wh is not None else inf
     exp_limit = data.max_grid_export_wh if data.max_grid_export_wh is not None else inf
-    imp = [b.var(0.0, imp_limit, weight * price[t]) for t in range(n)]
+    soft_import = data.max_grid_import_wh is not None and data.import_excess_cost_per_wh is not None
+    # Soft import limit (fork): excess is allowed at a penalty on top of the price, so a
+    # fixed load above the limit no longer makes the model infeasible.
+    imp = [b.var(0.0, inf if soft_import else imp_limit, weight * price[t]) for t in range(n)]
+    excess: list[Optional[int]] = [None] * n
+    if soft_import:
+        for t in range(n):
+            excess[t] = b.var(0.0, inf, weight * float(data.import_excess_cost_per_wh or 0.0))
+            b.row({imp[t]: 1.0, excess[t]: -1.0}, -inf, imp_limit)
     # Negative feed-in tariff: exporting costs money; the model may curtail by not exporting
     # (PV that is neither used nor exported is curtailed).
     exp = [b.var(0.0, min(pv[t], exp_limit), -weight * feed[t]) for t in range(n)]
@@ -280,6 +348,13 @@ def _add_scenario(
             c_grid = b.var(0.0, grid_cap, 1e-9)
             d = b.var(0.0, bat.max_discharge_wh, weight * bat.lcos_per_wh)
             chg_pv[t], chg_grid[t], dis[t] = c_pv, c_grid, d
+            lock = data.lock_charge_discharge
+            if lock == "always" or (lock == "negative_prices" and price[t] < 0.0):
+                # Fork (P5): the inverter cannot charge and discharge at once; without the
+                # lock, cycling would "sell" losses while the import price is negative.
+                z = b.var(0.0, 1.0, 0.0, integer=True)
+                b.row({c_pv: 1.0, c_grid: 1.0, z: bat.max_charge_wh}, -inf, bat.max_charge_wh)
+                b.row({d: 1.0, z: -bat.max_discharge_wh}, -inf, 0.0)
             soc.append(b.var(low, max(bat.max_soc_wh, start_soc)))
             b.row({c_pv: 1.0, c_grid: 1.0}, -inf, bat.max_charge_wh)
             # Grid charging is paid for: it needs as much import in the same slot.
@@ -336,7 +411,123 @@ def _add_scenario(
         # Grid and battery do not supply more than is consumed or stored (no import that
         # is curtailed); keeps the solution physical when prices are negative.
         b.row(supply, -inf, load[t])
-    return _ScenarioVars(imp, exp, chg_pv, chg_grid, dis, soc)
+    return _ScenarioVars(imp, exp, chg_pv, chg_grid, dis, soc, excess)
+
+
+@dataclass
+class _SwitchVars:
+    grid: list[int]
+    discharge: list[int]
+    changes: list[int]
+    short: list[int]
+    initial_state: Optional[int] = None
+
+    def count(self, solution: np.ndarray) -> int:
+        """Mode changes of a solution, from the mode binaries."""
+        modes = [
+            2 if solution[g] > 0.5 else 1 if solution[d] > 0.5 else 0
+            for g, d in zip(self.grid, self.discharge)
+        ]
+        if self.initial_state is not None:
+            modes = [self.initial_state] + modes
+        return sum(1 for a, b in zip(modes, modes[1:]) if a != b)
+
+
+def _add_switching(b: "_Builder", data: DispatchInput, plan: _ScenarioVars) -> Optional[_SwitchVars]:
+    """Mode binaries, change and short-hold variables of the reported scenario (P1)."""
+    sw, bat = data.switching, data.battery
+    if sw is None or bat is None or bat.capacity_wh <= 0:
+        return None
+    n = len(plan.imp)
+    inf = math.inf
+    # Slightly above the threshold: battery_states counts a flow strictly above it.
+    thr = max(float(sw.threshold_wh), 1e-6) * 1.01 + 1e-3
+    grid: list[int] = []
+    discharge: list[int] = []
+    for t in range(n):
+        c_grid, d = plan.chg_grid[t], plan.dis[t]
+        if c_grid is None or d is None:  # pragma: no cover - set with a battery
+            return None
+        g_t = b.var(0.0, 1.0, 0.0, integer=True)
+        d_t = b.var(0.0, 1.0, 0.0, integer=True)
+        # Exact modes: flow above the threshold <=> binary set (as battery_states reads it).
+        b.row({c_grid: 1.0, g_t: -bat.max_charge_wh}, -inf, 0.0)
+        b.row({c_grid: 1.0, g_t: -thr}, 0.0, inf)
+        b.row({d: 1.0, d_t: -bat.max_discharge_wh}, -inf, 0.0)
+        b.row({d: 1.0, d_t: -thr}, 0.0, inf)
+        b.row({g_t: 1.0, d_t: 1.0}, -inf, 1.0)
+        grid.append(g_t)
+        discharge.append(d_t)
+    initial = sw.initial_state
+    changes: list[int] = []
+    for t in range(n):
+        w = b.var(0.0, 1.0, float(sw.change_cost))
+        changes.append(w)
+        if t == 0:
+            if initial is None:
+                b.row({w: 1.0}, 0.0, 0.0)
+                continue
+            g_prev = 1.0 if initial == 2 else 0.0
+            d_prev = 1.0 if initial == 1 else 0.0
+            b.row({w: 1.0, grid[0]: -1.0}, -g_prev, inf)
+            b.row({w: 1.0, grid[0]: 1.0}, g_prev, inf)
+            b.row({w: 1.0, discharge[0]: -1.0}, -d_prev, inf)
+            b.row({w: 1.0, discharge[0]: 1.0}, d_prev, inf)
+            continue
+        for x in (grid, discharge):
+            b.row({w: 1.0, x[t]: -1.0, x[t - 1]: 1.0}, 0.0, inf)
+            b.row({w: 1.0, x[t]: 1.0, x[t - 1]: -1.0}, 0.0, inf)
+    short: list[int] = []
+    if sw.hold_slots > 1 and sw.hold_cost > 0:
+        # Two changes closer than the hold time: the mode between them is too short.
+        for t in range(n):
+            for k in range(1, sw.hold_slots):
+                if t + k >= n:
+                    break
+                v = b.var(0.0, 1.0, float(sw.hold_cost))
+                b.row({v: 1.0, changes[t]: -1.0, changes[t + k]: -1.0}, -1.0, inf)
+                short.append(v)
+    return _SwitchVars(grid, discharge, changes, short, initial)
+
+
+def _switch_tie_break(
+    b: "_Builder", data: DispatchInput, sv: _SwitchVars, outcome: "_SolveOutcome"
+) -> tuple["_SolveOutcome", str]:
+    """Fewest mode changes at the objective already found (evcc ``continuity``)."""
+    sw = data.switching
+    if sw is None or outcome.solution is None or outcome.objective is None:
+        return outcome, "no solution"
+    before = sv.count(outcome.solution)
+    if before == 0:
+        return outcome, "no changes"
+    bound = outcome.objective + abs(outcome.objective) * 1e-9 + float(sw.tie_break_tolerance)
+    cost = [0.0] * len(b.cost)
+    for i in sv.changes:
+        cost[i] = 1.0
+    for i in sv.short:
+        cost[i] = 0.5
+    objective_row = {i: c for i, c in enumerate(b.cost) if c != 0.0}
+    second = b.solve(
+        min(float(sw.tie_break_time_limit_s), float(data.time_limit_s)),
+        data.mip_rel_gap,
+        cost=cost,
+        extra_rows=[(objective_row, -math.inf, bound)],
+    )
+    if not second.ok or second.solution is None:
+        return outcome, f"kept ({second.status})"
+    after = sv.count(second.solution)
+    if after >= before:
+        return outcome, "kept"
+    objective = float(np.dot(np.array(b.cost), second.solution))
+    improved = _SolveOutcome(
+        status=outcome.status,
+        ok=True,
+        solution=second.solution,
+        objective=objective,
+        optimal=outcome.optimal,
+        mip_gap=outcome.mip_gap,
+    )
+    return improved, f"improved {before} to {after}"
 
 
 def solve_dispatch(data: DispatchInput) -> DispatchResult:
@@ -411,8 +602,12 @@ def solve_dispatch(data: DispatchInput) -> DispatchResult:
         first.dis,
         first.soc,
     )
+    switch_vars = _add_switching(b, data, first)
 
     outcome = b.solve(data.time_limit_s, data.mip_rel_gap)
+    tie_break: Optional[str] = None
+    if switch_vars is not None and data.switching is not None and data.switching.tie_break:
+        outcome, tie_break = _switch_tie_break(b, data, switch_vars, outcome)
     status, objective = outcome.status, outcome.objective
     elapsed = time.perf_counter() - started
     if not outcome.ok or outcome.solution is None:
@@ -446,6 +641,9 @@ def solve_dispatch(data: DispatchInput) -> DispatchResult:
         thermal=[trajectory(sol, tv) for tv in thermal_vars],
         optimal=outcome.optimal,
         mip_gap=outcome.mip_gap,
+        mode_changes=switch_vars.count(sol) if switch_vars is not None else None,
+        tie_break=tie_break,
+        import_excess_wh=[float(sol[i]) for i in first.excess if i is not None],
     )
 
 

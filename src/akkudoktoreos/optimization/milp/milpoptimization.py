@@ -27,6 +27,7 @@ for direct marketing.
 
 from __future__ import annotations
 
+import math
 import time
 from typing import Any, Optional
 
@@ -41,6 +42,7 @@ from akkudoktoreos.optimization.milp.dispatch import (
     BatteryModel,
     DispatchInput,
     DispatchResult,
+    SwitchingModel,
     battery_states,
     describe_optimality,
     solve_dispatch,
@@ -160,7 +162,43 @@ class MilpOptimization(GeneticOptimization):
     # Model input from the prepared GENETIC run
     # ------------------------------------------------------------------
 
-    def _dispatch_input(self, extra_load: Optional[list[float]]) -> DispatchInput:
+    def _switching_model(self, tie_break: bool = True) -> Optional[SwitchingModel]:
+        """Battery mode changes priced like the GENETIC fitness (fork, P1)."""
+        settings = self._milp
+        if not settings.switching or self.simulation.battery is None:
+            return None
+        cfg = self._genetic_cfg
+        change_cost = float(getattr(cfg, "battery_change_penalty_amt", 0.0) or 0.0)
+        hold_minutes = float(getattr(cfg, "battery_min_hold_minutes", 0.0) or 0.0)
+        hold_cost = float(getattr(cfg, "battery_hold_penalty_amt", 0.0) or 0.0)
+        slot_minutes = self.slot_duration_h * 60.0
+        hold_slots = math.ceil(hold_minutes / slot_minutes - 1e-9) if hold_minutes > 0 else 0
+        return SwitchingModel(
+            change_cost=change_cost,
+            hold_slots=hold_slots,
+            hold_cost=hold_cost,
+            tie_break=settings.switch_tie_break and tie_break,
+            tie_break_time_limit_s=settings.switch_time_limit_s,
+            initial_state=(
+                getattr(self, "_initial_battery_mode", None)
+                if settings.switch_initial_from_plan
+                else None
+            ),
+        )
+
+    def _battery_mode(self, gene: int) -> int:
+        """Switched battery mode of one battery gene: 0 idle, 1 discharge, 2 grid charge."""
+        import numpy as np
+
+        signature = int(self.battery_mode_signature(np.array([int(gene)]))[0])
+        return 2 if signature & 1 else 1 if signature & 2 else 0
+
+    def _dispatch_input(
+        self,
+        extra_load: Optional[list[float]],
+        switching: bool = False,
+        tie_break: bool = True,
+    ) -> DispatchInput:
         sim = self.simulation
         n = self.control_slots
         if (
@@ -250,8 +288,17 @@ class MilpOptimization(GeneticOptimization):
             appliances=appliances,
             terminal_segments=segments,
             terminal_dc_to_ac=float(dc_to_ac),
-            time_limit_s=self._milp.time_limit_s,
+            time_limit_s=(
+                min(self._milp.time_limit_s, self._milp.switch_time_limit_s)
+                if switching
+                else self._milp.time_limit_s
+            ),
             mip_rel_gap=self._milp.mip_rel_gap,
+            switching=self._switching_model(tie_break) if switching else None,
+            import_excess_cost_per_wh=(
+                float(grid.import_excess_penalty_amt_kwh) / 1000.0 if max_import_w else None
+            ),
+            lock_charge_discharge=settings.lock_charge_discharge,
         )
 
     def _full_charge_terms(
@@ -542,6 +589,46 @@ class MilpOptimization(GeneticOptimization):
             logger.warning("MILP: joint mode model failed ({}).", exc)
             return []
 
+    def _with_switching(
+        self, hp_genes: Optional[list[int]], result: DispatchResult, tie_break: bool = True
+    ) -> tuple[DispatchResult, str]:
+        """Re-solve a candidate's battery dispatch with mode changes priced (fork, P1).
+
+        The heat pump schedule stays; the result replaces the cost-only dispatch only
+        when it solved. Returns the result to encode and a short report.
+        """
+        if not self._milp.switching or self.simulation.battery is None:
+            return result, ""
+        hp_load: Optional[list[float]] = None
+        layout = self._hp_layout()
+        if layout and hp_genes is not None:
+            hp_load, _ = layout.evaluate(hp_genes)
+        try:
+            switched = solve_dispatch(
+                self._dispatch_input(hp_load, switching=True, tie_break=tie_break)
+            )
+        except Exception as exc:  # never lose the seed because of the switching model
+            logger.warning("MILP: switching solve failed ({}).", exc)
+            return result, ""
+        self._milp_solves += 1
+        if not switched.success:
+            return result, f"not solved ({switched.status})"
+        before = len(
+            [1 for a, b in zip(self._modes(result), self._modes(result)[1:]) if a != b]
+        )
+        return switched, (
+            f"{before} -> {switched.mode_changes} changes"
+            + (f", tie break {switched.tie_break}" if switched.tie_break else "")
+        )
+
+    def _modes(self, result: DispatchResult) -> list[int]:
+        """Switched battery mode per slot of a dispatch result."""
+        threshold = 1.0
+        return [
+            2 if g > threshold else 1 if d > threshold else 0
+            for g, d in zip(result.charge_grid_wh, result.discharge_wh)
+        ]
+
     def _coordinate_search(
         self, best: list[int], best_score: float, deadline: float
     ) -> tuple[list[int], float]:
@@ -586,16 +673,20 @@ class MilpOptimization(GeneticOptimization):
         self._dispatch_results: list[DispatchResult] = []
         warm = parameters.start_solution
         self._warm_hp_genes = None
-        if warm is not None and self._hp_layout():
+        self._initial_battery_mode: Optional[int] = None
+        if warm is not None:
             try:
                 shifted = self._start_solution_for_run_start(
                     warm, self._resolve_start_solution_datetime(parameters)
                 )
                 if shifted is not None:
                     shifted = self._start_solution_for_slot_grid(shifted)
-                    self._warm_hp_genes = self._heat_pump_genes(list(shifted))
+                    if self.simulation.battery is not None and len(shifted) > 0:
+                        self._initial_battery_mode = self._battery_mode(int(shifted[0]))
+                    if self._hp_layout():
+                        self._warm_hp_genes = self._heat_pump_genes(list(shifted))
             except Exception as exc:  # warm start is optional
-                logger.debug("MILP: warm start heat pump genes unusable: {}", exc)
+                logger.debug("MILP: warm start genes unusable: {}", exc)
 
         scored: list[tuple[float, list[int], DispatchResult]] = []
         self._thermal_keys = set()
@@ -666,7 +757,13 @@ class MilpOptimization(GeneticOptimization):
 
         seeds = []
         seen: set[tuple[int, ...]] = set()
+        switch_reports: list[str] = []
         for score, genes, result in scored:
+            if len(seeds) < self._milp.seeds:
+                # The tie break (slow without a MIP start) only for the best seed.
+                result, report = self._with_switching(genes or None, result, not seeds)
+                if report:
+                    switch_reports.append(report)
             genome = self._genome(result, genes or None)
             key = tuple(genome)
             if key in seen:
@@ -688,7 +785,10 @@ class MilpOptimization(GeneticOptimization):
             len(seeds),
             describe_report(dispatch_report),
         )
+        if switch_reports:
+            logger.info("MILP: battery switching {}.", "; ".join(switch_reports))
         self.milp_summary = {
+            "switching": switch_reports,
             "thermal": getattr(self, "thermal_summary", {}),
             "thermal_best_start": bool(getattr(self, "_thermal_start", False)),
             "joint": getattr(self, "joint_summary", {}),

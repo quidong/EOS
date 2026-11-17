@@ -1,6 +1,6 @@
 """Settings of the MILP optimization (RL29 fork); kept light for the config import."""
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import Field
 
@@ -151,6 +151,60 @@ class MilpCommonSettings(SettingsBaseModel):
             "examples": [None, 0.2],
         },
     )
+    switching: bool = Field(
+        default=True,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: the battery seeds are re-solved with the mode changes priced like "
+                "the GENETIC fitness (`genetic.battery_change_penalty_amt`, "
+                "`battery_min_hold_minutes`, `battery_hold_penalty_amt`), so the MILP plan "
+                "already respects the switching limits. The candidate search stays a pure "
+                "cost model."
+            ),
+            "examples": [True],
+        },
+    )
+    switch_tie_break: bool = Field(
+        default=True,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: after the switching solve of the best seed, a second solve keeps "
+                "its objective and minimises the number of battery mode changes (evcc "
+                "continuity)."
+            ),
+            "examples": [True],
+        },
+    )
+    switch_time_limit_s: float = Field(
+        default=10.0,
+        gt=0,
+        le=300,
+        json_schema_extra={
+            "description": "Time limit of each switching solve and of the tie break [s].",
+            "examples": [10.0],
+        },
+    )
+    switch_initial_from_plan: bool = Field(
+        default=True,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: the battery mode of the previous plan for the current slot is "
+                "the mode in effect; leaving it in the first slot counts as a change."
+            ),
+            "examples": [True],
+        },
+    )
+    lock_charge_discharge: Literal["never", "negative_prices", "always"] = Field(
+        default="negative_prices",
+        json_schema_extra={
+            "description": (
+                "RL29 fork: forbid charging and discharging the battery in the same slot "
+                "(binaries); `negative_prices` only where cycling could earn money."
+            ),
+            "examples": ["negative_prices"],
+        },
+    )
+
     max_grid_import_w: Optional[float] = Field(
         default=None,
         gt=0,

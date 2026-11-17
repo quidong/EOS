@@ -8,6 +8,7 @@ from akkudoktoreos.optimization.milp.dispatch import (
     ApplianceRun,
     BatteryModel,
     DispatchInput,
+    SwitchingModel,
     battery_states,
     solve_dispatch,
 )
@@ -144,6 +145,20 @@ def test_import_limit_and_infeasible_horizon():
         )
     )
     assert not result.success
+    # Fork (P5): with an excess price the limit is soft and the overshoot is reported.
+    soft = solve_dispatch(
+        DispatchInput(
+            pv_wh=[0],
+            load_wh=[1000],
+            price_per_wh=[30 * CENT],
+            feed_in_per_wh=[0],
+            max_grid_import_wh=500,
+            import_excess_cost_per_wh=100 * CENT,
+        )
+    )
+    assert soft.success
+    assert soft.import_excess_wh == pytest.approx([500])
+    assert soft.objective == pytest.approx(1000 * 30 * CENT + 500 * 100 * CENT)
     with pytest.raises(ValueError):
         solve_dispatch(DispatchInput(pv_wh=[], load_wh=[], price_per_wh=[], feed_in_per_wh=[]))
 
@@ -243,3 +258,101 @@ def test_scenario_validation_and_export_limit():
         )
     )
     assert result.grid_export_wh == pytest.approx([3000])
+
+
+# --------------------------------------------------------------------------------------
+# Fork: battery mode changes (P1) and charge/discharge lock (P5)
+# --------------------------------------------------------------------------------------
+
+
+def zigzag_input(**kw) -> DispatchInput:
+    """Prices alternate by 2 ct: pure cost cycles the battery every slot."""
+    n = 8
+    values = dict(
+        pv_wh=[0.0] * n,
+        load_wh=[1000.0] * n,
+        price_per_wh=[(30 if t % 2 else 20) * CENT for t in range(n)],
+        feed_in_per_wh=[0.0] * n,
+        battery=battery(soc_wh=5000, max_charge_wh=2000, max_discharge_wh=2000),
+    )
+    values.update(kw)
+    return DispatchInput(**values)
+
+
+def modes(result) -> list[int]:
+    """Switched mode per slot like ``battery_mode_signature``: grid charge level ignored."""
+    states = battery_states(result, max_charge_wh=2000, charge_levels=[0.5, 1.0])
+    return [2 if s >= 4 else 1 if s == 2 else 0 for s in states]
+
+
+def changes(result) -> int:
+    m = modes(result)
+    return sum(1 for a, b in zip(m, m[1:]) if a != b)
+
+
+class TestSwitching:
+    def test_change_cost_must_be_earned(self):
+        free = solve_dispatch(zigzag_input(switching=SwitchingModel(tie_break=False)))
+        assert free.mode_changes == changes(free) and free.mode_changes >= 4
+        priced = solve_dispatch(
+            zigzag_input(switching=SwitchingModel(change_cost=1.0, tie_break=False))
+        )
+        assert priced.mode_changes == changes(priced) <= 1
+        # The change penalty is part of the objective, the grid cost is higher.
+        assert priced.grid_cost([0.0] * 8, [0.0] * 8) == 0.0
+        assert sum(priced.grid_import_wh) >= sum(free.grid_import_wh) - 1e-6
+
+    def test_tie_break_keeps_cost_and_removes_changes(self):
+        # Flat price: discharging 2 kWh anywhere costs the same.
+        data = DispatchInput(
+            pv_wh=[0.0] * 6,
+            load_wh=[500.0] * 6,
+            price_per_wh=[30 * CENT] * 6,
+            feed_in_per_wh=[0.0] * 6,
+            battery=battery(soc_wh=2000),
+            switching=SwitchingModel(),
+        )
+        result = solve_dispatch(data)
+        plain = solve_dispatch(DispatchInput(**{**data.__dict__, "switching": None}))
+        assert result.objective == pytest.approx(plain.objective, abs=1e-4)
+        assert result.mode_changes <= 1
+        assert result.tie_break is not None
+
+    def test_hold_time_penalises_short_modes(self):
+        data = zigzag_input(
+            switching=SwitchingModel(change_cost=0.001, hold_slots=3, hold_cost=1.0)
+        )
+        result = solve_dispatch(data)
+        states = modes(result)
+        starts = [t for t in range(1, len(states)) if states[t] != states[t - 1]]
+        assert all(b - a >= 3 for a, b in zip(starts, starts[1:]))
+
+    def test_initial_state_counts_first_change(self):
+        data = zigzag_input(
+            price_per_wh=[30 * CENT] * 8,
+            switching=SwitchingModel(initial_state=2, change_cost=0.1, tie_break=False),
+        )
+        result = solve_dispatch(data)
+        assert result.mode_changes == 1  # grid charge -> discharge in the first slot
+
+
+def test_no_charge_and_discharge_at_once_at_negative_prices():
+    n = 4
+    data = DispatchInput(
+        pv_wh=[0.0] * n,
+        load_wh=[1000.0] * n,
+        price_per_wh=[-10 * CENT] * n,
+        feed_in_per_wh=[0.0] * n,
+        battery=battery(
+            soc_wh=5000, charge_efficiency=0.9, discharge_efficiency=0.9, max_charge_wh=2000,
+            max_discharge_wh=2000,
+        ),
+        lock_charge_discharge="never",
+    )
+    cycling = solve_dispatch(data)
+    assert any(
+        c > 1 and d > 1 for c, d in zip(cycling.charge_grid_wh, cycling.discharge_wh)
+    )  # the unlocked model burns energy for money
+    locked = solve_dispatch(DispatchInput(**{**data.__dict__, "lock_charge_discharge": "negative_prices"}))
+    for c_pv, c_grid, d in zip(locked.charge_pv_wh, locked.charge_grid_wh, locked.discharge_wh):
+        assert c_pv + c_grid < 1e-6 or d < 1e-6

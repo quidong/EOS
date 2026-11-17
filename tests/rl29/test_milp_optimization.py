@@ -123,6 +123,25 @@ def test_battery_arbitrage_seed_is_optimal_without_polish(config_eos: ConfigEOS)
     assert soc[8] > soc[0]
 
 
+def test_switching_seed_respects_change_cost(config_eos: ConfigEOS):
+    """Fork (P1): zigzag prices; with a high change cost the seed does not cycle."""
+    prices = [0.00020 if t % 2 else 0.00028 for t in range(12)]
+
+    def changes(**genetic: Any) -> int:
+        configure(config_eos, polish_generations=0)
+        config_eos.merge_settings_from_dict({"optimization": {"genetic": genetic}})
+        optimizer = MilpOptimization(fixed_seed=1)
+        solution = optimizer.optimize_ems(parameters(prices=prices), ngen=0, individuals=20)
+        signature = optimizer.battery_mode_signature(solution.start_solution)
+        assert optimizer.milp_summary["switching"]
+        return int(np.count_nonzero(signature[1:] != signature[:-1]))
+
+    free = changes(battery_change_penalty_amt=0.0, battery_hold_penalty_amt=0.0)
+    priced = changes(battery_change_penalty_amt=1.0, battery_hold_penalty_amt=0.0)
+    assert priced < free
+    assert priced <= 2
+
+
 def test_milp_not_worse_than_genetic_on_the_same_budget(config_eos: ConfigEOS):
     configure(config_eos, polish_generations=5, polish_individuals=20)
     prices = [
@@ -248,13 +267,13 @@ async def test_ems_run_with_milp_publishes_solution_plan_and_history_hook(
     assert len(scheduled) == 1 and scheduled[0][3] == "MILP"
 
 
-def test_scenarios_and_import_limit_fallback(config_eos: ConfigEOS, tmp_path):
+def test_scenarios_and_soft_import_limit(config_eos: ConfigEOS, tmp_path):
     configure(
         config_eos,
         polish_generations=0,
         scenarios=True,
         load_scenario_spread=None,
-        max_grid_import_w=100,  # far below the 500 Wh load: infeasible
+        max_grid_import_w=100,  # far below the 500 Wh load: only soft (P5)
     )
     config_eos.merge_settings_from_dict({"general": {"data_folder_path": str(tmp_path)}})
     (tmp_path / "rl29").mkdir()
@@ -265,6 +284,7 @@ def test_scenarios_and_import_limit_fallback(config_eos: ConfigEOS, tmp_path):
     optimizer = MilpOptimization(fixed_seed=1)
     assert optimizer._load_spread() == pytest.approx(0.4)
     solution = optimizer.optimize_ems(parameters(prices=prices), ngen=0, individuals=20)
-    assert optimizer._ignore_import_limit is True
+    # Fork (P5): the limit is soft (excess penalised as in the simulation), no fallback.
+    assert optimizer._ignore_import_limit is False
     assert optimizer.milp_summary["seeds"] >= 1
     assert np.asarray(solution.ac_charge)[:4].sum() > 0
