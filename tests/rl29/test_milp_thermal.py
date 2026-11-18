@@ -258,3 +258,138 @@ def test_local_search_keeps_the_better_result(config_eos):
     searched = _run_milp(config_eos, thermal=False, search=5)
     combined = _run_milp(config_eos, thermal=True, search=5)
     assert combined.milp_summary["best_cost"] <= searched.milp_summary["best_cost"] + 1e-6
+
+
+# ----------------------------------------------------------------------
+# Rod and legionella: tight binaries (fork, solver time)
+# ----------------------------------------------------------------------
+
+
+def _rod_plan(hours: int = 24, prices: list[float] | None = None, **state: Any):
+    """Rod with the legionella deadline at the end of the horizon."""
+    return make_plan(
+        hours=hours,
+        settings={"dhw": {"rod_power_w": 3000, "rod_targets_c": [60, 70]}},
+        prices=prices or valley_prices(int(hours / SLOT_H)),
+        hours_since_legionella=24 * 7 - hours,
+        **state,
+    )
+
+
+def _solve_block(block, price: list[float], legionella_slots=None, time_limit: float = 60.0):
+    """Dispatch with one thermal block; ``legionella_slots`` overrides the candidates."""
+    from akkudoktoreos.optimization.milp import dispatch as dispatch_module
+
+    n = block.n
+    data = DispatchInput(
+        pv_wh=[0.0] * n,
+        load_wh=[100.0] * n,
+        price_per_wh=price,
+        feed_in_per_wh=[0.00007] * n,
+        thermal=[block],
+        time_limit_s=time_limit,
+    )
+    if legionella_slots is None:
+        return solve_dispatch(data)
+    original = dispatch_module.legionella_candidate_slots
+    dispatch_module.legionella_candidate_slots = lambda *args, **kwargs: list(legionella_slots)
+    try:
+        return solve_dispatch(data)
+    finally:
+        dispatch_module.legionella_candidate_slots = original
+
+
+def test_tank_bounds_contain_the_milp_trajectory():
+    from akkudoktoreos.optimization.milp.thermal import tank_bounds
+
+    plan, price = _rod_plan()
+    block = thermal_block(plan)
+    assert block is not None
+    bounds = tank_bounds(block)
+    result = _solve_block(block, price)
+    assert result.success
+    tank = [block.tank0] + list(result.thermal[0].tank_c)
+    for t, value in enumerate(tank):
+        assert bounds.low[t] - 1e-6 <= value <= bounds.high[t] + 1e-6
+        assert bounds.hp_high[t] <= bounds.high[t] + 1e-9
+    # The rod lifts the reachable range above the heat pump's own reach.
+    assert max(bounds.high) >= plan.legionella_c
+    assert max(bounds.hp_high) < plan.legionella_c
+
+
+def test_no_tank_binaries_where_the_rod_cannot_lift_the_tank():
+    """Without rod heat (surplus-only rod, no surplus) the tank model is binary free."""
+    from akkudoktoreos.optimization.milp.dispatch import _Builder
+    from akkudoktoreos.optimization.milp.thermal import add_thermal
+
+    plan, _ = make_plan(settings={"dhw": {"rod_power_w": 3000, "rod_planned_surplus_only": True}})
+    block = thermal_block(plan)
+    assert block is not None
+    assert block.rod_power_w == 3000
+    assert block.rod_cap_w and max(block.rod_cap_w) == 0.0
+    builder = _Builder()
+    add_thermal(builder, block)
+    assert sum(builder.integer) == 0
+
+
+def test_legionella_candidates_are_cheap_and_spaced():
+    from akkudoktoreos.optimization.milp.thermal import (
+        LEGIONELLA_CANDIDATE_SPACING,
+        legionella_candidate_slots,
+    )
+
+    n = 96
+    price = [0.0004] * n
+    for t in range(40, 52):  # one cheap window of three hours
+        price[t] = 0.0001
+    plan, _ = _rod_plan(prices=price)
+    block = thermal_block(plan)
+    assert block is not None
+    block.rod_cap_w = [block.rod_power_w] * n  # rod heat everywhere: only the price decides
+    slots = legionella_candidate_slots(block, price, count=3)
+    assert 1 <= len(slots) <= 3
+    assert slots == sorted(slots)
+    assert all(b - a >= LEGIONELLA_CANDIDATE_SPACING for a, b in zip(slots, slots[1:]))
+    # The cheapest hit ends the heat-up inside or right after the cheap window.
+    assert any(44 <= slot <= 55 for slot in slots)
+    # No candidate after the deadline.
+    assert max(slots) < plan.legionella_deadline_slot
+
+
+def test_legionella_candidates_keep_the_optimum_and_solve_fast():
+    """The live case of 18.11.2026: rod with grid heat in every slot ran into the time limit.
+
+    With the candidates the model is solved to optimality quickly and reaches the same
+    objective as the model with a binary in every slot (short horizon, so the latter
+    is solvable in the test too).
+    """
+    import time
+
+    plan, price = _rod_plan(hours=8, dhw=44.5)
+    block = thermal_block(plan)
+    assert block is not None
+    block.rod_cap_w = [block.rod_power_w] * block.n  # grid heat for the rod in every slot
+    deadline = min(plan.legionella_deadline_slot or block.n, block.n)
+    every_slot = list(range(deadline))
+    full = _solve_block(block, price, legionella_slots=every_slot)
+    started = time.perf_counter()
+    fast = _solve_block(block, price)
+    seconds = time.perf_counter() - started
+    assert fast.success and fast.optimal
+    assert full.success
+    assert fast.objective == pytest.approx(full.objective, abs=0.02)
+    assert max(fast.thermal[0].tank_c[:deadline]) >= plan.legionella_c - 0.5 - 1e-6
+    assert seconds < 20.0
+
+
+def test_legionella_with_grid_rod_all_day_is_solved_to_optimality():
+    """24 h, rod allowed from the grid in every slot (legionella fallback window)."""
+    plan, price = _rod_plan(hours=24, dhw=44.5)
+    block = thermal_block(plan)
+    assert block is not None
+    block.rod_cap_w = [block.rod_power_w] * block.n  # grid heat for the rod in every slot
+    result = _solve_block(block, price, time_limit=60.0)
+    assert result.success
+    assert result.optimal, f"gap {result.mip_gap}"
+    deadline = min(plan.legionella_deadline_slot or block.n, block.n)
+    assert max(result.thermal[0].tank_c[:deadline]) >= plan.legionella_c - 0.5 - 1e-6

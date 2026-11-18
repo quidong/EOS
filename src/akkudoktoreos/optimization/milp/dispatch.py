@@ -36,6 +36,8 @@ from akkudoktoreos.optimization.milp.thermal import (
     ThermalBlock,
     ThermalTrajectory,
     add_thermal,
+    legionella_candidate_slots,
+    rod_marginal_price_per_wh,
     trajectory,
 )
 
@@ -841,7 +843,17 @@ def solve_dispatch(data: DispatchInput) -> DispatchResult:
         if block.n < n:
             raise ValueError("thermal block shorter than the horizon")
         block_n = replace(block, n=n) if block.n > n else block
-        tv = add_thermal(b, block_n)
+        candidates = None
+        if block_n.legionella_deadline is not None and block_n.legionella_c is not None:
+            _, pv0, load0 = scenarios[0]
+            surplus_wh = [
+                max(0.0, float(pv0[t]) - float(load0[t])) if t < min(len(pv0), len(load0)) else 0.0
+                for t in range(n)
+            ]
+            candidates = legionella_candidate_slots(
+                block_n, rod_marginal_price_per_wh(block_n, price, feed, surplus_wh)
+            )
+        tv = add_thermal(b, block_n, candidates)
         thermal_vars.append(tv)
         if block.separate_price_per_wh is None:
             for t in range(n):

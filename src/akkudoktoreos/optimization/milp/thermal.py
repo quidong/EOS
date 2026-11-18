@@ -479,11 +479,173 @@ def thermal_block(plan: "HeatPumpRunPlan", joint_modes: bool = False) -> Optiona
 # ----------------------------------------------------------------------
 
 
-def add_thermal(b: Any, block: ThermalBlock) -> ThermalVars:
+BIG_M_MARGIN_K = 0.01
+"""Slack on the tightened big-M constants against solver tolerances [K]."""
+
+
+@dataclass
+class TankBounds:
+    """Reachable tank temperatures of a block (RL29 fork), indexed like ``tank`` vars.
+
+    ``low[t]`` / ``high[t]`` bound the tank temperature at the start of slot ``t``
+    (``t = 0..n``): the lower bound is the cool-down without any heating, the upper
+    bound charges with the heat pump (up to its reachable setpoint) and the rod (at
+    its per-slot cap) in every slot. ``hp_limit[t]`` is the right-hand side of the
+    heat pump row ``decay * T + gain * w <= hp_limit`` of slot ``t``. The bounds
+    size the big-M constants of the binaries and drop binaries that can never bind.
+    """
+
+    low: list[float]
+    high: list[float]
+    hp_limit: list[float]
+    hp_high: list[float] = field(default_factory=list)
+    """Upper bound without the rod: what the heat pump alone can reach (the part of the
+    tank temperature that does not come from the rod never exceeds it)."""
+
+
+def tank_bounds(block: ThermalBlock) -> TankBounds:
+    """Propagate the reachable tank temperature range of ``block`` (see ``TankBounds``)."""
+    low = [block.tank0]
+    high = [block.tank0]
+    hp_high = [block.tank0]
+    hp_limit: list[float] = []
+    for t in range(block.n):
+        decay, gain = block.tank_step(t)
+        const_t = block.tank_ambient_c * (1.0 - decay) - block.draw_w[t] * gain
+        free_next = const_t + decay * low[t]
+        limit = max(block.hp_dhw_max_c, free_next) - const_t
+        hp_limit.append(limit)
+        rod_cap = 0.0
+        if block.rod_power_w > 0:
+            rod_cap = block.rod_cap_w[t] if t < len(block.rod_cap_w) else block.rod_power_w
+        # Heat pump on: decay*T + gain*w <= limit; off: only the cool-down of T.
+        reach = max(const_t + limit, const_t + decay * high[t]) + gain * max(0.0, rod_cap)
+        ceiling = max(block.hp_dhw_max_c, block.rod_max_c if block.rod_power_w else 0.0, free_next)
+        low.append(free_next)
+        high.append(max(free_next, min(reach, ceiling)))
+        hp_high.append(max(const_t + limit, const_t + decay * hp_high[t]))
+    return TankBounds(low=low, high=high, hp_limit=hp_limit, hp_high=hp_high)
+
+
+LEGIONELLA_CANDIDATES = 3
+"""Legionella hit slots the MILP chooses from (fork, see ``legionella_candidate_slots``)."""
+
+LEGIONELLA_CANDIDATE_SPACING = 4
+"""Minimum distance between two candidate hit slots [slots]: neighbouring slots end
+the same heat-up and only cost solver time."""
+
+
+def rod_marginal_price_per_wh(
+    block: ThermalBlock,
+    price_per_wh: Sequence[float],
+    feed_in_per_wh: Sequence[float],
+    surplus_wh: Sequence[float],
+) -> list[float]:
+    """Price of one Wh of rod heat per slot (fork).
+
+    The feed-in tariff where the PV surplus covers the rod, the import price otherwise
+    (or the separate meter's price).
+    """
+    n = block.n
+    if block.separate_price_per_wh is not None:
+        return [float(block.separate_price_per_wh[t]) for t in range(n)]
+    prices: list[float] = []
+    for t in range(n):
+        dt, _, _ = block.slot_matrices(t)
+        rod_wh = block.rod_power_w * dt
+        surplus = float(surplus_wh[t]) if t < len(surplus_wh) else 0.0
+        if rod_wh > 0 and surplus >= rod_wh:
+            prices.append(float(feed_in_per_wh[t]))
+        else:
+            prices.append(float(price_per_wh[t]))
+    return prices
+
+
+def legionella_candidate_slots(
+    block: ThermalBlock,
+    rod_price_per_wh: Sequence[float],
+    bounds: Optional[TankBounds] = None,
+    count: int = LEGIONELLA_CANDIDATES,
+    spacing: int = LEGIONELLA_CANDIDATE_SPACING,
+) -> list[int]:
+    """Slots ``t`` (the tank reaches the level at the end of ``t``) worth a legionella binary.
+
+    Fork: one binary per slot of the horizon left the LP relaxation almost free of the
+    legionella cost (many small fractions add up to one), so HiGHS could not close the
+    gap within its time limit. Only the rod reaches the level beyond the heat pump's own
+    reach (``TankBounds.hp_high``), so a cheap estimate ranks the slots: the cheapest rod
+    heat that lifts the tank by the missing Kelvin by the end of ``t`` (greedy over the
+    earlier slots by price per Kelvin, with the tank's decay in between; ties go to the
+    earlier slot). The MILP then chooses among the ``count`` cheapest slots at least
+    ``spacing`` apart.
+    """
+    if block.legionella_deadline is None or block.legionella_c is None or count <= 0:
+        return []
+    bounds = bounds or tank_bounds(block)
+    level = block.legionella_c - 0.5
+    n = block.n
+    caps = [
+        (block.rod_cap_w[t] if t < len(block.rod_cap_w) else block.rod_power_w)
+        if block.rod_power_w > 0
+        else 0.0
+        for t in range(n)
+    ]
+    estimates: list[tuple[float, int]] = []
+    for k in range(min(block.legionella_deadline, n)):
+        if bounds.high[k + 1] < level:
+            continue
+        missing = level - bounds.hp_high[k + 1]
+        if missing <= 0:
+            estimates.append((0.0, k))
+            continue
+        options: list[tuple[float, float]] = []  # (price per Kelvin, Kelvin)
+        carry = 1.0
+        for slot in range(k, -1, -1):
+            decay, gain = block.tank_step(slot)
+            dt, _, _ = block.slot_matrices(slot)
+            kelvin_per_w = gain * carry
+            carry *= decay
+            if caps[slot] <= 0 or kelvin_per_w <= 0:
+                continue
+            # Negative prices count as free: divided by the decay they would otherwise
+            # rank a late hit (heat held for longer) as cheaper than an early one.
+            per_kelvin = max(0.0, float(rod_price_per_wh[slot])) * dt / kelvin_per_w
+            options.append((per_kelvin, caps[slot] * kelvin_per_w))
+        options.sort()
+        cost = 0.0
+        for per_kelvin, kelvin in options:
+            take = min(kelvin, missing)
+            cost += take * per_kelvin
+            missing -= take
+            if missing <= 1e-9:
+                break
+        if missing > 1e-9:
+            continue  # the rod cannot get there in time
+        estimates.append((cost, k))
+    estimates.sort()
+    chosen: list[int] = []
+    for _, k in estimates:
+        if all(abs(k - other) >= spacing for other in chosen):
+            chosen.append(k)
+        if len(chosen) >= count:
+            break
+    return sorted(chosen)
+
+
+def add_thermal(
+    b: Any, block: ThermalBlock, legionella_slots: Optional[Sequence[int]] = None
+) -> ThermalVars:
     """Add the variables and rows of one heat pump to a ``_Builder``.
 
     Costs (penalties, value of the stored heat, separate meter) go into the objective
     with weight 1; the house balance gets ``hp_wh`` from the caller.
+
+    Args:
+        b: The MILP builder.
+        block: The heat pump's linear model.
+        legionella_slots: Fork: slots in which the tank may reach the legionella level
+            (``legionella_candidate_slots``); None = every reachable slot before the
+            deadline.
     """
     inf = math.inf
     n = block.n
@@ -496,6 +658,7 @@ def add_thermal(b: Any, block: ThermalBlock) -> ThermalVars:
     hp_wh: list[int] = []
     sep = block.separate_price_per_wh
     free = block.tank0
+    bounds = tank_bounds(block)
     mode_vars: list[list[int]] = []
     for t in range(n):
         dt, a, bm = block.slot_matrices(t)
@@ -572,11 +735,22 @@ def add_thermal(b: Any, block: ThermalBlock) -> ThermalVars:
         # the tank is never hotter than that (or than its own cool-down from a hotter
         # start), so one row suffices; with a rod the heat pump charges only while the
         # tank is below its setpoint (binary: charging or not).
-        hp_limit = max(block.hp_dhw_max_c, free) - const_t
-        if block.rod_power_w > 0:
+        hp_limit = bounds.hp_limit[t]
+        # Fork: the binary is only needed where the rod can lift the tank above the
+        # heat pump's reach (otherwise w = 0 already satisfies the single row), and its
+        # big-M is the largest possible violation instead of a generic constant: a
+        # loose big-M left the LP relaxation so weak that HiGHS ran into the time limit.
+        excess = decay * bounds.high[t] - hp_limit
+        if block.rod_power_w > 0 and excess > BIG_M_MARGIN_K:
             on = b.var(0.0, 1.0, 0.0, integer=True)
-            b.row({w: 1.0, on: -block.dhw_heat_w}, -inf, 0.0)
-            big = decay * max(block.rod_max_c, block.tank0) + 1.0
+            # Charging never needs more than the heat that fills the tank from its
+            # lowest possible temperature up to the heat pump's reach.
+            w_max = min(
+                block.dhw_heat_w,
+                max(0.0, hp_limit - decay * bounds.low[t]) / gain if gain > 0 else inf,
+            )
+            b.row({w: 1.0, on: -w_max}, -inf, 0.0)
+            big = excess + BIG_M_MARGIN_K
             b.row({tank[t]: decay, w: gain, on: big}, -inf, hp_limit + big)
         else:
             b.row({tank[t]: decay, w: gain}, -inf, hp_limit)
@@ -608,10 +782,16 @@ def add_thermal(b: Any, block: ThermalBlock) -> ThermalVars:
         b.row({tank[block.return_slot + 1]: 1.0, short: 1.0}, block.return_min_c, inf)
 
     if block.legionella_deadline is not None and block.legionella_c is not None:
-        big = 100.0
         level = block.legionella_c - 0.5
         hits = []
+        allowed = set(legionella_slots) if legionella_slots is not None else None
         for t in range(min(block.legionella_deadline, n)):
+            # Fork: no binary where the tank cannot reach the level (or outside the
+            # candidates), and the big-M is the distance from the lowest possible tank
+            # temperature to the level.
+            if bounds.high[t + 1] < level or (allowed is not None and t not in allowed):
+                continue
+            big = max(0.0, level - bounds.low[t + 1]) + BIG_M_MARGIN_K
             y = b.var(0.0, 1.0, 0.0, integer=True)
             b.row({tank[t + 1]: 1.0, y: -big}, level - big, inf)
             hits.append(y)

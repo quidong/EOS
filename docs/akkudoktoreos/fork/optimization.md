@@ -13,6 +13,12 @@ plan, the solution and plan formats, the PDF report.
    the terminal value of the battery energy and, with `milp.thermal_model` (default on), every heat pump
    as a linear model (building and tank state equations, COP curve interpolated between breakpoints,
    comfort band, hot water floor, legionella deadline, §14a limit, value of stored heat).
+   With a rod the tank model needs binaries (the heat pump charges only below its own reach, the
+   legionella level is reached in one slot). They exist only where the rod can lift the tank above the
+   heat pump's reach, their big-M constants come from the propagated tank temperature range, and the
+   legionella level may only be reached in the three slots with the cheapest estimated rod heat-up (at
+   least an hour apart). A binary in every slot left the relaxation too weak: HiGHS ran into the time
+   limit (300 s, gap 6 %) where the model now solves to optimality in seconds.
 2. **Modes from the heat schedule**: the optimal heat schedule is turned into operating modes per hour by
    following it with the exact simulation. These candidates, the status quo, the previous plan and
    PV/price heuristics are scored exactly (dispatch MILP for each heat pump schedule); a coordinate search
