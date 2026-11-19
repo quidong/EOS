@@ -195,6 +195,18 @@ class GeneticCommonSettings(SettingsBaseModel):
         ),
     )
 
+    ev_blocks_battery_discharge: bool = Field(
+        default=False,
+        json_schema_extra={
+            "description": (
+                "RL29 fork (evcc battery discharge control): the house battery does not "
+                "discharge in a slot in which the electric vehicle charges, so it never feeds "
+                "the car. Applies to GENETIC (plans are repaired) and MILP."
+            ),
+            "examples": [False, True],
+        },
+    )
+
     load_nowcast_slots: int = Field(
         default=4,
         ge=0,

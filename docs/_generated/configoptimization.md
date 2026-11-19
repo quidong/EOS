@@ -43,6 +43,7 @@
                "workers": null,
                "pin_workers": true,
                "measurement_max_age_seconds": 300,
+               "ev_blocks_battery_discharge": false,
                "load_nowcast_slots": 4,
                "load_nowcast_subtract_keys": null,
                "tail_horizon_hours": 48,
@@ -89,6 +90,8 @@
                "uncertainty_pv_dev": 0.3,
                "uncertainty_load_dev": null,
                "ev_start_cost_amt": 0.02,
+               "charging_strategy": "none",
+               "preference_time_limit_s": 5.0,
                "switching": true,
                "switch_tie_break": true,
                "switch_time_limit_s": 10.0,
@@ -130,6 +133,7 @@
                "workers": null,
                "pin_workers": true,
                "measurement_max_age_seconds": 300,
+               "ev_blocks_battery_discharge": false,
                "load_nowcast_slots": 4,
                "load_nowcast_subtract_keys": null,
                "tail_horizon_hours": 48,
@@ -179,6 +183,8 @@
                "uncertainty_pv_dev": 0.3,
                "uncertainty_load_dev": null,
                "ev_start_cost_amt": 0.02,
+               "charging_strategy": "none",
+               "preference_time_limit_s": 5.0,
                "switching": true,
                "switch_tie_break": true,
                "switch_time_limit_s": 10.0,
@@ -244,6 +250,7 @@
 
 | Name | Type | Read-Only | Default | Description |
 | ---- | ---- | --------- | ------- | ----------- |
+| charging_strategy | `Literal['none', 'charge_before_export', 'attenuate_demand_peaks', 'attenuate_feedin_peaks', 'attenuate_grid_peaks']` | `rw` | `none` | RL29 fork (evcc optimizer strategies): among plans of the same cost (within 0.1 ct) the MILP prefers one that fills the battery before feeding in (`charge_before_export`) or keeps the highest import, feed-in or both as low as possible (`attenuate_*_peaks`, e.g. for §14a or a feed-in cap). |
 | coarse_after_hours | `Optional[float]` | `rw` | `None` | RL29 fork (evcc coarsening): beyond this many hours from the start the MILP merges slots into `coarse_slot_minutes` (energies summed, prices averaged, building and tank discretised exactly for the longer slot) and expands the result back. Makes a 48 h control horizon affordable. None = full resolution. |
 | coarse_slot_minutes | `int` | `rw` | `60` | RL29 fork: length of a coarse MILP slot [min] (multiple of the slot). |
 | ev_start_cost_amt | `float` | `rw` | `0.02` | RL29 fork: cost of every EV charging start in the MILP [currency], so the car charges in few blocks (evcc continuity). 0 = starts are free. |
@@ -258,6 +265,7 @@
 | mip_rel_gap | `float` | `rw` | `0.0001` | Relative optimality gap of the MILP. |
 | polish_generations | `int` | `rw` | `30` | GENETIC generations on the exact simulation after the MILP (0 = MILP plan only). |
 | polish_individuals | `int` | `rw` | `60` | Population of the polish step. |
+| preference_time_limit_s | `float` | `rw` | `5.0` | RL29 fork: time limit of the preference solve [s]. |
 | pv_scenario_spread | `float` | `rw` | `0.25` | PV of the outer scenarios: forecast x (1 -/+ spread). |
 | scenarios | `bool` | `rw` | `False` | Plan against three weighted scenarios (central 50 %, little PV + high load 25 %, much PV + low load 25 %) instead of one forecast; appliance starts and the first `shared_slots` battery decisions are common to all. |
 | seeds | `int` | `rw` | `3` | Best candidates handed to the polish step. |
@@ -303,6 +311,8 @@
                "uncertainty_pv_dev": 0.3,
                "uncertainty_load_dev": null,
                "ev_start_cost_amt": 0.02,
+               "charging_strategy": "none",
+               "preference_time_limit_s": 5.0,
                "switching": true,
                "switch_tie_break": true,
                "switch_time_limit_s": 10.0,
@@ -435,6 +445,7 @@ optimizer spreads charging and loads.
 | battery_change_penalty_amt | `float` | `rw` | `0.0` | RL29 fork: cost of every change of the battery operating mode (charge from the grid, discharge allowed, PV charge allowed, export) between two slots [currency]. A change must save at least this much; small values (1-2 ct) remove switching that changes almost nothing. 0 = off. |
 | battery_hold_penalty_amt | `float` | `rw` | `0.5` | RL29 fork: cost of a battery operating mode shorter than battery_min_hold_minutes [currency]. |
 | battery_min_hold_minutes | `float` | `rw` | `0.0` | RL29 fork: least time a battery operating mode stays before the next change [min]; a shorter mode costs battery_hold_penalty_amt. 0 = off. |
+| ev_blocks_battery_discharge | `bool` | `rw` | `False` | RL29 fork (evcc battery discharge control): the house battery does not discharge in a slot in which the electric vehicle charges, so it never feeds the car. Applies to GENETIC (plans are repaired) and MILP. |
 | fitness_cache_max_entries | `Optional[int]` | `rw` | `None` | Maximum number of keys in the per-run fitness cache. None = unbounded (default), 0 = cache disabled, N > 0 = keep at most N keys and evict the oldest first. Every cached evaluation takes one or two keys. The cache only saves repeated evaluations; the result for a fixed seed is the same with any value. Limit it to cap memory on small devices. |
 | generations | `Optional[int]` | `rw` | `400` | Number of generations to evolve [>= 10]. Defaults to 400. |
 | horizon | `int` | `ro` | `N/A` | Number of optimization steps. |
@@ -476,6 +487,7 @@ optimizer spreads charging and loads.
                "workers": null,
                "pin_workers": true,
                "measurement_max_age_seconds": 300,
+               "ev_blocks_battery_discharge": false,
                "load_nowcast_slots": 4,
                "load_nowcast_subtract_keys": null,
                "tail_horizon_hours": 48,
@@ -512,6 +524,7 @@ optimizer spreads charging and loads.
                "workers": null,
                "pin_workers": true,
                "measurement_max_age_seconds": 300,
+               "ev_blocks_battery_discharge": false,
                "load_nowcast_slots": 4,
                "load_nowcast_subtract_keys": null,
                "tail_horizon_hours": 48,

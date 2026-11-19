@@ -578,3 +578,101 @@ def test_terminal_credit_values_usable_energy_like_the_simulation():
     # A start below the minimum SoC stays feasible.
     low = solve_dispatch(replace(data, battery=battery(soc_wh=500, min_soc_wh=1000)))
     assert low.success
+
+
+# --------------------------------------------------------------------------------------
+# Fork: preferences at equal cost (P5), battery export (P12), EV battery lock (P8)
+# --------------------------------------------------------------------------------------
+
+
+class TestPreferences:
+    def flat(self, **kw: Any) -> DispatchInput:
+        values: dict[str, Any] = dict(
+            pv_wh=[0.0] * 8,
+            load_wh=[0.0] * 8,
+            price_per_wh=[30 * CENT] * 8,
+            feed_in_per_wh=[0.0] * 8,
+            battery=battery(soc_wh=0, max_charge_wh=4000),
+            ev=ev_model(
+                soc_wh=0, target_wh=8000 * 0.9, target_slot=8, min_rate=0.0, start_cost=0.0
+            ),
+        )
+        values.update(kw)
+        return DispatchInput(**values)
+
+    def test_demand_peaks_are_flattened_at_the_same_cost(self):
+        plain = solve_dispatch(self.flat())
+        flat = solve_dispatch(self.flat(preference="attenuate_demand_peaks"))
+        assert flat.objective == pytest.approx(plain.objective, abs=2e-3)
+        # 8 kWh over 8 slots: 1 kWh each instead of whatever the solver picked.
+        assert max(flat.grid_import_wh) == pytest.approx(1000, abs=1)
+        assert flat.preference is not None and "attenuate_demand_peaks" in flat.preference
+
+    def test_charge_before_export_fills_the_battery_first(self):
+        n = 4
+        data = DispatchInput(
+            pv_wh=[3000.0] * n,
+            load_wh=[0.0] * n,
+            price_per_wh=[30 * CENT] * n,
+            feed_in_per_wh=[8 * CENT] * n,
+            battery=battery(soc_wh=0, capacity_wh=6000, max_soc_wh=6000, max_charge_wh=3000),
+            terminal_segments=[(6000.0, 8 * CENT)],
+            preference="charge_before_export",
+        )
+        result = solve_dispatch(data)
+        # Storing is worth exactly the feed-in: a tie; the battery fills first.
+        # (within the cost tolerance of 0.1 ct, i.e. about 12 Wh at 8 ct)
+        assert result.charge_pv_wh[:2] == pytest.approx([3000, 3000], abs=20)
+        assert result.grid_export_wh[:2] == pytest.approx([0, 0], abs=20)
+
+    def test_unknown_preference_keeps_the_plan(self):
+        result = solve_dispatch(self.flat(preference="bogus"))
+        assert result.success and result.preference == "bogus: unknown"
+
+
+class TestBatteryExport:
+    def test_battery_exports_at_a_high_feed_in_and_never_serves_the_house_then(self):
+        data = DispatchInput(
+            pv_wh=[0.0] * 3,
+            load_wh=[500.0] * 3,
+            price_per_wh=[30 * CENT] * 3,
+            feed_in_per_wh=[0.0, 60 * CENT, 0.0],
+            battery=battery(soc_wh=3000, max_discharge_wh=2000, allow_grid_export=True),
+        )
+        result = solve_dispatch(data)
+        assert result.battery_export_wh == pytest.approx([0, 2000, 0], abs=1)
+        assert result.discharge_wh[1] == pytest.approx(0, abs=1e-6)
+        assert result.grid_import_wh[1] == pytest.approx(500, abs=1)
+        assert result.grid_export_wh[1] == pytest.approx(2000, abs=1)
+
+    def test_without_export_only_pv_is_fed_in(self):
+        data = DispatchInput(
+            pv_wh=[0.0],
+            load_wh=[0.0],
+            price_per_wh=[30 * CENT],
+            feed_in_per_wh=[60 * CENT],
+            battery=battery(soc_wh=3000),
+        )
+        result = solve_dispatch(data)
+        assert result.battery_export_wh == []
+        assert result.grid_export_wh == pytest.approx([0])
+
+
+def test_battery_does_not_feed_the_car():
+    data = DispatchInput(
+        pv_wh=[0.0] * 2,
+        load_wh=[500.0] * 2,
+        price_per_wh=[40 * CENT] * 2,
+        feed_in_per_wh=[0.0] * 2,
+        battery=battery(soc_wh=10000, max_discharge_wh=11000),
+        ev=ev_model(soc_wh=10000, target_wh=10000 + 11000 * 0.9, target_slot=1),
+    )
+    free = solve_dispatch(data)
+    assert free.discharge_wh[0] > 5000  # the house battery charges the car
+    blocked = solve_dispatch(
+        replace(data, ev=ev_model(soc_wh=10000, target_wh=10000 + 11000 * 0.9, target_slot=1,
+                                  block_battery_discharge=True))
+    )
+    assert blocked.ev_charge_wh[0] == pytest.approx(11000, abs=1)
+    assert blocked.discharge_wh[0] == pytest.approx(0, abs=1e-6)
+    assert blocked.discharge_wh[1] == pytest.approx(500, abs=1)

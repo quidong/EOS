@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2611172097913571"
+    "version": "v0.3.0.dev2611191729936021"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -10136,6 +10136,16 @@
             "description": "Maximum age of SoC measurements used for configuration-based optimization [s]. Without an explicit SoC or usable measurement, the initial SoC defaults to 0%.",
             "default": 300
           },
+          "ev_blocks_battery_discharge": {
+            "type": "boolean",
+            "title": "Ev Blocks Battery Discharge",
+            "description": "RL29 fork (evcc battery discharge control): the house battery does not discharge in a slot in which the electric vehicle charges, so it never feeds the car. Applies to GENETIC (plans are repaired) and MILP.",
+            "default": false,
+            "examples": [
+              false,
+              true
+            ]
+          },
           "load_nowcast_slots": {
             "type": "integer",
             "maximum": 24.0,
@@ -10391,6 +10401,16 @@
             "title": "Measurement Max Age Seconds",
             "description": "Maximum age of SoC measurements used for configuration-based optimization [s]. Without an explicit SoC or usable measurement, the initial SoC defaults to 0%.",
             "default": 300
+          },
+          "ev_blocks_battery_discharge": {
+            "type": "boolean",
+            "title": "Ev Blocks Battery Discharge",
+            "description": "RL29 fork (evcc battery discharge control): the house battery does not discharge in a slot in which the electric vehicle charges, so it never feeds the car. Applies to GENETIC (plans are repaired) and MILP.",
+            "default": false,
+            "examples": [
+              false,
+              true
+            ]
           },
           "load_nowcast_slots": {
             "type": "integer",
@@ -18430,6 +18450,34 @@
             "examples": [
               0.02,
               0.0
+            ]
+          },
+          "charging_strategy": {
+            "type": "string",
+            "enum": [
+              "none",
+              "charge_before_export",
+              "attenuate_demand_peaks",
+              "attenuate_feedin_peaks",
+              "attenuate_grid_peaks"
+            ],
+            "title": "Charging Strategy",
+            "description": "RL29 fork (evcc optimizer strategies): among plans of the same cost (within 0.1 ct) the MILP prefers one that fills the battery before feeding in (`charge_before_export`) or keeps the highest import, feed-in or both as low as possible (`attenuate_*_peaks`, e.g. for \u00a714a or a feed-in cap).",
+            "default": "none",
+            "examples": [
+              "none",
+              "attenuate_grid_peaks"
+            ]
+          },
+          "preference_time_limit_s": {
+            "type": "number",
+            "maximum": 120.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Preference Time Limit S",
+            "description": "RL29 fork: time limit of the preference solve [s].",
+            "default": 5.0,
+            "examples": [
+              5.0
             ]
           },
           "switching": {

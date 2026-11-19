@@ -2800,6 +2800,52 @@ class GeneticOptimization(OptimizationBase):
 
         return discharge_hours_bin, eautocharge_hours_index, appliance_gene_values
 
+    def _repair_battery_hold_while_ev_charges(self, individual: list[int]) -> bool:
+        """Fork (P8): no battery discharge in slots in which the car charges.
+
+        With ``ev_blocks_battery_discharge`` the house battery never feeds the car
+        (evcc battery discharge control): a discharge state in a slot with a positive EV
+        charge gene becomes the matching idle state (PV charging stays as it was).
+
+        Returns:
+            True if the genome changed.
+        """
+        if not self.optimize_ev or not getattr(
+            self._genetic_cfg, "ev_blocks_battery_discharge", False
+        ):
+            return False
+        rates = getattr(self, "ev_possible_charge_values", None)
+        if not rates:
+            return False
+        battery_genes, ev_genes, appliance_genes = self.split_individual(individual)
+        if ev_genes is None:
+            return False
+        layout = self._battery_state_layout()
+        n_levels = len(self.bat_possible_charge_values)
+        changed = False
+        for slot in range(min(len(battery_genes), len(ev_genes))):
+            if rates[int(ev_genes[slot])] <= 0.0:
+                continue
+            state = int(battery_genes[slot])
+            if n_levels <= state < 2 * n_levels:
+                battery_genes[slot] = 0  # idle (PV charging as the layout's idle does)
+                changed = True
+            elif (
+                layout.self_consumption_state is not None
+                and state == layout.self_consumption_state
+                and layout.dc_allowed_state is not None
+            ):
+                battery_genes[slot] = layout.dc_allowed_state  # PV charging, no discharge
+                changed = True
+        if changed:
+            individual[:] = self.merge_individual(
+                battery_genes,
+                ev_genes,
+                appliance_genes,
+                self._heat_pump_genes(individual) if self._hp_layout() else None,
+            )
+        return changed
+
     def _repair_ev_charge_at_full_soc(
         self,
         individual: list[int],
@@ -4197,6 +4243,7 @@ class GeneticOptimization(OptimizationBase):
             if only a single scalar fitness value is returned.
         """
         try:
+            self._repair_battery_hold_while_ev_charges(individual)
             simulation_result = self.evaluate_inner(individual)
             if self._repair_ev_charge_at_full_soc(individual, simulation_result):
                 simulation_result = self.evaluate_inner(individual)

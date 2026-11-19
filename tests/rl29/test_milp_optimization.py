@@ -385,3 +385,80 @@ def test_dispatch_starts_from_the_run_state_and_values_usable_energy(config_eos:
     assert data.battery.soc_wh == pytest.approx(2000.0)  # 20 % of 10 kWh
     assert data.terminal_offset_wh == pytest.approx(500.0)  # 5 % minimum SoC
     assert data.terminal_dc_to_ac == pytest.approx(data.battery.discharge_efficiency)
+
+
+def test_ev_blocks_battery_discharge_in_genetic_and_milp(config_eos: ConfigEOS):
+    """Fork (P8): the house battery never feeds the car, in both algorithms."""
+    configure(config_eos, polish_generations=0)
+    config_eos.merge_settings_from_dict(
+        {"optimization": {"genetic": {"ev_blocks_battery_discharge": True}}}
+    )
+    prices = [0.00030] * 2 + [0.00008] * 2 + [0.00030] * 8
+    params = parameters(prices=prices, ev=ev_parameters())
+    optimizer = MilpOptimization(fixed_seed=1)
+    solution = optimizer.optimize_ems(params, ngen=0, individuals=20)
+    model = optimizer._ev_model()
+    assert model is not None and model.block_battery_discharge
+    assert solution.start_solution is not None
+    battery_genes, ev_genes, _ = optimizer.split_individual(np.array(solution.start_solution))
+    assert ev_genes is not None
+    n_levels = len(optimizer.bat_possible_charge_values)
+    for slot, (bat_gene, ev_gene) in enumerate(zip(battery_genes, ev_genes)):
+        if optimizer.ev_possible_charge_values[int(ev_gene)] > 0:
+            assert not (n_levels <= int(bat_gene) < 2 * n_levels), slot
+    # The repair turns a discharge gene in a charging slot into idle.
+    individual = list(solution.start_solution)
+    battery_genes, ev_genes, appliances = optimizer.split_individual(np.array(individual))
+    battery_genes[0] = n_levels  # discharge
+    ev_genes[0] = len(optimizer.ev_possible_charge_values) - 1  # full charge
+    individual = list(optimizer.merge_individual(battery_genes, ev_genes, appliances, None))
+    assert optimizer._repair_battery_hold_while_ev_charges(individual)
+    assert optimizer.split_individual(np.array(individual))[0][0] == 0
+
+
+def test_direct_marketing_export_and_pv_blocked_states(config_eos: ConfigEOS):
+    """Fork (P12/P13): battery export and "no PV charging" map to the DM states."""
+    from akkudoktoreos.optimization.milp.dispatch import DispatchResult
+
+    configure(config_eos, polish_generations=0)
+    optimizer = MilpOptimization(fixed_seed=1)
+    optimizer.optimize_ems(parameters(), ngen=0, individuals=20)
+    optimizer.optimize_dc_charge = True
+    optimizer.optimize_battery_grid_export = True
+    optimizer.bat_possible_grid_export_values = [0.25, 0.5, 1.0]
+    layout = optimizer._battery_state_layout()
+    n = optimizer.control_end_slot
+    max_wh = float(optimizer.simulation.battery.max_charge_power_w) * optimizer.slot_duration_h
+    zeros = [0.0] * n
+    export = list(zeros)
+    export[0] = 0.4 * max_wh
+    exported_pv = list(zeros)
+    exported_pv[1] = 2000.0
+    result = DispatchResult(
+        status="ok",
+        success=True,
+        objective=0.0,
+        grid_import_wh=zeros,
+        grid_export_wh=[e + p for e, p in zip(export, exported_pv)],
+        charge_pv_wh=zeros,
+        charge_grid_wh=zeros,
+        discharge_wh=zeros,
+        soc_wh=[2000.0] * (n + 1),
+        appliance_starts=[],
+        appliance_wh=zeros,
+        solve_seconds=0.0,
+        battery_export_wh=export,
+    )
+    genes = optimizer._battery_genes(result)
+    assert genes[0] == layout.grid_export_states[1]  # 50 % reaches 40 %
+    assert genes[1] == layout.dc_not_allowed_state  # PV fed in, battery has room
+    assert genes[2] == layout.dc_allowed_state  # nothing to decide: PV charging allowed
+
+
+def test_charging_strategy_is_passed_to_the_dispatch(config_eos: ConfigEOS):
+    configure(config_eos, charging_strategy="attenuate_grid_peaks", polish_generations=0)
+    optimizer = MilpOptimization(fixed_seed=1)
+    optimizer.optimize_ems(parameters(), ngen=0, individuals=20)
+    data = optimizer._dispatch_input(None)
+    assert data.preference == "attenuate_grid_peaks"
+    configure(config_eos, charging_strategy="none")

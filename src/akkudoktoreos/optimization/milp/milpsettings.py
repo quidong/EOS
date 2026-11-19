@@ -221,6 +221,33 @@ class MilpCommonSettings(SettingsBaseModel):
             "examples": [0.02, 0.0],
         },
     )
+    charging_strategy: Literal[
+        "none",
+        "charge_before_export",
+        "attenuate_demand_peaks",
+        "attenuate_feedin_peaks",
+        "attenuate_grid_peaks",
+    ] = Field(
+        default="none",
+        json_schema_extra={
+            "description": (
+                "RL29 fork (evcc optimizer strategies): among plans of the same cost "
+                "(within 0.1 ct) the MILP prefers one that fills the battery before feeding "
+                "in (`charge_before_export`) or keeps the highest import, feed-in or both "
+                "as low as possible (`attenuate_*_peaks`, e.g. for §14a or a feed-in cap)."
+            ),
+            "examples": ["none", "attenuate_grid_peaks"],
+        },
+    )
+    preference_time_limit_s: float = Field(
+        default=5.0,
+        gt=0,
+        le=120,
+        json_schema_extra={
+            "description": "RL29 fork: time limit of the preference solve [s].",
+            "examples": [5.0],
+        },
+    )
     switching: bool = Field(
         default=True,
         json_schema_extra={

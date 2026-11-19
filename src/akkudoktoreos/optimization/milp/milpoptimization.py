@@ -235,6 +235,9 @@ class MilpOptimization(GeneticOptimization):
             shortfall_per_wh=per_percent * 100.0 / capacity,
             start_cost=float(self._milp.ev_start_cost_amt),
             slot_cap_wh=caps,
+            block_battery_discharge=bool(
+                getattr(self._genetic_cfg, "ev_blocks_battery_discharge", False)
+            ),
         )
 
     def _ev_genes(self, result: DispatchResult) -> Optional[list[int]]:
@@ -352,6 +355,7 @@ class MilpOptimization(GeneticOptimization):
                 capacity_wh=float(bat.capacity_wh),
                 soc_wh=soc_wh,
                 min_soc_wh=float(bat.min_soc_wh),
+                allow_grid_export=bool(self.optimize_battery_grid_export),
                 max_soc_wh=float(bat.max_soc_wh),
                 max_charge_wh=max_charge,
                 max_discharge_wh=max_charge,
@@ -431,6 +435,8 @@ class MilpOptimization(GeneticOptimization):
                 float(grid.import_excess_penalty_amt_kwh) / 1000.0 if max_import_w else None
             ),
             lock_charge_discharge=settings.lock_charge_discharge,
+            preference=settings.charging_strategy,
+            preference_time_limit_s=settings.preference_time_limit_s,
         )
 
     def _full_charge_terms(
@@ -546,15 +552,58 @@ class MilpOptimization(GeneticOptimization):
             charge_levels=list(self.bat_possible_charge_values),
         )
         n_levels = len(self.bat_possible_charge_values)
+        max_wh = float(bat.max_charge_power_w) * self.slot_duration_h
+        export_rates = list(self.bat_possible_grid_export_values) or [1.0]
+        threshold = 1.0
         for slot, state in enumerate(encoded[:n_total]):
+            exported = (
+                result.battery_export_wh[slot] if slot < len(result.battery_export_wh) else 0.0
+            )
+            if layout.grid_export_states and exported > threshold and max_wh > 0:
+                # Fork (P12): battery into the grid at the smallest rate reaching it.
+                share = min(exported / max_wh, 1.0)
+                reaching = [i for i, r in enumerate(export_rates) if r >= share - 1e-6]
+                index = (
+                    min(reaching, key=lambda i: export_rates[i])
+                    if reaching
+                    else max(range(len(export_rates)), key=lambda i: export_rates[i])
+                )
+                states[slot] = layout.grid_export_states[
+                    min(index, len(layout.grid_export_states) - 1)
+                ]
+                continue
             if layout.dc_allowed_state is not None:
-                # Direct marketing layout: idle must allow PV charging explicitly.
+                # Direct marketing layout: PV charging is a decision of its own.
+                pv_blocked = self._pv_charge_blocked(result, slot)
                 if state == 0:
-                    state = layout.dc_allowed_state
+                    # Fork (P13): no PV charging although PV is fed in and there is room.
+                    state = (
+                        layout.dc_not_allowed_state
+                        if pv_blocked and layout.dc_not_allowed_state is not None
+                        else layout.dc_allowed_state
+                    )
                 elif state == n_levels and layout.self_consumption_state is not None:
-                    state = layout.self_consumption_state
+                    # Discharge only (state n_levels) or discharge with PV charging.
+                    state = n_levels if pv_blocked else layout.self_consumption_state
             states[slot] = state
         return states
+
+    def _pv_charge_blocked(self, result: DispatchResult, slot: int) -> bool:
+        """Fork (P13): the plan feeds PV in instead of charging although the battery has room.
+
+        evcc "smart feed-in priority": with a high feed-in tariff the PV goes to the grid
+        rather than into the battery. Only the direct marketing layout can execute it
+        (state "DC charging not allowed").
+        """
+        bat = self.simulation.battery
+        if bat is None or slot >= len(result.charge_pv_wh) or slot + 1 >= len(result.soc_wh):
+            return False
+        threshold = 1.0
+        room = float(bat.max_soc_wh) - float(result.soc_wh[slot + 1]) > threshold
+        exported_pv = result.grid_export_wh[slot] - (
+            result.battery_export_wh[slot] if slot < len(result.battery_export_wh) else 0.0
+        )
+        return room and result.charge_pv_wh[slot] <= threshold and exported_pv > threshold
 
     def _genome(self, result: DispatchResult, hp_genes: Optional[list[int]]) -> list[int]:
         import numpy as np

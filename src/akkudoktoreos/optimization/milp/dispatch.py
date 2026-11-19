@@ -68,6 +68,10 @@ class BatteryModel:
     """Slot at whose start ``target_soc_wh`` is checked (capped to the horizon end)."""
     target_shortfall_per_wh: float = 0.0
     """Penalty per Wh the full charge stays below its target."""
+    allow_grid_export: bool = False
+    """Fork (direct marketing): the battery may discharge into the grid. A slot either
+    serves the house or exports (as the GENETIC export states); only where the feed-in
+    tariff is positive."""
 
 
 @dataclass
@@ -131,6 +135,9 @@ class EVModel:
     """Raw energy cap per slot (§14a dimming, no charging at the end); missing = none."""
     charging_now: bool = False
     """The charger runs at the start: continuing costs no start."""
+    block_battery_discharge: bool = False
+    """Fork (P8): no battery discharge in a slot in which the car charges (the house
+    battery never feeds the car; evcc ``batteryDischargeControl``)."""
 
 
 @dataclass
@@ -247,6 +254,11 @@ class DispatchInput:
     """Fork (P4): merge ``coarse_factor`` slots into one beyond this slot (``coarsen.py``);
     None = full resolution."""
     coarse_factor: int = 4
+    preference: str = "none"
+    """Fork (P5): preference among equally good plans (``PREFERENCES``)."""
+    preference_tolerance: float = 1e-3
+    """Fork (P5): cost the preference may add at most [currency]."""
+    preference_time_limit_s: float = 5.0
     lock_charge_discharge: str = "negative_prices"
     """Fork: binaries that forbid charging and discharging in the same slot:
     ``never``, ``negative_prices`` (only where cycling could earn money) or ``always``."""
@@ -283,6 +295,10 @@ class DispatchResult:
     """Fork: import above the soft import limit per slot (empty without a limit)."""
     ev_charge_wh: list[float] = field(default_factory=list)
     """Fork: raw EV charger energy per slot (empty without an EV)."""
+    battery_export_wh: list[float] = field(default_factory=list)
+    """Fork: battery energy fed into the grid per slot [AC Wh] (empty without export)."""
+    preference: Optional[str] = None
+    """Fork: what the preference stage did (strategy and outcome)."""
     ev_soc_wh: list[float] = field(default_factory=list)
     """Fork: EV energy at the start of every slot plus the end state."""
 
@@ -419,6 +435,7 @@ class _ScenarioVars:
     dis: list[Optional[int]]
     soc: list[int]
     excess: list[Optional[int]] = field(default_factory=list)
+    dis_exp: list[Optional[int]] = field(default_factory=list)
 
 
 def _add_scenario(
@@ -452,9 +469,18 @@ def _add_scenario(
             excess[t] = over
     # Negative feed-in tariff: exporting costs money; the model may curtail by not exporting
     # (PV that is neither used nor exported is curtailed).
-    exp = [b.var(0.0, min(pv[t], exp_limit * factor[t]), -weight * feed[t]) for t in range(n)]
-
     bat = data.battery
+    battery_export = bool(bat is not None and bat.capacity_wh > 0 and bat.allow_grid_export)
+    exp = [
+        b.var(
+            0.0,
+            exp_limit * factor[t] if battery_export else min(pv[t], exp_limit * factor[t]),
+            -weight * feed[t],
+        )
+        for t in range(n)
+    ]
+    dis_exp: list[Optional[int]] = [None] * n
+
     chg_pv: list[Optional[int]] = [None] * n
     chg_grid: list[Optional[int]] = [None] * n
     dis: list[Optional[int]] = [None] * n
@@ -476,6 +502,15 @@ def _add_scenario(
             c_grid = b.var(0.0, grid_cap, 1e-9)
             d = b.var(0.0, max_d, weight * bat.lcos_per_wh)
             chg_pv[t], chg_grid[t], dis[t] = c_pv, c_grid, d
+            x: Optional[int] = None
+            if battery_export and feed[t] > 0.0:
+                # Fork (P12, direct marketing): battery into the grid; the slot exports
+                # or serves the house, as the GENETIC export states do.
+                x = b.var(0.0, max_d, weight * bat.lcos_per_wh)
+                e = b.var(0.0, 1.0, 0.0, integer=True)
+                b.row({x: 1.0, e: -max_d}, -inf, 0.0)
+                b.row({d: 1.0, e: max_d}, -inf, max_d)
+                dis_exp[t] = x
             lock = data.lock_charge_discharge
             if lock == "always" or (lock == "negative_prices" and price[t] < 0.0):
                 # Fork (P5): the inverter cannot charge and discharge at once; without the
@@ -494,6 +529,7 @@ def _add_scenario(
                     c_pv: -bat.charge_efficiency,
                     c_grid: -bat.charge_efficiency,
                     d: 1.0 / max(bat.discharge_efficiency, 1e-9),
+                    **({x: 1.0 / max(bat.discharge_efficiency, 1e-9)} if x is not None else {}),
                 },
                 0.0,
                 0.0,
@@ -538,12 +574,18 @@ def _add_scenario(
             for x_var, energy in app_load[t].items():
                 serve[x_var] = -energy
             b.row(serve, -inf, load[t])
+        battery_out = dis_exp[t]
+        if battery_out is not None:
+            balance[battery_out] = 1.0
+            b.row({exp[t]: 1.0, battery_out: -1.0}, -inf, pv[t])  # export = PV + battery
+        elif battery_export:
+            b.row({exp[t]: 1.0}, -inf, pv[t])  # only PV is fed in without battery export
         # pv + imp + dis - app - chg - exp >= load  (>=: surplus PV may be curtailed)
         b.row(balance, load[t] - pv[t], inf)
         # Grid and battery do not supply more than is consumed or stored (no import that
         # is curtailed); keeps the solution physical when prices are negative.
         b.row(supply, -inf, load[t])
-    return _ScenarioVars(imp, exp, chg_pv, chg_grid, dis, soc, excess)
+    return _ScenarioVars(imp, exp, chg_pv, chg_grid, dis, soc, excess, dis_exp)
 
 
 @dataclass
@@ -743,6 +785,7 @@ def _add_hedge(
 class _EVVars:
     charge: list[int]
     soc: list[int]
+    on: list[Optional[int]] = field(default_factory=list)
 
 
 def _add_ev(
@@ -756,14 +799,17 @@ def _add_ev(
     start = min(max(ev.soc_wh, 0.0), ev.capacity_wh)
     soc = [b.var(start, start)]
     charge: list[int] = []
+    ons: list[Optional[int]] = []
     on_prev: Optional[int] = None
     for t in range(n):
         full = ev.max_charge_wh * _factor(data, t)
         cap = ev.slot_cap_wh[t] if t < len(ev.slot_cap_wh) else None
         upper = full if cap is None else max(0.0, min(full, float(cap)))
         e = b.var(0.0, upper)
-        if ev.min_rate > 0 or ev.start_cost > 0:
+        ons.append(None)
+        if ev.min_rate > 0 or ev.start_cost > 0 or ev.block_battery_discharge:
             on = b.var(0.0, 1.0, 0.0, integer=True)
+            ons[t] = on
             b.row({e: 1.0, on: -upper}, -inf, 0.0)
             # Smallest rate of one original slot (a coarse slot may run part of it); a
             # start only means something when "on" draws real power (1 % at least).
@@ -787,7 +833,98 @@ def _add_ev(
         if target > start:
             short = b.var(0.0, target, ev.shortfall_per_wh)
             b.row({soc[k]: 1.0, short: 1.0}, target, inf)
-    return _EVVars(charge, soc)
+    return _EVVars(charge, soc, ons)
+
+
+PREFERENCES = (
+    "none",
+    "charge_before_export",
+    "attenuate_demand_peaks",
+    "attenuate_feedin_peaks",
+    "attenuate_grid_peaks",
+)
+"""Fork (P5): what the preference stage optimises at the cost already found."""
+
+
+def _preference_stage(
+    b: "_Builder",
+    data: DispatchInput,
+    plan: _ScenarioVars,
+    sv: Optional[_SwitchVars],
+    outcome: "_SolveOutcome",
+) -> tuple["_SolveOutcome", str]:
+    """Among plans of (almost) the same cost, the preferred one (evcc strategies).
+
+    - ``charge_before_export``: export as late as possible (the battery fills first);
+    - ``attenuate_demand_peaks`` / ``attenuate_feedin_peaks`` / ``attenuate_grid_peaks``:
+      the highest import, export or both per original slot as low as possible.
+
+    The objective found stays (within ``preference_tolerance``) and so does the number of
+    battery mode changes; otherwise the first solution is kept.
+    """
+    if data.preference not in PREFERENCES or outcome.solution is None:
+        return outcome, f"{data.preference}: unknown"
+    if outcome.objective is None:
+        return outcome, f"{data.preference}: no objective"
+    n = len(plan.imp)
+    inf = math.inf
+    objective_row = {i: c for i, c in enumerate(b.cost) if c != 0.0}
+    bound = outcome.objective + abs(outcome.objective) * 1e-9 + float(data.preference_tolerance)
+    extra: list[tuple[dict[int, float], float, float]] = [(objective_row, -inf, bound)]
+    if sv is not None:
+        changes = sv.count(outcome.solution)
+        extra.append(({w: 1.0 for w in sv.changes}, -inf, changes + 0.5))
+    pref_cost: dict[int, float] = {}
+    if data.preference == "charge_before_export":
+        for t in range(n):
+            pref_cost[plan.exp[t]] = float(n - t) / n
+    else:
+        peak = b.var(0.0, inf, 0.0)
+        pref_cost[peak] = 1.0
+        for t in range(n):
+            f = _factor(data, t)
+            if data.preference in ("attenuate_demand_peaks", "attenuate_grid_peaks"):
+                b.row({peak: 1.0, plan.imp[t]: -1.0 / f}, 0.0, inf)
+            if data.preference in ("attenuate_feedin_peaks", "attenuate_grid_peaks"):
+                b.row({peak: 1.0, plan.exp[t]: -1.0 / f}, 0.0, inf)
+    cost = [0.0] * len(b.cost)
+    for index, value in pref_cost.items():
+        cost[index] = value
+    second = b.solve(
+        min(float(data.preference_time_limit_s), float(data.time_limit_s)),
+        data.mip_rel_gap,
+        cost=cost,
+        extra_rows=extra,
+    )
+    if not second.ok or second.solution is None:
+        return outcome, f"{data.preference}: kept ({second.status})"
+    full_cost = list(b.cost) + [0.0] * (len(second.solution) - len(b.cost))
+    objective = float(np.dot(np.array(full_cost), second.solution))
+
+    def measure(sol: np.ndarray) -> float:
+        if data.preference == "charge_before_export":
+            return sum(float(sol[plan.exp[t]]) * (n - t) / n for t in range(n))
+        flows: list[float] = []
+        for t in range(n):
+            f = _factor(data, t)
+            if data.preference in ("attenuate_demand_peaks", "attenuate_grid_peaks"):
+                flows.append(float(sol[plan.imp[t]]) / f)
+            if data.preference in ("attenuate_feedin_peaks", "attenuate_grid_peaks"):
+                flows.append(float(sol[plan.exp[t]]) / f)
+        return max(flows, default=0.0)
+
+    before, after = measure(outcome.solution), measure(second.solution)
+    if after > before + 1e-6:
+        return outcome, f"{data.preference}: kept"
+    improved = _SolveOutcome(
+        status=outcome.status,
+        ok=True,
+        solution=second.solution,
+        objective=objective,
+        optimal=outcome.optimal,
+        mip_gap=outcome.mip_gap,
+    )
+    return improved, f"{data.preference}: {before:.1f} -> {after:.1f}"
 
 
 def solve_dispatch(data: DispatchInput) -> DispatchResult:
@@ -876,6 +1013,10 @@ def solve_dispatch(data: DispatchInput) -> DispatchResult:
             for a_var, b_var in (
                 (first.chg_grid[t], other.chg_grid[t]),
                 (first.dis[t], other.dis[t]),
+                (
+                    first.dis_exp[t] if first.dis_exp else None,
+                    other.dis_exp[t] if other.dis_exp else None,
+                ),
             ):
                 if a_var is not None and b_var is not None:
                     b.row({a_var: 1.0, b_var: -1.0}, 0.0, 0.0)
@@ -887,6 +1028,18 @@ def solve_dispatch(data: DispatchInput) -> DispatchResult:
         first.dis,
         first.soc,
     )
+    if ev_vars is not None and data.ev is not None and data.ev.block_battery_discharge:
+        bat = data.battery
+        if bat is not None and bat.capacity_wh > 0:
+            for sv in built:
+                for t in range(n):
+                    on = ev_vars.on[t]
+                    if on is None:
+                        continue
+                    max_d = bat.max_discharge_wh * _factor(data, t)
+                    for d_var in (sv.dis[t], sv.dis_exp[t] if sv.dis_exp else None):
+                        if d_var is not None:
+                            b.row({d_var: 1.0, on: max_d}, -math.inf, max_d)
     switch_vars = _add_switching(b, data, first)
     weight0, pv0, load0 = scenarios[0]
     _add_hedge(
@@ -904,6 +1057,9 @@ def solve_dispatch(data: DispatchInput) -> DispatchResult:
     tie_break: Optional[str] = None
     if switch_vars is not None and data.switching is not None and data.switching.tie_break:
         outcome, tie_break = _switch_tie_break(b, data, switch_vars, outcome)
+    preference_report: Optional[str] = None
+    if data.preference != "none" and outcome.ok and outcome.solution is not None:
+        outcome, preference_report = _preference_stage(b, data, first, switch_vars, outcome)
     status, objective = outcome.status, outcome.objective
     elapsed = time.perf_counter() - started
     if not outcome.ok or outcome.solution is None:
@@ -941,6 +1097,10 @@ def solve_dispatch(data: DispatchInput) -> DispatchResult:
         tie_break=tie_break,
         import_excess_wh=[float(sol[i]) for i in first.excess if i is not None],
         ev_charge_wh=values(ev_vars.charge) if ev_vars is not None else [],
+        battery_export_wh=values(first.dis_exp)
+        if any(v is not None for v in first.dis_exp)
+        else [],
+        preference=preference_report,
         ev_soc_wh=[float(sol[i]) for i in ev_vars.soc] if ev_vars is not None else [],
     )
 

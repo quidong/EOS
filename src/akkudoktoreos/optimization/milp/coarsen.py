@@ -331,6 +331,9 @@ def expand_result(
             _expand(result.import_excess_wh, groups) if result.import_excess_wh else []
         ),
         ev_charge_wh=_expand(result.ev_charge_wh, groups) if result.ev_charge_wh else [],
+        battery_export_wh=(
+            _expand(result.battery_export_wh, groups) if result.battery_export_wh else []
+        ),
         ev_soc_wh=(
             [result.ev_soc_wh[0]] + _states(result.ev_soc_wh[0], result.ev_soc_wh[1:], groups)
             if result.ev_soc_wh

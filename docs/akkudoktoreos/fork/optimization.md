@@ -26,9 +26,8 @@ plan, the solution and plan formats, the PDF report.
 3. **Polish**: the best candidates lead the initial population of `milp.polish_generations` GENETIC
    generations on the exact simulation (0 = take the MILP plan as it is).
 
-The result is never worse than the best MILP candidate under the exact simulation. Not in the MILP:
-battery export for direct marketing (polish only). Cooling seasons use the mode search without the linear
-heat pump model.
+The result is never worse than the best MILP candidate under the exact simulation. Cooling seasons use the
+mode search without the linear heat pump model.
 
 | Setting (`optimization.milp.*`) | Default | Meaning |
 | --- | --- | --- |
@@ -47,6 +46,7 @@ heat pump model.
 | `uncertainty_pv_dev` / `uncertainty_load_dev` | 0.3 / LoadML or 0.2 | adverse deviation per slot |
 | `coarse_after_hours` / `coarse_slot_minutes` | none / 60 | coarse slots for the far horizon (see below) |
 | `ev_start_cost_amt` | 0.02 | cost of an EV charging start |
+| `charging_strategy` / `preference_time_limit_s` | `none` / 5 | preference among plans of the same cost (see below) |
 
 **Scenarios**: central (50 %), little PV and high load (25 %), much PV and low load (25 %). Appliance starts
 and the first `shared_slots` battery decisions are common, afterwards each scenario adapts (two-stage).
@@ -84,6 +84,21 @@ simulation) with one binary per slot for the smallest charge rate, a soft target
 (`genetic.penalties.ev_soc_miss` per percent), §14a dimming, `fixed_eauto_hours` and a small cost per charging
 start (`ev_start_cost_amt`), so the car charges in few blocks. The MILP charge energy is encoded as the smallest
 configured charge rate that reaches it.
+
+**Preferences at the same cost** (`charging_strategy`, after the evcc optimizer's strategies): a further solve
+keeps the objective found (within 0.1 ct) and the number of battery mode changes and prefers
+`charge_before_export` (feed in as late as possible, the battery fills first), `attenuate_demand_peaks`,
+`attenuate_feedin_peaks` or `attenuate_grid_peaks` (the highest import, feed-in or both per slot as low as
+possible, for §14a or a feed-in cap).
+
+**Battery and the car** (`genetic.ev_blocks_battery_discharge`, evcc battery discharge control): the house battery
+does not discharge in a slot in which the car charges. GENETIC repairs such genes (discharge becomes idle), the MILP
+forbids it with the charger's on/off binary.
+
+**Direct marketing** (`feedintariff.direct_marketing_enabled`): the MILP plans battery export into the grid where
+the feed-in tariff is positive (a slot exports or serves the house, as the GENETIC export states) and encodes it as
+the smallest configured export rate reaching it. A plan that feeds PV in although the battery has room is encoded as
+"DC charging not allowed" (evcc smart feed-in priority); otherwise idle allows PV charging.
 
 ## Joint mode model (experimental)
 
