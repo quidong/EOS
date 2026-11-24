@@ -175,6 +175,8 @@ def apply_snapshot_config(
     # Never touch the history database or the adapters of the live system from a replay.
     data.get("database", {}).pop("history", None)
     data.pop("adapter", None)
+    # The account the live server drops to need not exist where the replay runs.
+    data.get("server", {}).pop("run_as_user", None)
     if data_folder_path is not None:
         data.setdefault("general", {})["data_folder_path"] = data_folder_path
     config.merge_settings_from_dict(data)

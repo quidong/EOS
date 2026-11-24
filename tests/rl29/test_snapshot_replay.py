@@ -99,6 +99,73 @@ def test_parse_variant_and_summary():
     assert summary["GENETIC"]["runs"] == 0
 
 
+def test_parse_variant_keeps_lists_whole():
+    script = load_script()
+    algorithm, overrides = script.parse_variant(
+        "MILP:devices/heat_pumps/wbb12/optimization/heating_modes=[0,1,2],"
+        'optimization/milp/note={"a":[1,2],"b":"x,y"},optimization/milp/scenarios=false'
+    )
+    assert algorithm == "MILP"
+    assert overrides == [
+        ("devices/heat_pumps/wbb12/optimization/heating_modes", [0, 1, 2]),
+        ("optimization/milp/note", {"a": [1, 2], "b": "x,y"}),
+        ("optimization/milp/scenarios", False),
+    ]
+    assert script.split_top_level("a=[1,2],b=3") == ["a=[1,2]", "b=3"]
+
+
+def test_parameter_overrides_reach_the_stored_heat_pump_parameters():
+    script = load_script()
+    snapshot = {
+        "parameters": {
+            "heat_pumps": [
+                {"device_id": "other", "settings": {"optimization": {"heating_modes": [1]}}},
+                {
+                    "device_id": "wbb12",
+                    "settings": {"optimization": {"heating_modes": [0, 1, 2, 3]}},
+                },
+            ]
+        }
+    }
+    result = script.apply_parameter_overrides(
+        snapshot,
+        [
+            ("devices/heat_pumps/wbb12/optimization/heating_modes", [0, 1, 2]),
+            ("devices/heat_pumps/wbb12/optimization/min_hold_minutes", 30),
+            ("optimization/milp/time_limit_s", 60),  # not a heat pump setting: untouched here
+        ],
+    )
+    pumps = {p["device_id"]: p["settings"]["optimization"] for p in result["parameters"]["heat_pumps"]}
+    assert pumps["wbb12"] == {"heating_modes": [0, 1, 2], "min_hold_minutes": 30}
+    assert pumps["other"] == {"heating_modes": [1]}
+    # the recorded snapshot itself is not modified
+    original = snapshot["parameters"]["heat_pumps"][1]["settings"]["optimization"]
+    assert original == {"heating_modes": [0, 1, 2, 3]}
+    # no overrides: an equal but independent copy
+    assert script.apply_parameter_overrides(snapshot, []) == snapshot
+
+
+def test_apply_snapshot_config_ignores_the_live_server_account(config_eos, tmp_path):
+    from akkudoktoreos.core.snapshot import apply_snapshot_config
+
+    snapshot = {"config": {"server": {"run_as_user": "no-such-account-xyz", "port": 8503}}}
+    apply_snapshot_config(config_eos, snapshot, data_folder_path=str(tmp_path))
+    assert config_eos.server.run_as_user != "no-such-account-xyz"
+
+
+def test_replay_environment_loads_without_the_eos_account(monkeypatch):
+    """The configuration must also load on a host that has no ``eos`` user."""
+    from akkudoktoreos.core import coreabc
+
+    monkeypatch.delenv("EOS_SERVER__RUN_AS_USER", raising=False)
+    monkeypatch.setattr(coreabc, "_config_eos", None)
+    monkeypatch.setattr(coreabc, "_ems_eos", None)
+    script = load_script()
+    config = script.init_replay_environment()
+    assert config is coreabc.get_config()
+    assert coreabc.get_ems() is not None
+
+
 @pytest.mark.asyncio
 async def test_automatic_run_stores_a_snapshot_that_replays(
     configured_request, monkeypatch, tmp_path

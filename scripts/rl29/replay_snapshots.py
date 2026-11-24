@@ -14,6 +14,10 @@ with what was executed. Variants differ in algorithm and configuration overrides
     uv run python scripts/rl29/replay_snapshots.py --dir ./snapshots --days 14 \\
         --variant "MILP:optimization/milp/time_limit_s=60,optimization/milp/hp_search_seconds=120"
 
+    # The same run without PREHEAT (lists with commas are fine, heat pump settings reach the replay)
+    uv run python scripts/rl29/replay_snapshots.py --dir ./snapshots --days 1 \\
+        --variant MILP --variant "MILP:devices/heat_pumps/wbb12/optimization/heating_modes=[0,1,2]"
+
 Results go to stdout (summary) and optionally to a CSV (``--csv``). Runs are CPU bound:
 on the EOS host run it outside the busy hours or copy the snapshots elsewhere.
 """
@@ -30,11 +34,39 @@ from pathlib import Path
 from typing import Any, Optional
 
 
+def split_top_level(text: str) -> list[str]:
+    """Split at commas outside brackets, braces and quotes (so JSON lists stay whole)."""
+    parts: list[str] = []
+    depth = 0
+    quote = ""
+    current = ""
+    for char in text:
+        if quote:
+            if char == quote:
+                quote = ""
+        elif char in "\"'":
+            quote = char
+        elif char in "[{":
+            depth += 1
+        elif char in "]}":
+            depth -= 1
+        elif char == "," and depth == 0:
+            parts.append(current)
+            current = ""
+            continue
+        current += char
+    parts.append(current)
+    return parts
+
+
 def parse_variant(text: str) -> tuple[str, list[tuple[str, Any]]]:
-    """``ALGORITHM[:path=value,path=value]``; values are parsed as JSON when possible."""
+    """``ALGORITHM[:path=value,path=value]``; values are parsed as JSON when possible.
+
+    Lists and objects may contain commas: ``MILP:devices/heat_pumps/wbb12/optimization/heating_modes=[0,1,2]``.
+    """
     algorithm, _, rest = text.partition(":")
     overrides: list[tuple[str, Any]] = []
-    for item in filter(None, (part.strip() for part in rest.split(","))):
+    for item in filter(None, (part.strip() for part in split_top_level(rest))):
         path, sep, raw = item.partition("=")
         if not sep or not path.strip():
             raise argparse.ArgumentTypeError(f"Override '{item}' is not path=value.")
@@ -44,6 +76,56 @@ def parse_variant(text: str) -> tuple[str, list[tuple[str, Any]]]:
             value = raw
         overrides.append((path.strip().strip("/"), value))
     return algorithm.strip().upper(), overrides
+
+
+def apply_parameter_overrides(snapshot: dict[str, Any], overrides: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Return a copy of the snapshot whose stored parameters honour the overrides.
+
+    A replay optimizes the parameters stored in the snapshot, not the live configuration. Settings
+    of a heat pump (``devices/heat_pumps/<device_id>/...``) are copied into the stored heat pump
+    parameters, otherwise such an override would change nothing.
+    """
+    import copy
+
+    result = copy.deepcopy(snapshot)
+    for path, value in overrides:
+        keys = [key for key in path.split("/") if key]
+        if len(keys) < 4 or keys[:2] != ["devices", "heat_pumps"]:
+            continue
+        device_id, rest = keys[2], keys[3:]
+        for pump in (result.get("parameters") or {}).get("heat_pumps") or []:
+            if pump.get("device_id") != device_id:
+                continue
+            target = pump.setdefault("settings", {})
+            for key in rest[:-1]:
+                target = target.setdefault(key, {})
+            target[rest[-1]] = value
+    return result
+
+
+def init_replay_environment() -> Any:
+    """Create the configuration and the other singletons without reading the live setup.
+
+    Only the process environment is read; the user the server would drop to is set to the current
+    user so that the configuration also loads on hosts without the ``eos`` account.
+    """
+    import getpass
+    import os
+
+    from akkudoktoreos.core.coreabc import get_config, singletons_init
+
+    os.environ.setdefault("EOS_SERVER__RUN_AS_USER", getpass.getuser())
+    config = get_config(
+        init={
+            "with_init_settings": True,
+            "with_env_settings": True,
+            "with_dotenv_settings": False,
+            "with_file_settings": False,
+            "with_file_secret_settings": False,
+        }
+    )
+    singletons_init()
+    return config
 
 
 def summarize(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -102,7 +184,6 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--csv", type=Path, default=None, help="Write all rows to this CSV.")
     args = parser.parse_args(argv)
 
-    from akkudoktoreos.core.coreabc import get_config
     from akkudoktoreos.core.snapshot import (
         apply_snapshot_config,
         iter_snapshots,
@@ -119,12 +200,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"No snapshots in {args.dir} for the last {args.days:g} days.", file=sys.stderr)
         return 1
 
-    config = get_config()
+    config = init_replay_environment()
     rows: list[dict[str, Any]] = []
     with tempfile.TemporaryDirectory() as data_folder:
         for index, path in enumerate(paths, start=1):
-            snapshot = load_snapshot(path)
+            recorded = load_snapshot(path)
             for algorithm, overrides in args.variant:
+                snapshot = apply_parameter_overrides(recorded, overrides)
                 name = algorithm + (
                     ":" + ",".join(f"{p}={v}" for p, v in overrides) if overrides else ""
                 )
