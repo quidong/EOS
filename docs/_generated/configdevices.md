@@ -313,6 +313,8 @@ config path from ``self.device_id`` without needing an external index.
                            1,
                            2
                        ],
+                       "preheat_planned_surplus_only": false,
+                       "preheat_min_pv_surplus_w": 1000.0,
                        "dhw_modes": [
                            0,
                            1,
@@ -884,6 +886,8 @@ config path from ``self.device_id`` without needing an external index.
                            1,
                            2
                        ],
+                       "preheat_planned_surplus_only": false,
+                       "preheat_min_pv_surplus_w": 1000.0,
                        "dhw_modes": [
                            0,
                            1,

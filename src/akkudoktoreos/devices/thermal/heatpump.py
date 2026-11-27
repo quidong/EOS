@@ -329,6 +329,9 @@ class SlotInputs:
     reduce_locked: bool = False
     """The controller does not reduce in this slot (fork), e.g. a manual lock after a
     complaint: REDUCED runs as NORMAL and the heat pump does not go into standby."""
+    preheat_locked: bool = False
+    """PREHEAT is not available in this slot (fork, ``optimization.preheat_planned_surplus_only``):
+    the forecast PV surplus is too small to carry it, so a planned PREHEAT runs as RAISED."""
 
 
 @dataclass
@@ -404,10 +407,22 @@ class HeatPumpSystem:
         high = inputs.comfort_max_c if inputs.comfort_max_c is not None else setpoint + 1.0
         return low, setpoint, max(high, setpoint)
 
+    @staticmethod
+    def effective_mode(mode: HeatingMode, inputs: "SlotInputs") -> HeatingMode:
+        """The mode the controller actually runs in a slot (fork).
+
+        A locked reduction runs as NORMAL; a locked PREHEAT (too little PV surplus
+        forecast, ``preheat_locked``) runs as RAISED.
+        """
+        if mode == HeatingMode.REDUCED and inputs.reduce_locked:
+            return HeatingMode.NORMAL
+        if mode == HeatingMode.PREHEAT and inputs.preheat_locked:
+            return HeatingMode.RAISED
+        return mode
+
     def _room_target(self, mode: HeatingMode, inputs: "SlotInputs") -> float:
         low, setpoint, high = self.comfort_band(inputs)
-        if mode == HeatingMode.REDUCED and inputs.reduce_locked:
-            mode = HeatingMode.NORMAL
+        mode = self.effective_mode(mode, inputs)
         if mode == HeatingMode.REDUCED:
             return min(low + REPAIR_MARGIN_K, setpoint)
         if mode == HeatingMode.NORMAL:
@@ -649,9 +664,9 @@ class HeatPumpSystem:
         """
         dt = self.dt
         notes: list[str] = []
-        if inputs.reduce_locked and heating_mode == HeatingMode.REDUCED:
-            # Reduction locked by the controller (fork): it holds NORMAL instead.
-            heating_mode = HeatingMode.NORMAL
+        # Locked reduction (fork): the controller holds NORMAL; locked PREHEAT (too little
+        # PV surplus): it runs as RAISED.
+        heating_mode = self.effective_mode(heating_mode, inputs)
         gains = self.slot_gains_w(inputs)
         if inputs.ventilation_w_per_k > 0:
             # Airing: an extra loss of the room node, linearised at the slot start.

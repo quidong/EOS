@@ -622,6 +622,27 @@ class HeatPumpOptimizationSettings(SettingsBaseModel):
             "examples": [[0, 1, 2], [0, 1, 2, 3, 4], [1, 2]],
         },
     )
+    preheat_planned_surplus_only: bool = Field(
+        default=False,
+        json_schema_extra={
+            "description": (
+                "RL29 fork: PREHEAT (3) only in hours with enough forecast PV surplus "
+                "(PV minus household load, see preheat_min_pv_surplus_w). In every other "
+                "hour a planned PREHEAT runs as RAISED, so PREHEAT stores PV surplus "
+                "instead of becoming a permanent state."
+            )
+        },
+    )
+    preheat_min_pv_surplus_w: float = Field(
+        default=1000.0,
+        ge=0,
+        json_schema_extra={
+            "description": (
+                "With preheat_planned_surplus_only: smallest forecast PV surplus of an "
+                "hour that allows PREHEAT [W]."
+            )
+        },
+    )
     dhw_modes: list[int] = Field(
         default_factory=lambda: [0, 1, 2],
         min_length=1,

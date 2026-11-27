@@ -758,8 +758,7 @@ class HeatPumpRunPlan:
                 reached_by_deadline = True
             if detail:
                 mode = slot_heating[slot]
-                if inputs.reduce_locked and mode == HeatingMode.REDUCED:
-                    mode = HeatingMode.NORMAL  # what the controller runs (fork)
+                mode = self.system.effective_mode(mode, inputs)  # what the controller runs (fork)
                 rows["heating_mode"].append(mode.name)
                 rows["dhw_mode"].append(option.label)
                 rows["rod_target_c"].append(
@@ -1400,6 +1399,25 @@ def build_run_plan(
     _apply_room_limits_and_humidity(parameters, slot_hours, inputs, away_slots)
 
     _apply_weather_warning(parameters, slot_starts, inputs, system)
+
+    # PREHEAT only with PV surplus (fork): other slots run a planned PREHEAT as RAISED.
+    preheat_opt = settings.optimization
+    if preheat_opt.preheat_planned_surplus_only and HeatingMode.PREHEAT in (
+        preheat_opt.heating_modes
+    ):
+        locked_slots = 0
+        for i, slot_input in enumerate(inputs):
+            surplus_w = float(pv_surplus_w[i]) if pv_surplus_w and i < len(pv_surplus_w) else 0.0
+            if surplus_w < preheat_opt.preheat_min_pv_surplus_w:
+                slot_input.preheat_locked = True
+                locked_slots += 1
+        logger.info(
+            "Heat pump {}: PREHEAT only with at least {} W PV surplus, {} of {} slots locked.",
+            parameters.device_id,
+            preheat_opt.preheat_min_pv_surplus_w,
+            locked_slots,
+            len(inputs),
+        )
 
     # Manual lock of the reduction (fork): the controller holds NORMAL until then.
     lock_until = parameters.reduce_locked_until

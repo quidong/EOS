@@ -289,7 +289,7 @@ def mode_control(plan: "HeatPumpRunPlan", room_ref_c: Sequence[float]) -> ModeCo
         floor_const, kr, ks = mode_heat_coefficients(system, slot, floor_target, ref)
         row: list[float] = []
         for mode in modes:
-            heating_mode = HeatingMode(mode)
+            heating_mode = system.effective_mode(HeatingMode(mode), slot)
             if heating_mode == HeatingMode.FORCED and system.hp.forced_flow_offset_k is None:
                 row.append(FORCED_HEAT_W)
                 continue

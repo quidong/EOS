@@ -8,7 +8,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "v0.3.0.dev2611191729936021"
+    "version": "v0.3.0.dev2611272391595221"
   },
   "paths": {
     "/v1/measurement/battery-capacity/{battery_id}": {
@@ -13431,6 +13431,19 @@
                 2
               ]
             ]
+          },
+          "preheat_planned_surplus_only": {
+            "type": "boolean",
+            "title": "Preheat Planned Surplus Only",
+            "description": "RL29 fork: PREHEAT (3) only in hours with enough forecast PV surplus (PV minus household load, see preheat_min_pv_surplus_w). In every other hour a planned PREHEAT runs as RAISED, so PREHEAT stores PV surplus instead of becoming a permanent state.",
+            "default": false
+          },
+          "preheat_min_pv_surplus_w": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Preheat Min Pv Surplus W",
+            "description": "With preheat_planned_surplus_only: smallest forecast PV surplus of an hour that allows PREHEAT [W].",
+            "default": 1000.0
           },
           "dhw_modes": {
             "items": {

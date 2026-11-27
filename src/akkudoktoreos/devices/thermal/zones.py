@@ -330,8 +330,7 @@ class MultiZoneHeatPump:
         per_zone = list(zone_inputs) if zone_inputs is not None else [inputs] * self.n
         modes = [HeatingMode(m) for m in zone_modes]
         for i, mode in enumerate(modes):
-            if per_zone[i].reduce_locked and mode == HeatingMode.REDUCED:
-                modes[i] = HeatingMode.NORMAL
+            modes[i] = system.effective_mode(mode, per_zone[i])
         if system.comfort.fixed_room_setpoints and aggregate_heating_mode(modes) != (
             HeatingMode.REDUCED
         ):
